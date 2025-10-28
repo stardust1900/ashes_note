@@ -6,14 +6,15 @@ import 'package:ashes_note/utils/file_util.dart';
 
 class FileUtilIO implements FileUtil {
   @override
-  Future<void> saveFile(String path, String filename, String content) async {
+  Future<String> saveFile(String path, String filename, String content) async {
     final file = io.File(path);
     await file.create(recursive: true);
     await file.writeAsString(content);
+    return filename;
   }
 
   @override
-  Future<String> readFile(String path) async {
+  Future<String> readFile(String path, String filename) async {
     final file = io.File(path);
     if (!await file.exists()) {
       throw io.FileSystemException('File not found', path);

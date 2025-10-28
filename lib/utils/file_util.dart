@@ -7,8 +7,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 // 定义所有平台都必须实现的公共接口
 abstract class FileUtil {
   // 文件读写操作
-  Future<void> saveFile(String path, String filename, String content);
-  Future<String> readFile(String path);
+  Future<String> saveFile(String path, String filename, String content);
+  Future<String> readFile(String path, String filename);
   Future<void> deleteFile(String path);
   Future<List<String>> listFiles(String path);
 

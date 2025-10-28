@@ -119,17 +119,28 @@ class FileUtilWeb implements FileUtil {
   }
 
   @override
-  Future<String> readFile(String path) async {
+  Future<String> readFile(String path, String filename) async {
+    String fullPath = '$path/$filename';
     await _ensureRootDirectory();
     try {
-      final getFileHandlePromise = js_util.callMethod(
+      final getDirHandlePromise = js_util.callMethod(
         _rootDirectoryHandle!,
-        'getFileHandle',
+        'getDirectoryHandle',
         [path],
       );
+      final dirHandle = await js_util.promiseToFuture(getDirHandlePromise);
+      final getFileHandlePromise = js_util.callMethod(
+        dirHandle!,
+        'getFileHandle',
+        [
+          filename,
+          js_util.jsify({'create': false}),
+        ],
+      );
       final fileHandle = await js_util.promiseToFuture(getFileHandlePromise);
-
-      final getFilePromise = js_util.callMethod(fileHandle, 'getFile', []);
+      final getFilePromise = js_util.callMethod(fileHandle, 'getFile', [
+        js_util.jsify({'create': false}),
+      ]);
       final file = await js_util.promiseToFuture(getFilePromise);
 
       final textPromise = js_util.callMethod(file, 'text', []);
