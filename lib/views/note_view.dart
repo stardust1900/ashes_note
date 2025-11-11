@@ -18,6 +18,12 @@ class NoteViewState extends State<NoteView> {
   String? _selectedNotebook;
   String? _selectedNote;
   String? _content;
+
+  double _navigationWidthRatio = 0.3; // 导航栏初始宽度比例 (30%)
+  double _maxNavigationWidth = 400; // 导航栏最大宽度
+  double _minNavigationWidthRatio = 0.15; // 最小宽度比例 (15%)
+  double _maxNavigationWidthRatio = 0.5; // 最大宽度比例 (50%)
+
   void _onNoteSelected(String selectedNotebook, String selectedNote) {
     fileUtil.readFile(selectedNotebook, selectedNote).then((String content) {
       print('content: $content');
@@ -37,12 +43,17 @@ class NoteViewState extends State<NoteView> {
           // Tablet/Desktop layout
           return Row(
             children: [
-              NavigationPanel(
-                fileUtil: fileUtil,
-                onNoteSelected: _onNoteSelected,
-                selectedNotebook: _selectedNotebook,
-                selectedNote: _selectedNote,
+              // 导航栏
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: NavigationPanel(
+                  fileUtil: fileUtil,
+                  onNoteSelected: _onNoteSelected,
+                  selectedNotebook: _selectedNotebook,
+                  selectedNote: _selectedNote,
+                ),
               ),
+
               Expanded(
                 child: ContentArea(
                   _selectedNotebook,
@@ -313,7 +324,7 @@ class NavigationPanelState extends State<NavigationPanel> {
                                     widget.selectedNote == note &&
                                         widget.selectedNotebook == notebook
                                     ? Theme.of(context).textTheme.titleLarge
-                                    : Theme.of(context).textTheme.titleMedium,
+                                    : Theme.of(context).textTheme.titleSmall,
                               ),
                             ) ??
                             [],
@@ -429,12 +440,12 @@ class ContentAreaState extends State<ContentArea> {
 
   @override
   Widget build(BuildContext context) {
-    print(
-      'selectedNotebook: ${widget.selectedNotebook}, selectedNote: ${widget.selectedNote}, content: ${widget.content}',
-    );
     if (_isLoading) {
       return Center(child: CircularProgressIndicator());
     }
-    return SuperEditor(editor: _editor);
+    return Padding(
+      padding: EdgeInsets.only(left: 1.0, top: 8.0, right: 8.0, bottom: 8.0),
+      child: SuperEditor(editor: _editor),
+    );
   }
 }
