@@ -22,7 +22,7 @@ class AshesNoteApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '灰烬笔记',
+      title: '草灰笔记',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: Colors.blue,
@@ -41,6 +41,22 @@ class AshesNoteApp extends StatelessWidget {
           ),
           labelMedium: TextStyle(color: Colors.white, fontSize: 30),
           bodyMedium: TextStyle(color: Colors.white, fontSize: 15),
+        ),
+        dialogTheme: DialogThemeData(
+          backgroundColor: Colors.grey[800],
+          titleTextStyle: const TextStyle(color: Colors.white),
+          contentTextStyle: const TextStyle(color: Colors.white),
+        ),
+        buttonTheme: const ButtonThemeData(
+          buttonColor: Colors.blue,
+          textTheme: ButtonTextTheme.primary,
+        ),
+        iconTheme: const IconThemeData(color: Colors.white),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(foregroundColor: Colors.blue),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(foregroundColor: Colors.white),
         ),
       ),
       home: Builder(

@@ -60,7 +60,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
               IconButton(
                 icon: Icon(Icons.folder_open),
-                color: Colors.white,
+                // color: Colors.white,
                 onPressed: () async {
                   // 使用 file_picker 选择目录：
                   // 在 pubspec.yaml 添加依赖: file_picker
@@ -88,6 +88,7 @@ class _SettingsViewState extends State<SettingsView> {
           ),
           SizedBox(height: 16),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
             onPressed: () {
               _saveSettings();
               ScaffoldMessenger.of(

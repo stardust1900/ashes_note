@@ -113,6 +113,88 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
     }
   }
 
+  // 删除笔记本
+  void _deleteNotebook(String notebookId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('删除笔记本'),
+        content: Text('确定要删除这个笔记本吗？笔记本中的所有笔记也将被删除。此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _notebooks.removeWhere((notebook) => notebook.id == notebookId);
+                // 如果删除的是当前选中的笔记本，则选择第一个笔记本（如果存在）
+                if (_selectedNotebook?.id == notebookId) {
+                  _selectedNotebook = _notebooks.isNotEmpty
+                      ? _notebooks[0]
+                      : null;
+                }
+                _isNotebookListExpanded = false;
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('笔记本已删除')));
+            },
+            child: Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 删除笔记
+  void _deleteNote(String noteId) {
+    if (_selectedNotebook == null) return;
+
+    setState(() {
+      _selectedNotebook!.notes.removeWhere((note) => note.id == noteId);
+    });
+
+    // 显示SnackBar提示
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('笔记已删除'),
+        action: SnackBarAction(
+          label: '撤销',
+          onPressed: () {
+            // 这里可以添加撤销删除的逻辑
+          },
+        ),
+      ),
+    );
+  }
+
+  // 带确认的删除笔记对话框
+  void _showDeleteNoteDialog(String noteId, String noteTitle) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('删除笔记'),
+        content: Text('确定要删除笔记"$noteTitle"吗？此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              _deleteNote(noteId);
+              Navigator.pop(context);
+            },
+            child: Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -202,37 +284,72 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
             itemCount: _notebooks.length,
             itemBuilder: (context, index) {
               final notebook = _notebooks[index];
-              return ListTile(
-                leading: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    // color: Theme.of(context).primaryColorDark,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Icon(
-                    Icons.folder,
-                    color: Theme.of(context).primaryColor,
-                    size: 18,
-                  ),
+              return Dismissible(
+                key: Key(notebook.id),
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  color: Colors.red,
+                  alignment: Alignment.centerRight,
+                  padding: EdgeInsets.only(right: 20),
+                  child: Icon(Icons.delete, color: Colors.white),
                 ),
-                title: Text(
-                  notebook.name,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                trailing: _selectedNotebook?.id == notebook.id
-                    ? Icon(
-                        Icons.check,
-                        color: Theme.of(context).primaryColor,
-                        size: 20,
-                      )
-                    : null,
-                onTap: () {
-                  setState(() {
-                    _selectedNotebook = notebook;
-                    _isNotebookListExpanded = false;
-                  });
+                confirmDismiss: (direction) async {
+                  return await showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text('删除笔记本'),
+                      content: Text('确定要删除笔记本"${notebook.name}"吗？'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: Text('取消'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: Text(
+                            '删除',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
                 },
+                onDismissed: (direction) {
+                  _deleteNotebook(notebook.id);
+                },
+                child: ListTile(
+                  leading: Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      // color: Theme.of(context).primaryColorDark,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Icon(
+                      Icons.folder,
+                      color: Theme.of(context).primaryColor,
+                      size: 18,
+                    ),
+                  ),
+                  title: Text(
+                    notebook.name,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  trailing: _selectedNotebook?.id == notebook.id
+                      ? Icon(
+                          Icons.check,
+                          color: Theme.of(context).primaryColor,
+                          size: 20,
+                        )
+                      : null,
+                  onTap: () {
+                    setState(() {
+                      _selectedNotebook = notebook;
+                      _isNotebookListExpanded = false;
+                    });
+                  },
+                ),
               );
             },
           ),
@@ -283,43 +400,75 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
       itemCount: notes.length,
       itemBuilder: (context, index) {
         final note = notes[index];
-        return Card(
-          color: Theme.of(context).canvasColor,
-          margin: EdgeInsets.symmetric(horizontal: 0, vertical: 2),
-          elevation: 1,
-          child: ListTile(
-            title: Text(
-              note.title,
-              style: Theme.of(context).textTheme.headlineSmall,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+        return Dismissible(
+          key: Key(note.id),
+          direction: DismissDirection.endToStart,
+          background: Container(
+            color: Colors.red,
+            alignment: Alignment.centerRight,
+            padding: EdgeInsets.only(right: 20),
+            child: Icon(Icons.delete, color: Colors.white),
+          ),
+          confirmDismiss: (direction) async {
+            return await showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text('删除笔记'),
+                content: Text('确定要删除笔记"${note.title}"吗？'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: Text('取消'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    child: Text('删除', style: TextStyle(color: Colors.red)),
+                  ),
+                ],
+              ),
+            );
+          },
+          onDismissed: (direction) {
+            _deleteNote(note.id);
+          },
+          child: Card(
+            color: Theme.of(context).canvasColor,
+            margin: EdgeInsets.symmetric(horizontal: 0, vertical: 2),
+            elevation: 1,
+            child: ListTile(
+              title: Text(
+                note.title,
+                style: Theme.of(context).textTheme.headlineSmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(height: 4),
+                  Text(
+                    note.content,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '${note.createTime.year}-${note.createTime.month.toString().padLeft(2, '0')}-${note.createTime.day.toString().padLeft(2, '0')}',
+                    style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                  ),
+                ],
+              ),
+              trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => NoteDetailPage(note: note),
+                  ),
+                );
+              },
             ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(height: 4),
-                Text(
-                  note.content,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  '${note.createTime.year}-${note.createTime.month.toString().padLeft(2, '0')}-${note.createTime.day.toString().padLeft(2, '0')}',
-                  style: TextStyle(fontSize: 10, color: Colors.grey[400]),
-                ),
-              ],
-            ),
-            trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => NoteDetailPage(note: note),
-                ),
-              );
-            },
           ),
         );
       },
