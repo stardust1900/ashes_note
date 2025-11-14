@@ -1,6 +1,11 @@
+import 'package:ashes_note/utils/prefs_util.dart';
+import 'package:ashes_note/views/settings_view.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SPUtil.init();
   runApp(VSCodeLikeEditorApp());
 }
 
@@ -26,6 +31,9 @@ class _VSCodeLayoutState extends State<VSCodeLayout> {
   int _selectedActivity = 0;
   String _currentFile = 'main.dart';
 
+  // 文本编辑控制器
+  final TextEditingController _textController = TextEditingController();
+
   // 模拟文件结构
   final List<FileItem> _fileStructure = [
     FileItem('lib', true, [
@@ -36,14 +44,28 @@ class _VSCodeLayoutState extends State<VSCodeLayout> {
     FileItem('README.md', false),
   ];
 
+  bool _isEditing = true; // 切换编辑/预览模式
+
+  // 文件内容映射
+  final Map<String, String> _fileContents = {};
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Row(
         children: [
-          // 活动栏（左侧图标栏）[6](@ref)
           _buildActivityBar(),
+          // 活动栏（左侧图标栏）[6](@ref)
+          ..._buildLeftPanel(),
+        ],
+      ),
+    );
+  }
 
+  List<Widget> _buildLeftPanel() {
+    switch (_selectedActivity) {
+      case 0: // 资源管理器
+        return [
           // 侧边栏分隔条（可拖拽调整宽度）
           if (_sidebarVisible) ...[
             // 侧边栏主区域[1,2](@ref)
@@ -93,73 +115,132 @@ class _VSCodeLayoutState extends State<VSCodeLayout> {
                             ),
                           ),
                         ),
+                        Spacer(),
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                Icons.edit,
+                                size: 16,
+                                color: _isEditing
+                                    ? Colors.blue
+                                    : Colors.white54,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isEditing = true;
+                                });
+                              },
+                              tooltip: '编辑',
+                            ),
+                            IconButton(
+                              icon: Icon(
+                                Icons.preview,
+                                size: 16,
+                                color: !_isEditing
+                                    ? Colors.blue
+                                    : Colors.white54,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isEditing = false;
+                                });
+                              },
+                              tooltip: '预览',
+                            ),
+                          ],
+                        ),
+                        SizedBox(width: 16),
                       ],
                     ),
                   ),
 
                   // 代码编辑器区域
                   Expanded(
-                    child: Container(
-                      padding: EdgeInsets.only(
-                        left: 8.0,
-                        top: 16,
-                        right: 16,
-                        bottom: 16,
-                      ),
-                      child: DefaultTextStyle.merge(
-                        style: TextStyle(
-                          fontFamily: 'Monospace',
-                          fontSize: 14,
-                          color: Colors.white70,
-                        ),
-                        child: SingleChildScrollView(
-                          child: Align(
-                            alignment: Alignment.topLeft,
-                            child: Text.rich(
-                              TextSpan(
-                                children: [
-                                  TextSpan(
-                                    text: 'import ',
-                                    style: TextStyle(
-                                      color: Colors.purpleAccent,
-                                    ),
-                                  ),
-                                  TextSpan(
-                                    text: "'package:flutter/material.dart'",
-                                    style: TextStyle(color: Colors.greenAccent),
-                                  ),
-                                  TextSpan(text: ';\n\n'),
-                                  TextSpan(
-                                    text: 'void ',
-                                    style: TextStyle(
-                                      color: Colors.purpleAccent,
-                                    ),
-                                  ),
-                                  TextSpan(
-                                    text: 'main',
-                                    style: TextStyle(color: Colors.blueAccent),
-                                  ),
-                                  TextSpan(text: '() {\n  '),
-                                  TextSpan(
-                                    text: 'runApp',
-                                    style: TextStyle(color: Colors.blueAccent),
-                                  ),
-                                  TextSpan(text: '(MyApp());\n}'),
-                                ],
-                              ),
-                              // 确保文本左对齐
-                              textAlign: TextAlign.left,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                    child: _isEditing ? _buildEditor() : _buildPreview(),
                   ),
                 ],
               ),
             ),
           ),
-        ],
+        ];
+
+      case 4: // 设置
+        return [SettingsView()];
+      // return [];
+      default:
+        return [];
+    }
+  }
+
+  // 构建Markdown编辑器
+  Widget _buildEditor() {
+    return Container(
+      padding: EdgeInsets.only(left: 16, top: 8, right: 16, bottom: 8),
+      child: TextField(
+        controller: _textController,
+        maxLines: null, // 允许多行
+        expands: true, // 填充可用空间
+        decoration: InputDecoration(
+          border: InputBorder.none,
+          hintText: '开始输入Markdown内容...',
+          hintStyle: TextStyle(color: Colors.white30),
+        ),
+        style: TextStyle(
+          fontFamily: 'Monospace',
+          fontSize: 14,
+          color: Colors.white70,
+        ),
+        onChanged: (text) {
+          // 实时更新文件内容
+          setState(() {
+            _fileContents[_currentFile] = text;
+          });
+        },
+      ),
+    );
+  }
+
+  // 构建Markdown预览
+  Widget _buildPreview() {
+    return SelectionArea(
+      child: Container(
+        padding: EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: Markdown(
+            data: _fileContents[_currentFile] ?? '',
+            selectable: false,
+            styleSheet: MarkdownStyleSheet(
+              p: TextStyle(fontSize: 14, color: Colors.white70),
+              h1: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              h2: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              h3: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              code: TextStyle(
+                backgroundColor: Colors.grey[800],
+                color: Colors.orange,
+                fontFamily: 'Monospace',
+              ),
+              codeblockPadding: EdgeInsets.all(8),
+              codeblockDecoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            shrinkWrap: true,
+          ),
+        ),
       ),
     );
   }
@@ -171,11 +252,11 @@ class _VSCodeLayoutState extends State<VSCodeLayout> {
       color: Colors.grey[900],
       child: Column(
         children: [
-          _buildActivityIcon(Icons.explore, 0, '资源管理器'),
-          _buildActivityIcon(Icons.search, 1, '搜索'),
-          _buildActivityIcon(Icons.source, 2, '源代码管理'),
-          _buildActivityIcon(Icons.bug_report, 3, '调试'),
-          _buildActivityIcon(Icons.extension, 4, '扩展'),
+          _buildActivityIcon(Icons.book, 0, '笔记本'),
+          // _buildActivityIcon(Icons.search, 1, '搜索'),
+          // _buildActivityIcon(Icons.source, 2, '源代码管理'),
+          // _buildActivityIcon(Icons.bug_report, 3, '调试'),
+          _buildActivityIcon(Icons.settings, 4, '设置'),
           Spacer(),
           _buildActivityIcon(
             _sidebarVisible ? Icons.chevron_left : Icons.chevron_right,
@@ -222,7 +303,7 @@ class _VSCodeLayoutState extends State<VSCodeLayout> {
       case 3: // 调试
         return _buildDebug();
       case 4: // 扩展
-        return _buildExtensions();
+        return _buildSettings();
       default:
         return _buildExplorer();
     }
@@ -306,7 +387,7 @@ class _VSCodeLayoutState extends State<VSCodeLayout> {
   }
 
   // 构建扩展面板
-  Widget _buildExtensions() {
+  Widget _buildSettings() {
     return Center(
       child: Text('扩展面板', style: TextStyle(color: Colors.white70)),
     );
