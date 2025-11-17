@@ -21,12 +21,14 @@ class _SettingsViewState extends State<SettingsView> {
 
   Future<void> _loadSettings() async {
     String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
+    print('workingDirectory: $workingDirectory');
     setState(() {
       _workingDirectory = workingDirectory;
     });
   }
 
   Future<void> _saveSettings() async {
+    print('_workingDirectory: $_workingDirectory');
     if (_workingDirectory != '') {
       await SPUtil.set<String>('workingDirectory', _workingDirectory!);
     }
@@ -61,7 +63,7 @@ class _SettingsViewState extends State<SettingsView> {
               IconButton(
                 icon: Icon(Icons.folder_open),
                 // color: Colors.white,
-                onPressed: () async {
+                onPressed: () {
                   // 使用 file_picker 选择目录：
                   // 在 pubspec.yaml 添加依赖: file_picker
                   // 并在文件顶部添加: import 'package:file_picker/file_picker.dart';
@@ -72,14 +74,14 @@ class _SettingsViewState extends State<SettingsView> {
                   //   });
                   // }
                   final fileUtil = FileUtil();
+
                   fileUtil.resetDirectoryHandle();
-                  final rootPath = await fileUtil.getApplicationDocumentsPath();
-
-                  print('rootPath: $rootPath');
-                  setState(() {
-                    _workingDirectory = rootPath;
+                  fileUtil.getApplicationDocumentsPath().then((rootPath) {
+                    setState(() {
+                      _workingDirectory = rootPath;
+                    });
+                    _saveSettings();
                   });
-
                   // final files = await fileUtil.listFiles("");
                   // print('files: $files');
                 },

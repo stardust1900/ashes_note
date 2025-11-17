@@ -1,34 +1,7 @@
+import 'package:ashes_note/utils/file_util.dart';
+import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
-
-// 笔记本数据模型
-class Notebook {
-  final String id;
-  final String name;
-  final List<Note> notes;
-  final Color color;
-
-  Notebook({
-    required this.id,
-    required this.name,
-    required this.notes,
-    this.color = Colors.blue,
-  });
-}
-
-// 笔记数据模型
-class Note {
-  final String id;
-  final String title;
-  final String content;
-  final DateTime createTime;
-
-  Note({
-    required this.id,
-    required this.title,
-    required this.content,
-    required this.createTime,
-  });
-}
+import 'package:ashes_note/entity/entities_notebook.dart';
 
 class NotebookHomePage extends StatefulWidget {
   @override
@@ -39,7 +12,6 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
   // 模拟数据
   List<Notebook> _notebooks = [
     Notebook(
-      id: '1',
       name: '工作笔记',
       color: Colors.blue,
       notes: [
@@ -47,18 +19,17 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
           id: '1',
           title: '项目会议记录',
           content: '今天讨论了项目进度和下一步计划...',
-          createTime: DateTime.now(),
+          lastModified: DateTime.now(),
         ),
         Note(
           id: '2',
           title: '技术方案',
           content: '关于新功能的技术实现方案...',
-          createTime: DateTime.now().subtract(Duration(days: 1)),
+          lastModified: DateTime.now().subtract(Duration(days: 1)),
         ),
       ],
     ),
     Notebook(
-      id: '2',
       name: '学习笔记',
       color: Colors.green,
       notes: [
@@ -66,12 +37,11 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
           id: '3',
           title: 'Flutter学习',
           content: '今天学习了Flutter布局...',
-          createTime: DateTime.now().subtract(Duration(days: 2)),
+          lastModified: DateTime.now().subtract(Duration(days: 2)),
         ),
       ],
     ),
     Notebook(
-      id: '3',
       name: '生活随笔',
       color: Colors.orange,
       notes: [
@@ -79,12 +49,11 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
           id: '4',
           title: '读书笔记',
           content: '《设计心理学》读后感...',
-          createTime: DateTime.now().subtract(Duration(days: 3)),
+          lastModified: DateTime.now().subtract(Duration(days: 3)),
         ),
       ],
     ),
     Notebook(
-      id: '4',
       name: '旅行计划',
       color: Colors.purple,
       notes: [
@@ -92,7 +61,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
           id: '5',
           title: '日本行程',
           content: '东京-大阪-京都的旅行计划...',
-          createTime: DateTime.now().subtract(Duration(days: 4)),
+          lastModified: DateTime.now().subtract(Duration(days: 4)),
         ),
       ],
     ),
@@ -107,14 +76,36 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
   @override
   void initState() {
     super.initState();
+    print('initState before _loadNotebookList');
+    _loadNotebookList();
     // 默认选择第一个笔记本
     if (_notebooks.isNotEmpty) {
       _selectedNotebook = _notebooks[0];
     }
   }
 
+  Future<void> _loadNotebookList() async {
+    String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
+    print('workingDirectory: $workingDirectory');
+    final List<String> bookList = await FileUtil().listFiles(
+      workingDirectory,
+      '/',
+      type: 'directory',
+    );
+    print('bookList: $bookList');
+    for (var book in bookList) {
+      final List<Note> notes = await FileUtil().listNotes(
+        workingDirectory,
+        book,
+      );
+      print('$book noteList: $notes');
+      print('notebookes: $book , notes: $notes');
+      _notebooks.add(Notebook(name: book, notes: notes, color: Colors.blue));
+    }
+  }
+
   // 删除笔记本
-  void _deleteNotebook(String notebookId) {
+  void _deleteNotebook(String notebookName) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -128,9 +119,11 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
           TextButton(
             onPressed: () {
               setState(() {
-                _notebooks.removeWhere((notebook) => notebook.id == notebookId);
+                _notebooks.removeWhere(
+                  (notebook) => notebook.name == notebookName,
+                );
                 // 如果删除的是当前选中的笔记本，则选择第一个笔记本（如果存在）
-                if (_selectedNotebook?.id == notebookId) {
+                if (_selectedNotebook?.name == notebookName) {
                   _selectedNotebook = _notebooks.isNotEmpty
                       ? _notebooks[0]
                       : null;
@@ -285,7 +278,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
             itemBuilder: (context, index) {
               final notebook = _notebooks[index];
               return Dismissible(
-                key: Key(notebook.id),
+                key: Key(notebook.name),
                 direction: DismissDirection.endToStart,
                 background: Container(
                   color: Colors.red,
@@ -316,7 +309,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                   );
                 },
                 onDismissed: (direction) {
-                  _deleteNotebook(notebook.id);
+                  _deleteNotebook(notebook.name);
                 },
                 child: ListTile(
                   leading: Container(
@@ -336,7 +329,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                     notebook.name,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                  trailing: _selectedNotebook?.id == notebook.id
+                  trailing: _selectedNotebook?.name == notebook.name
                       ? Icon(
                           Icons.check,
                           color: Theme.of(context).primaryColor,
@@ -454,7 +447,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                   ),
                   SizedBox(height: 4),
                   Text(
-                    '${note.createTime.year}-${note.createTime.month.toString().padLeft(2, '0')}-${note.createTime.day.toString().padLeft(2, '0')}',
+                    '${note.lastModified.year}-${note.lastModified.month.toString().padLeft(2, '0')}-${note.lastModified.day.toString().padLeft(2, '0')}',
                     style: TextStyle(fontSize: 10, color: Colors.grey[400]),
                   ),
                 ],
@@ -485,6 +478,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
         title: Text('创建新笔记本'),
         content: TextField(
           controller: _notebookNameController,
+          style: Theme.of(context).textTheme.bodyMedium,
           decoration: InputDecoration(
             hintText: '输入笔记本名称',
             border: OutlineInputBorder(),
@@ -501,7 +495,6 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                 setState(() {
                   _notebooks.add(
                     Notebook(
-                      id: DateTime.now().millisecondsSinceEpoch.toString(),
                       name: _notebookNameController.text,
                       notes: [],
                       color:
@@ -536,6 +529,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
             children: [
               TextField(
                 controller: _noteTitleController,
+                style: Theme.of(context).textTheme.bodyMedium,
                 decoration: InputDecoration(
                   hintText: '笔记标题',
                   border: OutlineInputBorder(),
@@ -558,7 +552,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                   _selectedNotebook != null) {
                 setState(() {
                   final notebookIndex = _notebooks.indexWhere(
-                    (n) => n.id == _selectedNotebook!.id,
+                    (n) => n.name == _selectedNotebook!.name,
                   );
                   if (notebookIndex != -1) {
                     _notebooks[notebookIndex].notes.add(
@@ -566,7 +560,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                         id: DateTime.now().millisecondsSinceEpoch.toString(),
                         title: _noteTitleController.text,
                         content: _noteContentController.text,
-                        createTime: DateTime.now(),
+                        lastModified: DateTime.now(),
                       ),
                     );
                   }
@@ -610,11 +604,14 @@ class NoteDetailPage extends StatelessWidget {
             ),
             SizedBox(height: 8),
             Text(
-              '创建时间: ${note.createTime.toString().substring(0, 16)}',
+              '创建时间: ${note.lastModified.toString().substring(0, 16)}',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
             SizedBox(height: 24),
-            Text(note.content, style: TextStyle(fontSize: 16, height: 1.6)),
+            Text(
+              note.content ?? '',
+              style: TextStyle(fontSize: 16, height: 1.6),
+            ),
           ],
         ),
       ),

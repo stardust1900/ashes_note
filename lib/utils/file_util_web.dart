@@ -8,9 +8,10 @@ import 'dart:js_interop';
 // ignore: deprecated_member_use
 import 'dart:js_util' as js_util;
 
+import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:ashes_note/utils/file_util.dart';
 
-class FileUtilWeb implements FileUtil {
+class FileUtilImpl implements FileUtil {
   JSObject? _rootDirectoryHandle;
 
   // ====================
@@ -19,6 +20,7 @@ class FileUtilWeb implements FileUtil {
 
   /// 确保已获取根目录的访问权限
   Future<void> _ensureRootDirectory() async {
+    print('_rootDirectoryHandle: $_rootDirectoryHandle');
     if (_rootDirectoryHandle == null) {
       try {
         // 方法1：使用 dart:js_util 直接调用（最可靠）
@@ -33,13 +35,12 @@ class FileUtilWeb implements FileUtil {
           [options],
         );
 
-        _rootDirectoryHandle = await js_util.promiseToFuture(promise);
-
         // 验证权限
         final permissionStatus = await _checkPermission();
         if (permissionStatus != 'granted') {
           throw Exception('用户未授予文件系统访问权限');
         }
+        _rootDirectoryHandle = await js_util.promiseToFuture(promise);
       } catch (e) {
         if (e.toString().contains('AbortError')) {
           throw Exception('用户取消了目录选择');
@@ -120,7 +121,7 @@ class FileUtilWeb implements FileUtil {
 
   @override
   Future<String> readFile(String path, String filename) async {
-    String fullPath = '$path/$filename';
+    // String fullPath = '$path/$filename';
     await _ensureRootDirectory();
     try {
       final getDirHandlePromise = js_util.callMethod(
@@ -163,13 +164,17 @@ class FileUtilWeb implements FileUtil {
   }
 
   @override
-  Future<List<String>> listFiles(String path) async {
+  Future<List<String>> listFiles(
+    String rootPath,
+    String path, {
+    String type = 'directory',
+  }) async {
     await _ensureRootDirectory();
     final files = <String>[];
     try {
       // 处理子目录路径
       var targetHandle = _rootDirectoryHandle!;
-      if (path.isNotEmpty && path != '.') {
+      if (path.isNotEmpty && path != '.' && path != '/') {
         final getDirHandlePromise = js_util.callMethod(
           _rootDirectoryHandle!,
           'getDirectoryHandle',
@@ -193,11 +198,10 @@ class FileUtilWeb implements FileUtil {
         print('value: $value');
         final name = js_util.getProperty(value, 'name') as String;
         final kind = js_util.getProperty(value, 'kind') as String;
-        print('name: $name, kind: $kind');
-        if (kind == 'file') {
+        if (kind == 'file' && type == 'file') {
           files.add(name);
         }
-        if (kind == 'directory') {
+        if (kind == 'directory' && type == 'directory') {
           files.add(name);
         }
       }
@@ -253,11 +257,90 @@ class FileUtilWeb implements FileUtil {
   }
 
   /// 手动重置目录句柄（允许用户重新选择）
+  /// TODO 需要考虑重置后用户未授予文件系统访问权限的情况
+  @override
   void resetDirectoryHandle() {
     _rootDirectoryHandle = null;
   }
 
-  FileUtilWeb._internal();
-  static final FileUtilWeb _instance = FileUtilWeb._internal();
-  factory FileUtilWeb() => FileUtilWeb._instance;
+  FileUtilImpl._internal();
+  static final FileUtilImpl _instance = FileUtilImpl._internal();
+  factory FileUtilImpl() => FileUtilImpl._instance;
+
+  @override
+  Future<List<Note>> listNotes(String rootPath, String path) async {
+    await _ensureRootDirectory();
+    final notes = <Note>[];
+    try {
+      // 处理子目录路径
+      var targetHandle = _rootDirectoryHandle!;
+      if (path.isNotEmpty && path != '.' && path != '/') {
+        final getDirHandlePromise = js_util.callMethod(
+          _rootDirectoryHandle!,
+          'getDirectoryHandle',
+          [path],
+        );
+        targetHandle = await js_util.promiseToFuture(getDirHandlePromise);
+      }
+      // 获取目录条目迭代器
+      final iterator = js_util.callMethod(targetHandle, 'values', []);
+      // final iterator = await js_util.promiseToFuture(valuesPromise);
+
+      // 遍历目录内容
+      while (true) {
+        final nextPromise = js_util.callMethod(iterator, 'next', []);
+        final result = await js_util.promiseToFuture(nextPromise);
+        final done = js_util.getProperty(result, 'done');
+        print('done: $done');
+        if (done == true) break;
+
+        final value = js_util.getProperty(result, 'value');
+        print('value: $value');
+        final name = js_util.getProperty(value, 'name') as String;
+        final kind = js_util.getProperty(value, 'kind') as String;
+        if (kind == 'file') {
+          try {
+            final getFileHandlePromise = js_util.callMethod(
+              targetHandle,
+              'getFileHandle',
+              [name],
+            );
+            final fileHandle = await js_util.promiseToFuture(
+              getFileHandlePromise,
+            );
+
+            final getFilePromise = js_util.callMethod(
+              fileHandle,
+              'getFile',
+              [],
+            );
+            final file = await js_util.promiseToFuture(getFilePromise);
+            final lastModifiedMs = js_util.getProperty(file, 'lastModified');
+            var lastModified = DateTime.now();
+            if (lastModifiedMs != null) {
+              lastModified = DateTime.fromMillisecondsSinceEpoch(
+                lastModifiedMs as int,
+              );
+              //displayName = '$name (${lastModified.toLocal()})';
+            }
+            final textPromise = js_util.callMethod(file, 'text', []);
+            String content = await js_util.promiseToFuture(textPromise);
+            notes.add(
+              Note(
+                id: '$path/$name',
+                title: name,
+                content: content,
+                lastModified: lastModified,
+              ),
+            );
+          } catch (e) {
+            print('无法获取文件 $name 的详细信息: $e');
+          }
+        }
+      }
+    } catch (e) {
+      throw Exception('列出路径 "$path" 下的文件失败: $e');
+    }
+    return notes;
+  }
 }

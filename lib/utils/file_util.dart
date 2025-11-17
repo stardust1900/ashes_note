@@ -1,6 +1,6 @@
-import 'package:ashes_note/utils/file_util_io.dart';
-import 'package:ashes_note/utils/file_util_web.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:ashes_note/entity/entities_notebook.dart';
+
+import 'file_util_io.dart' if (dart.library.js_interop) 'file_util_web.dart';
 // 统一入口：按平台选择实现（web 使用 file_util_web.dart）
 // export 'file_util_io.dart' if (dart.library.js_interop) 'file_util_web.dart';
 
@@ -10,7 +10,13 @@ abstract class FileUtil {
   Future<String> saveFile(String path, String filename, String content);
   Future<String> readFile(String path, String filename);
   Future<void> deleteFile(String path);
-  Future<List<String>> listFiles(String path);
+  Future<List<String>> listFiles(
+    String rootPath,
+    String path, {
+    String type = 'directory',
+  });
+
+  Future<List<Note>> listNotes(String rootPath, String path);
 
   // 目录操作
   Future<String> getApplicationDocumentsPath();
@@ -20,11 +26,5 @@ abstract class FileUtil {
   // 手动重置目录句柄（允许用户重新选择）
   void resetDirectoryHandle();
 
-  factory FileUtil() {
-    if (kIsWeb) {
-      return FileUtilWeb();
-    } else {
-      return FileUtilIO();
-    }
-  }
+  factory FileUtil() => FileUtilImpl();
 }

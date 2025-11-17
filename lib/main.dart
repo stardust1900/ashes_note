@@ -64,6 +64,7 @@ class AshesNoteApp extends StatelessWidget {
           //从本地存储中读取工作目录，判断工作目录是否设置
           String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
           print('工作目录: $workingDirectory');
+          //web环境不能只判断缓存
           if (workingDirectory.isEmpty) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (context.mounted) {

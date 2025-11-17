@@ -39,6 +39,8 @@ dependencies:
   super_editor: ^0.3.0-dev.35
   super_editor_markdown: ^0.2.0
   flutter_markdown_plus: ^1.0.5
+  file_picker: ^10.3.6
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:

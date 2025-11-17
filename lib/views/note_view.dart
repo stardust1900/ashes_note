@@ -1,4 +1,5 @@
 import 'package:ashes_note/utils/file_util.dart';
+import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor_markdown/super_editor_markdown.dart';
@@ -107,12 +108,21 @@ class NavigationPanelState extends State<NavigationPanel> {
   }
 
   Future<void> _loadNotebookList() async {
-    final List<String> list = await widget.fileUtil.listFiles('');
+    String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
+    final List<String> list = await widget.fileUtil.listFiles(
+      workingDirectory,
+      '',
+      type: 'directory',
+    );
     setState(() {
       _notebookList = list;
     });
     for (var notebook in _notebookList) {
-      final List<String> list = await widget.fileUtil.listFiles(notebook);
+      final List<String> list = await widget.fileUtil.listFiles(
+        workingDirectory,
+        notebook,
+        type: 'file',
+      );
       setState(() {
         _notebookMap[notebook] = list;
       });
