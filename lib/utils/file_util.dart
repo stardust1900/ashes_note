@@ -26,5 +26,7 @@ abstract class FileUtil {
   // 手动重置目录句柄（允许用户重新选择）
   void resetDirectoryHandle();
 
+  bool isHandleGot();
+
   factory FileUtil() => FileUtilImpl();
 }

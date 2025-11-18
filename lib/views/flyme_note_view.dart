@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 class NotebookHomePage extends StatefulWidget {
   @override
@@ -10,62 +13,7 @@ class NotebookHomePage extends StatefulWidget {
 
 class _NotebookHomePageState extends State<NotebookHomePage> {
   // 模拟数据
-  List<Notebook> _notebooks = [
-    Notebook(
-      name: '工作笔记',
-      color: Colors.blue,
-      notes: [
-        Note(
-          id: '1',
-          title: '项目会议记录',
-          content: '今天讨论了项目进度和下一步计划...',
-          lastModified: DateTime.now(),
-        ),
-        Note(
-          id: '2',
-          title: '技术方案',
-          content: '关于新功能的技术实现方案...',
-          lastModified: DateTime.now().subtract(Duration(days: 1)),
-        ),
-      ],
-    ),
-    Notebook(
-      name: '学习笔记',
-      color: Colors.green,
-      notes: [
-        Note(
-          id: '3',
-          title: 'Flutter学习',
-          content: '今天学习了Flutter布局...',
-          lastModified: DateTime.now().subtract(Duration(days: 2)),
-        ),
-      ],
-    ),
-    Notebook(
-      name: '生活随笔',
-      color: Colors.orange,
-      notes: [
-        Note(
-          id: '4',
-          title: '读书笔记',
-          content: '《设计心理学》读后感...',
-          lastModified: DateTime.now().subtract(Duration(days: 3)),
-        ),
-      ],
-    ),
-    Notebook(
-      name: '旅行计划',
-      color: Colors.purple,
-      notes: [
-        Note(
-          id: '5',
-          title: '日本行程',
-          content: '东京-大阪-京都的旅行计划...',
-          lastModified: DateTime.now().subtract(Duration(days: 4)),
-        ),
-      ],
-    ),
-  ];
+  final List<Notebook> _notebooks = [];
 
   Notebook? _selectedNotebook;
   bool _isNotebookListExpanded = false;
@@ -76,29 +24,28 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
   @override
   void initState() {
     super.initState();
-    print('initState before _loadNotebookList');
-    _loadNotebookList();
+    _loadNotebookList().then((_) {
+      setState(() {
+        if (_notebooks.isNotEmpty) {
+          _selectedNotebook = _notebooks[0];
+        }
+      });
+    });
     // 默认选择第一个笔记本
-    if (_notebooks.isNotEmpty) {
-      _selectedNotebook = _notebooks[0];
-    }
   }
 
   Future<void> _loadNotebookList() async {
     String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
-    print('workingDirectory: $workingDirectory');
     final List<String> bookList = await FileUtil().listFiles(
       workingDirectory,
       '/',
       type: 'directory',
     );
-    print('bookList: $bookList');
     for (var book in bookList) {
       final List<Note> notes = await FileUtil().listNotes(
         workingDirectory,
         book,
       );
-      print('$book noteList: $notes');
       print('notebookes: $book , notes: $notes');
       _notebooks.add(Notebook(name: book, notes: notes, color: Colors.blue));
     }
@@ -577,10 +524,33 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
 }
 
 // 笔记详情页面
-class NoteDetailPage extends StatelessWidget {
+class NoteDetailPage extends StatefulWidget {
   final Note note;
+  const NoteDetailPage({super.key, required this.note});
+  @override
+  State<StatefulWidget> createState() => NoteDetailState();
+}
 
-  const NoteDetailPage({Key? key, required this.note}) : super(key: key);
+class NoteDetailState extends State<NoteDetailPage> {
+  late Note note = widget.note;
+
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _textController = TextEditingController();
+
+  bool _isEditing = true; // 切换编辑/预览模式
+  @override
+  void initState() {
+    super.initState();
+    // 2. 在初始化时为控制器设置文本，这将成为默认值
+    _titleController.text = note.title;
+    _textController.text = note.content;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -590,7 +560,64 @@ class NoteDetailPage extends StatelessWidget {
           icon: Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('笔记详情'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _titleController,
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                isDense: true, // 减少内部边距
+                contentPadding: EdgeInsets.zero, // 去除内边距
+              ),
+            ),
+            SizedBox(height: 2), // 添加小间距
+            Text(
+              note.lastModified.toString().substring(0, 16),
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          Padding(
+            padding: EdgeInsets.only(right: 0.0),
+            child: IconButton(
+              icon: Icon(
+                Icons.edit,
+                size: 16,
+                color: _isEditing ? Colors.blue : Colors.grey,
+              ),
+              onPressed: () {
+                setState(() {
+                  _isEditing = true;
+                });
+              },
+              tooltip: '编辑',
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.only(right: 32.0),
+            child: IconButton(
+              icon: Icon(
+                Icons.preview,
+                size: 16,
+                color: !_isEditing ? Colors.blue : Colors.grey,
+              ),
+              onPressed: () {
+                setState(() {
+                  _isEditing = false;
+                });
+              },
+              tooltip: '预览',
+            ),
+          ),
+        ],
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -598,21 +625,79 @@ class NoteDetailPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              note.title,
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 8),
-            Text(
-              '创建时间: ${note.lastModified.toString().substring(0, 16)}',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-            SizedBox(height: 24),
-            Text(
-              note.content ?? '',
-              style: TextStyle(fontSize: 16, height: 1.6),
-            ),
+            // 代码编辑器区域
+            _isEditing ? _buildEditor() : _buildPreview(),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEditor() {
+    return Container(
+      padding: EdgeInsets.only(left: 16, top: 8, right: 16, bottom: 8),
+      child: TextField(
+        controller: _textController,
+        maxLines: null, // 允许多行
+        // expands: true, // 填充可用空间
+        decoration: InputDecoration(
+          border: InputBorder.none,
+          hintText: '开始输入内容...',
+          hintStyle: TextStyle(color: Colors.white30),
+        ),
+        style: TextStyle(
+          // fontFamily: 'Monospace',
+          fontSize: 14,
+          color: Colors.white,
+        ),
+        onChanged: (text) {
+          // 实时更新文件内容
+          setState(() {
+            note.content = text;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildPreview() {
+    return SelectionArea(
+      child: Container(
+        padding: EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: Markdown(
+            data: note.content,
+            selectable: false,
+            styleSheet: MarkdownStyleSheet(
+              p: TextStyle(fontSize: 14, color: Colors.white70),
+              h1: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              h2: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              h3: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              code: TextStyle(
+                backgroundColor: Colors.grey[800],
+                color: Colors.orange,
+                fontFamily: 'Monospace',
+              ),
+              codeblockPadding: EdgeInsets.all(8),
+              codeblockDecoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            shrinkWrap: true,
+          ),
         ),
       ),
     );

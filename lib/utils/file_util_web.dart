@@ -20,7 +20,6 @@ class FileUtilImpl implements FileUtil {
 
   /// 确保已获取根目录的访问权限
   Future<void> _ensureRootDirectory() async {
-    print('_rootDirectoryHandle: $_rootDirectoryHandle');
     if (_rootDirectoryHandle == null) {
       try {
         // 方法1：使用 dart:js_util 直接调用（最可靠）
@@ -202,7 +201,7 @@ class FileUtilImpl implements FileUtil {
           files.add(name);
         }
         if (kind == 'directory' && type == 'directory') {
-          files.add(name);
+          if (!name.startsWith(".")) files.add(name);
         }
       }
     } catch (e) {
@@ -342,5 +341,10 @@ class FileUtilImpl implements FileUtil {
       throw Exception('列出路径 "$path" 下的文件失败: $e');
     }
     return notes;
+  }
+
+  @override
+  bool isHandleGot() {
+    return _rootDirectoryHandle != null;
   }
 }

@@ -17,9 +17,9 @@ class FileUtilImpl implements FileUtil {
 
   @override
   Future<String> readFile(String path, String filename) async {
-    final file = io.File(path);
+    final file = io.File('$path/$filename');
     if (!await file.exists()) {
-      throw io.FileSystemException('File not found', path);
+      throw io.FileSystemException('File not found', filename);
     }
     return await file.readAsString();
   }
@@ -58,7 +58,9 @@ class FileUtilImpl implements FileUtil {
     if (!await dir.exists()) return <String>[];
     final entities = await dir.list().toList();
     if (type == 'file') {
-      return entities.whereType<io.File>().map((f) {
+      return entities.whereType<io.File>()
+      // .where((f) => p.basename(f.path).endsWith('.md'))
+      .map((f) {
         f.lastModified().then(
           (s) => print('f.modified: $s ${p.basename(f.path)}'),
         );
@@ -66,10 +68,18 @@ class FileUtilImpl implements FileUtil {
       }).toList();
     }
     if (type == 'directory') {
-      return entities.whereType<io.Directory>().map((f) {
-        f.stat().then((s) => print('s.modified: ${s.modified}'));
-        return p.basename(f.path);
-      }).toList();
+      return entities
+          .whereType<io.Directory>()
+          .where((f) {
+            return !p.basename(f.path).startsWith('.');
+          })
+          .map((f) {
+            f.stat().then(
+              (s) => print('s.modified: ${s.modified} ${p.basename(f.path)}'),
+            );
+            return p.basename(f.path);
+          })
+          .toList();
     }
     return <String>[];
   }
@@ -90,8 +100,30 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<List<Note>> listNotes(String rootPath, String path) {
-    // TODO: implement listNotes
-    throw UnimplementedError();
+  Future<List<Note>> listNotes(String rootPath, String path) async {
+    final notes = <Note>[];
+    final dir = io.Directory('$rootPath/$path');
+    if (!await dir.exists()) return <Note>[];
+    final entities = await dir.list().toList();
+    for (var entity in entities) {
+      if (entity is io.File) {
+        final content = await entity.readAsString();
+        final lastModified = await entity.lastModified();
+        final note = Note(
+          id: '$path/${p.basename(entity.path)}',
+          title: p.basename(entity.path),
+          content: content,
+          lastModified: lastModified,
+        );
+        notes.add(note);
+      }
+    }
+
+    return notes;
+  }
+
+  @override
+  bool isHandleGot() {
+    return true;
   }
 }

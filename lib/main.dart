@@ -1,3 +1,4 @@
+import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 // import 'package:ashes_note/views/editor_view.dart';
 import 'package:ashes_note/views/flyme_note_view.dart';
@@ -65,7 +66,7 @@ class AshesNoteApp extends StatelessWidget {
           String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
           print('工作目录: $workingDirectory');
           //web环境不能只判断缓存
-          if (workingDirectory.isEmpty) {
+          if (workingDirectory.isEmpty || !FileUtil().isHandleGot()) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (context.mounted) {
                 // 添加安全检查
