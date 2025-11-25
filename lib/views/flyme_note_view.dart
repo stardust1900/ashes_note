@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
-import 'package:super_editor/super_editor.dart';
-
 class NotebookHomePage extends StatefulWidget {
   @override
   _NotebookHomePageState createState() => _NotebookHomePageState();
@@ -702,21 +700,6 @@ class NoteDetailState extends State<NoteDetailPage> {
           });
         },
       ),
-    );
-  }
-
-  Widget _buildeSuperEditor() {
-    MutableDocument _document = MutableDocument();
-    final _composer = MutableDocumentComposer();
-    Editor _editor = createDefaultDocumentEditor(
-      document: _document,
-      composer: _composer,
-    );
-
-    return SuperEditor(
-      document: _document,
-      composer: _composer,
-      editor: _editor,
     );
   }
 
