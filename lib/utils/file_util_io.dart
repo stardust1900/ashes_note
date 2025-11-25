@@ -8,16 +8,21 @@ import 'package:path/path.dart' as p;
 
 class FileUtilImpl implements FileUtil {
   @override
-  Future<String> saveFile(String path, String filename, String content) async {
-    final file = io.File(path);
+  Future<String> saveFile(
+    String rootPath,
+    String path,
+    String filename,
+    String content,
+  ) async {
+    final file = io.File('$rootPath/$path/$filename');
     await file.create(recursive: true);
     await file.writeAsString(content);
     return filename;
   }
 
   @override
-  Future<String> readFile(String path, String filename) async {
-    final file = io.File('$path/$filename');
+  Future<String> readFile(String rootPath, String path, String filename) async {
+    final file = io.File('$rootPath/$path/$filename');
     if (!await file.exists()) {
       throw io.FileSystemException('File not found', filename);
     }
@@ -25,24 +30,24 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<void> deleteFile(String path) async {
-    final file = io.File(path);
+  Future<void> deleteFile(String rootPath, String path) async {
+    final file = io.File('$rootPath/$path');
     if (await file.exists()) {
       await file.delete();
     }
   }
 
   @override
-  Future<void> createDirectory(String path) async {
-    final dir = io.Directory(path);
+  Future<void> createDirectory(String rootPath, String path) async {
+    final dir = io.Directory('$rootPath/$path');
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
   }
 
   @override
-  Future<void> deleteDirectory(String path) async {
-    final dir = io.Directory(path);
+  Future<void> deleteDirectory(String rootPath, String path) async {
+    final dir = io.Directory('$rootPath/$path');
     if (await dir.exists()) {
       await dir.delete(recursive: true);
     }

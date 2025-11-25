@@ -1,8 +1,6 @@
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
-import 'package:super_editor/super_editor.dart';
-import 'package:super_editor_markdown/super_editor_markdown.dart';
 
 class NoteView extends StatefulWidget {
   const NoteView({super.key});
@@ -19,14 +17,23 @@ class NoteViewState extends State<NoteView> {
   String? _selectedNotebook;
   String? _selectedNote;
   String? _content;
+  late String workingDirectory;
 
   double _navigationWidthRatio = 0.3; // 导航栏初始宽度比例 (30%)
   double _maxNavigationWidth = 400; // 导航栏最大宽度
   double _minNavigationWidthRatio = 0.15; // 最小宽度比例 (15%)
   double _maxNavigationWidthRatio = 0.5; // 最大宽度比例 (50%)
 
+  @override
+  void initState() {
+    super.initState();
+    workingDirectory = SPUtil.get<String>('workingDirectory', '');
+  }
+
   void _onNoteSelected(String selectedNotebook, String selectedNote) {
-    fileUtil.readFile(selectedNotebook, selectedNote).then((String content) {
+    fileUtil.readFile(workingDirectory, selectedNotebook, selectedNote).then((
+      String content,
+    ) {
       print('content: $content');
       setState(() {
         _selectedNotebook = selectedNotebook;
@@ -99,6 +106,7 @@ class NavigationPanel extends StatefulWidget {
 class NavigationPanelState extends State<NavigationPanel> {
   final TextEditingController _textEditingController = TextEditingController();
 
+  late String workingDirectory;
   List<String> _notebookList = [];
   final Map<String, List<String>> _notebookMap = {};
   @override
@@ -108,7 +116,7 @@ class NavigationPanelState extends State<NavigationPanel> {
   }
 
   Future<void> _loadNotebookList() async {
-    String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
+    workingDirectory = SPUtil.get<String>('workingDirectory', '');
     final List<String> list = await widget.fileUtil.listFiles(
       workingDirectory,
       '',
@@ -193,7 +201,7 @@ class NavigationPanelState extends State<NavigationPanel> {
       // 这里可以添加其他处理逻辑，比如保存到本地等
       print('用户输入的笔记本名称: $result');
 
-      await widget.fileUtil.createDirectory(result);
+      await widget.fileUtil.createDirectory(workingDirectory, result);
       _loadNotebookList();
     }
   }
@@ -259,7 +267,9 @@ class NavigationPanelState extends State<NavigationPanel> {
     // print("result: $result");
     // 处理对话框返回的结果
     if (result != null && result.isNotEmpty) {
-      widget.fileUtil.saveFile(noteBook, result, "").then((value) {
+      widget.fileUtil.saveFile(workingDirectory, noteBook, result, "").then((
+        value,
+      ) {
         setState(() {
           _notebookMap[noteBook]?.add(result);
         });
@@ -285,7 +295,10 @@ class NavigationPanelState extends State<NavigationPanel> {
                     key: Key(notebook),
                     direction: DismissDirection.endToStart, // 设置从右向左滑动
                     onDismissed: (direction) {
-                      widget.fileUtil.deleteDirectory(notebook);
+                      widget.fileUtil.deleteDirectory(
+                        workingDirectory,
+                        notebook,
+                      );
                       setState(() {
                         _notebookList.remove(notebook);
                         _notebookMap.remove(notebook);
@@ -388,40 +401,41 @@ class ContentArea extends StatefulWidget {
 }
 
 class ContentAreaState extends State<ContentArea> {
-  late MutableDocument _document;
-  late MutableDocumentComposer _composer;
-  late Editor _editor;
+  //late MutableDocument _document;
+  //late MutableDocumentComposer _composer;
+  // late Editor _editor;
   bool _isEditing = true;
   bool _isLoading = true;
+  late String workingDirectory;
 
   @override
   void initState() {
     super.initState();
     final initialContent = widget.content ?? '';
     _updateDocument(initialContent);
+    workingDirectory = SPUtil.get<String>('workingDirectory', '');
   }
 
   // 更新文档的核心方法
   void _updateDocument(String content) {
     // 将 Markdown 转换为 SuperEditor 的 Document
-    _document = deserializeMarkdownToDocument(content);
-    _document.addListener(_onDocumentChange);
-    _composer = MutableDocumentComposer();
-    _editor = createDefaultDocumentEditor(
-      document: _document,
-      composer: _composer,
-    );
+    // _document = deserializeMarkdownToDocument(content);
+    // _document.addListener(_onDocumentChange);
+    // _composer = MutableDocumentComposer();
+    // _editor = createDefaultDocumentEditor(
+    //   document: _document,
+    //   composer: _composer,
+    // );
 
     setState(() {
       _isLoading = false;
     });
   }
 
-  void _onDocumentChange(DocumentChangeLog changeLog) {
-    final newContent = serializeDocumentToMarkdown(_document);
-    //widget.fileUtil.saveFile(widget.selectedNotebook!, widget.selectedNote!, newContent);
-    print('新的文档内容: $newContent');
-  }
+  // void _onDocumentChange(DocumentChangeLog changeLog) {
+  //   final newContent = serializeDocumentToMarkdown(_document);
+  //   print('新的文档内容: $newContent');
+  // }
 
   @override
   void didUpdateWidget(ContentArea oldWidget) {
@@ -432,11 +446,13 @@ class ContentAreaState extends State<ContentArea> {
         oldWidget.selectedNote != widget.selectedNote) {
       print('切换笔记，重新初始化编辑器');
       //保存当前文档
-      final editedContent = serializeDocumentToMarkdown(_document);
+      // final editedContent = serializeDocumentToMarkdown(_document);
+      final editedContent = '';
       if (editedContent != oldWidget.content &&
           oldWidget.selectedNotebook != null &&
           oldWidget.selectedNote != null) {
         widget.fileUtil.saveFile(
+          workingDirectory,
           oldWidget.selectedNotebook!,
           oldWidget.selectedNote!,
           editedContent,
@@ -455,7 +471,7 @@ class ContentAreaState extends State<ContentArea> {
     }
     return Padding(
       padding: EdgeInsets.only(left: 1.0, top: 8.0, right: 8.0, bottom: 8.0),
-      child: SuperEditor(editor: _editor),
+      //child: SuperEditor(editor: _editor),
     );
   }
 }

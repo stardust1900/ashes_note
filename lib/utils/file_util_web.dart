@@ -73,7 +73,12 @@ class FileUtilImpl implements FileUtil {
   // ====================
 
   @override
-  Future<String> saveFile(String path, String filename, String content) async {
+  Future<String> saveFile(
+    String rootPath,
+    String path,
+    String filename,
+    String content,
+  ) async {
     await _ensureRootDirectory();
     try {
       final getDirHandlePromise = js_util.callMethod(
@@ -119,7 +124,7 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<String> readFile(String path, String filename) async {
+  Future<String> readFile(String rootPath, String path, String filename) async {
     // String fullPath = '$path/$filename';
     await _ensureRootDirectory();
     try {
@@ -151,7 +156,7 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<void> deleteFile(String path) async {
+  Future<void> deleteFile(String rootPath, String path) async {
     await _ensureRootDirectory();
     try {
       await js_util.promiseToFuture(
@@ -218,7 +223,7 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<void> createDirectory(String path) async {
+  Future<void> createDirectory(String rootPath, String path) async {
     await _ensureRootDirectory();
     try {
       await js_util.promiseToFuture(
@@ -233,7 +238,7 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<void> deleteDirectory(String path) async {
+  Future<void> deleteDirectory(String rootPath, String path) async {
     await _ensureRootDirectory();
     try {
       await js_util.promiseToFuture(

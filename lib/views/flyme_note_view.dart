@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
+import 'package:super_editor/super_editor.dart';
+
 class NotebookHomePage extends StatefulWidget {
   @override
   _NotebookHomePageState createState() => _NotebookHomePageState();
@@ -14,7 +16,7 @@ class NotebookHomePage extends StatefulWidget {
 class _NotebookHomePageState extends State<NotebookHomePage> {
   // 模拟数据
   final List<Notebook> _notebooks = [];
-
+  late String workingDirectory;
   Notebook? _selectedNotebook;
   bool _isNotebookListExpanded = false;
   final TextEditingController _notebookNameController = TextEditingController();
@@ -35,7 +37,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
   }
 
   Future<void> _loadNotebookList() async {
-    String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
+    workingDirectory = SPUtil.get<String>('workingDirectory', '');
     final List<String> bookList = await FileUtil().listFiles(
       workingDirectory,
       '/',
@@ -81,6 +83,8 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
               ScaffoldMessenger.of(
                 context,
               ).showSnackBar(SnackBar(content: Text('笔记本已删除')));
+
+              FileUtil().deleteDirectory(workingDirectory, notebookName);
             },
             child: Text('删除', style: TextStyle(color: Colors.red)),
           ),
@@ -96,7 +100,8 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
     setState(() {
       _selectedNotebook!.notes.removeWhere((note) => note.id == noteId);
     });
-
+    // TODO : 将笔记移动到垃圾箱，而不是直接删除
+    FileUtil().deleteFile(workingDirectory, noteId);
     // 显示SnackBar提示
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -111,28 +116,15 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
     );
   }
 
-  // 带确认的删除笔记对话框
-  void _showDeleteNoteDialog(String noteId, String noteTitle) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('删除笔记'),
-        content: Text('确定要删除笔记"$noteTitle"吗？此操作不可撤销。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              _deleteNote(noteId);
-              Navigator.pop(context);
-            },
-            child: Text('删除', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
+  void noteChanged(Note updatedNote) {
+    setState(() {
+      final index = _selectedNotebook!.notes.indexWhere(
+        (note) => note.id == updatedNote.id,
+      );
+      if (index != -1) {
+        _selectedNotebook!.notes[index] = updatedNote;
+      }
+    });
   }
 
   @override
@@ -404,7 +396,8 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => NoteDetailPage(note: note),
+                    builder: (context) =>
+                        NoteDetailPage(note: note, onNoteChanged: noteChanged),
                   ),
                 );
               },
@@ -439,6 +432,10 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
           TextButton(
             onPressed: () {
               if (_notebookNameController.text.isNotEmpty) {
+                FileUtil().createDirectory(
+                  workingDirectory,
+                  _notebookNameController.text,
+                );
                 setState(() {
                   _notebooks.add(
                     Notebook(
@@ -495,23 +492,49 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
           TextButton(
             style: Theme.of(context).textButtonTheme.style,
             onPressed: () {
+              print(_noteTitleController.text);
               if (_noteTitleController.text.isNotEmpty &&
                   _selectedNotebook != null) {
-                setState(() {
-                  final notebookIndex = _notebooks.indexWhere(
-                    (n) => n.name == _selectedNotebook!.name,
-                  );
-                  if (notebookIndex != -1) {
-                    _notebooks[notebookIndex].notes.add(
-                      Note(
-                        id: DateTime.now().millisecondsSinceEpoch.toString(),
-                        title: _noteTitleController.text,
-                        content: _noteContentController.text,
-                        lastModified: DateTime.now(),
-                      ),
-                    );
-                  }
-                });
+                //判断同名笔记本是否存在
+                final exists = _selectedNotebook!.notes.any(
+                  (note) =>
+                      note.title == _noteTitleController.text ||
+                      note.title == '${_noteTitleController.text}.md',
+                );
+                if (exists) {
+                  // 提示用户笔记已存在
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('笔记已存在，请使用不同的标题')));
+                  return;
+                }
+
+                FileUtil()
+                    .saveFile(
+                      workingDirectory,
+                      _selectedNotebook!.name,
+                      _noteTitleController.text.endsWith('.md')
+                          ? _noteTitleController.text
+                          : '${_noteTitleController.text}.md',
+                      '',
+                    )
+                    .then((value) {
+                      print('note saved: $value');
+                      FileUtil()
+                          .listNotes(workingDirectory, _selectedNotebook!.name)
+                          .then((notes) {
+                            print(
+                              '${_selectedNotebook!.name} notes loaded: $notes',
+                            );
+                            setState(() {
+                              final notebookIndex = _notebooks.indexWhere(
+                                (n) => n.name == _selectedNotebook!.name,
+                              );
+                              _notebooks[notebookIndex].notes.clear();
+                              _notebooks[notebookIndex].notes.addAll(notes);
+                            });
+                          });
+                    });
                 Navigator.pop(context);
               }
             },
@@ -526,7 +549,12 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
 // 笔记详情页面
 class NoteDetailPage extends StatefulWidget {
   final Note note;
-  const NoteDetailPage({super.key, required this.note});
+  final Function(Note) onNoteChanged;
+  const NoteDetailPage({
+    super.key,
+    required this.note,
+    required this.onNoteChanged,
+  });
   @override
   State<StatefulWidget> createState() => NoteDetailState();
 }
@@ -544,6 +572,23 @@ class NoteDetailState extends State<NoteDetailPage> {
     // 2. 在初始化时为控制器设置文本，这将成为默认值
     _titleController.text = note.title;
     _textController.text = note.content;
+
+    // 3. 监听文本变化 定时保存文本
+    _textController.addListener(() {
+      //刷新父页面，更新笔记列表中note内容
+      note.content = _textController.text;
+      // widget.onNoteChanged(note);
+      widget.onNoteChanged(note);
+      // 延迟保存，避免频繁写文件
+      Timer(const Duration(seconds: 1), () {
+        FileUtil().saveFile(
+          SPUtil.get<String>('workingDirectory', ''),
+          note.id.substring(0, note.id.lastIndexOf('/')),
+          note.title,
+          note.content,
+        );
+      });
+    });
   }
 
   @override
@@ -657,6 +702,21 @@ class NoteDetailState extends State<NoteDetailPage> {
           });
         },
       ),
+    );
+  }
+
+  Widget _buildeSuperEditor() {
+    MutableDocument _document = MutableDocument();
+    final _composer = MutableDocumentComposer();
+    Editor _editor = createDefaultDocumentEditor(
+      document: _document,
+      composer: _composer,
+    );
+
+    return SuperEditor(
+      document: _document,
+      composer: _composer,
+      editor: _editor,
     );
   }
 

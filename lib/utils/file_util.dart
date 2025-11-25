@@ -7,9 +7,14 @@ import 'file_util_io.dart' if (dart.library.js_interop) 'file_util_web.dart';
 // 定义所有平台都必须实现的公共接口
 abstract class FileUtil {
   // 文件读写操作
-  Future<String> saveFile(String path, String filename, String content);
-  Future<String> readFile(String path, String filename);
-  Future<void> deleteFile(String path);
+  Future<String> saveFile(
+    String rootPath,
+    String path,
+    String filename,
+    String content,
+  );
+  Future<String> readFile(String rootPath, String path, String filename);
+  Future<void> deleteFile(String rootPath, String path);
   Future<List<String>> listFiles(
     String rootPath,
     String path, {
@@ -20,8 +25,8 @@ abstract class FileUtil {
 
   // 目录操作
   Future<String> getApplicationDocumentsPath();
-  Future<void> createDirectory(String path);
-  Future<void> deleteDirectory(String path);
+  Future<void> createDirectory(String rootPath, String path);
+  Future<void> deleteDirectory(String rootPath, String path);
 
   // 手动重置目录句柄（允许用户重新选择）
   void resetDirectoryHandle();
