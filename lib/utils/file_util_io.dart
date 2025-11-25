@@ -30,8 +30,8 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<void> deleteFile(String rootPath, String path) async {
-    final file = io.File('$rootPath/$path');
+  Future<void> deleteFile(String rootPath, String path, String filename) async {
+    final file = io.File('$rootPath/$path/$filename');
     if (await file.exists()) {
       await file.delete();
     }

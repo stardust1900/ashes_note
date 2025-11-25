@@ -73,10 +73,11 @@ class _SettingsViewState extends State<SettingsView> {
                   //     _workingDirectory = selected;
                   //   });
                   // }
-                  final fileUtil = FileUtil();
+                  // final fileUtil = FileUtil();
 
-                  fileUtil.resetDirectoryHandle();
-                  fileUtil.getApplicationDocumentsPath().then((rootPath) {
+                  // fileUtil.resetDirectoryHandle();
+                  FileUtil().getApplicationDocumentsPath().then((rootPath) {
+                    print('rootPath: $rootPath');
                     setState(() {
                       _workingDirectory = rootPath;
                     });

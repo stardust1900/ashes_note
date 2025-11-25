@@ -36,7 +36,8 @@ class FileUtilImpl implements FileUtil {
 
         // 验证权限
         final permissionStatus = await _checkPermission();
-        if (permissionStatus != 'granted') {
+        print('Permission status: $permissionStatus');
+        if (permissionStatus != 'granted' && permissionStatus != 'prompt') {
           throw Exception('用户未授予文件系统访问权限');
         }
         _rootDirectoryHandle = await js_util.promiseToFuture(promise);
@@ -156,11 +157,17 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<void> deleteFile(String rootPath, String path) async {
+  Future<void> deleteFile(String rootPath, String path, String filename) async {
     await _ensureRootDirectory();
     try {
+      final getDirHandlePromise = js_util.callMethod(
+        _rootDirectoryHandle!,
+        'getDirectoryHandle',
+        [path],
+      );
+      final dirHandle = await js_util.promiseToFuture(getDirHandlePromise);
       await js_util.promiseToFuture(
-        js_util.callMethod(_rootDirectoryHandle!, 'removeEntry', [path]),
+        js_util.callMethod(dirHandle!, 'removeEntry', [filename]),
       );
     } catch (e) {
       throw Exception('删除文件 "$path" 失败: $e');

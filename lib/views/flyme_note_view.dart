@@ -36,6 +36,10 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
 
   Future<void> _loadNotebookList() async {
     workingDirectory = SPUtil.get<String>('workingDirectory', '');
+    if (workingDirectory.isEmpty) {
+      print('工作目录未设置，无法加载笔记本列表');
+      return;
+    }
     final List<String> bookList = await FileUtil().listFiles(
       workingDirectory,
       '/',
@@ -99,23 +103,70 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
       _selectedNotebook!.notes.removeWhere((note) => note.id == noteId);
     });
     // TODO : 将笔记移动到垃圾箱，而不是直接删除
-    FileUtil().deleteFile(workingDirectory, noteId);
+    FileUtil().deleteFile(
+      workingDirectory,
+      noteId.substring(0, noteId.lastIndexOf('/')),
+      noteId.substring(noteId.lastIndexOf('/') + 1),
+    );
     // 显示SnackBar提示
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('笔记已删除'),
-        action: SnackBarAction(
-          label: '撤销',
-          onPressed: () {
-            // 这里可以添加撤销删除的逻辑
-          },
-        ),
+        //action: SnackBarAction(
+        //label: '撤销',
+        // onPressed: () {
+        // 这里可以添加撤销删除的逻辑
+        //},
+        // ),
       ),
     );
   }
 
-  void noteChanged(Note updatedNote) {
+  void noteChanged(Note updatedNote, {String? newTitle}) {
     setState(() {
+      if (newTitle != null && newTitle != updatedNote.title) {
+        //判断同名笔记本是否存在
+        final exists = _selectedNotebook!.notes.any(
+          (note) => note.title == newTitle || note.title == '$newTitle.md',
+        );
+        if (exists) {
+          // 提示用户笔记已存在
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('笔记已存在，请使用不同的标题')));
+          return;
+        }
+
+        // 保存旧 id 和生成新文件名
+        final oldTitle = updatedNote.title.endsWith('.md')
+            ? updatedNote.title
+            : '${updatedNote.title}.md';
+
+        final newFileName = newTitle.endsWith('.md')
+            ? newTitle
+            : '$newTitle.md';
+
+        updatedNote.title = newTitle;
+        // FileUtil 中可能没有 renameFile 方法，改为先保存新文件再删除旧文件以模拟重命名
+        FileUtil()
+            .saveFile(
+              workingDirectory,
+              _selectedNotebook!.name,
+              newFileName,
+              updatedNote.content,
+            )
+            .then((_) {
+              // 删除旧文件（oldId 可能是完整路径，也可能是文件名，依实现而定）
+              FileUtil().deleteFile(
+                workingDirectory,
+                _selectedNotebook!.name,
+                oldTitle,
+              );
+            });
+
+        // 更新 note 的 id 为新的路径或文件标识（根据项目中 id 的格式进行调整）
+        updatedNote.id = '${_selectedNotebook!.name}/$newFileName';
+      }
       final index = _selectedNotebook!.notes.indexWhere(
         (note) => note.id == updatedNote.id,
       );
@@ -547,7 +598,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
 // 笔记详情页面
 class NoteDetailPage extends StatefulWidget {
   final Note note;
-  final Function(Note) onNoteChanged;
+  final Function(Note, {String? newTitle}) onNoteChanged;
   const NoteDetailPage({
     super.key,
     required this.note,
@@ -568,7 +619,9 @@ class NoteDetailState extends State<NoteDetailPage> {
   void initState() {
     super.initState();
     // 2. 在初始化时为控制器设置文本，这将成为默认值
-    _titleController.text = note.title;
+    _titleController.text = note.title.endsWith('.md')
+        ? note.title.substring(0, note.title.length - 3)
+        : note.title;
     _textController.text = note.content;
 
     // 3. 监听文本变化 定时保存文本
@@ -592,6 +645,7 @@ class NoteDetailState extends State<NoteDetailPage> {
   @override
   void dispose() {
     _titleController.dispose();
+    _textController.dispose();
     super.dispose();
   }
 
@@ -609,6 +663,10 @@ class NoteDetailState extends State<NoteDetailPage> {
           children: [
             TextField(
               controller: _titleController,
+              onEditingComplete: () {
+                print('new title: ${_titleController.text}');
+                widget.onNoteChanged(note, newTitle: _titleController.text);
+              },
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
                 border: InputBorder.none,
