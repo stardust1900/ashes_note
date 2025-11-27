@@ -12,11 +12,11 @@ class FileUtilImpl implements FileUtil {
     String rootPath,
     String path,
     String filename,
-    String content,
+    List<int>? content,
   ) async {
     final file = io.File('$rootPath/$path/$filename');
     await file.create(recursive: true);
-    await file.writeAsString(content);
+    await file.writeAsBytes(content ?? []);
     return filename;
   }
 
@@ -66,9 +66,9 @@ class FileUtilImpl implements FileUtil {
       return entities.whereType<io.File>()
       // .where((f) => p.basename(f.path).endsWith('.md'))
       .map((f) {
-        f.lastModified().then(
-          (s) => print('f.modified: $s ${p.basename(f.path)}'),
-        );
+        // f.lastModified().then(
+        //   (s) => print('f.modified: $s ${p.basename(f.path)}'),
+        // );
         return p.basename(f.path);
       }).toList();
     }
@@ -79,9 +79,9 @@ class FileUtilImpl implements FileUtil {
             return !p.basename(f.path).startsWith('.');
           })
           .map((f) {
-            f.stat().then(
-              (s) => print('s.modified: ${s.modified} ${p.basename(f.path)}'),
-            );
+            // f.stat().then(
+            //   (s) => print('s.modified: ${s.modified} ${p.basename(f.path)}'),
+            // );
             return p.basename(f.path);
           })
           .toList();

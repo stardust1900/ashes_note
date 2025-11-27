@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
@@ -267,13 +269,13 @@ class NavigationPanelState extends State<NavigationPanel> {
     // print("result: $result");
     // 处理对话框返回的结果
     if (result != null && result.isNotEmpty) {
-      widget.fileUtil.saveFile(workingDirectory, noteBook, result, "").then((
-        value,
-      ) {
-        setState(() {
-          _notebookMap[noteBook]?.add(result);
-        });
-      });
+      widget.fileUtil
+          .saveFile(workingDirectory, noteBook, result, utf8.encode(""))
+          .then((value) {
+            setState(() {
+              _notebookMap[noteBook]?.add(result);
+            });
+          });
       // 这里可以添加其他处理逻辑，比如保存到本地等
       print('用户输入的笔记名称: $result');
     }
@@ -455,7 +457,7 @@ class ContentAreaState extends State<ContentArea> {
           workingDirectory,
           oldWidget.selectedNotebook!,
           oldWidget.selectedNote!,
-          editedContent,
+          utf8.encode(editedContent),
         );
       }
 

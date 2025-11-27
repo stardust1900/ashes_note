@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:ashes_note/utils/file_util.dart';
+import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
@@ -21,17 +23,41 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
   final TextEditingController _noteTitleController = TextEditingController();
   final TextEditingController _noteContentController = TextEditingController();
 
+  GitService? git;
+  String? remoteUrl;
+
   @override
   void initState() {
     super.initState();
     _loadNotebookList().then((_) {
       setState(() {
         if (_notebooks.isNotEmpty) {
-          _selectedNotebook = _notebooks[0];
+          String selectedNotebookName = SPUtil.get<String>(
+            'selectedNotebook',
+            '',
+          );
+          if (selectedNotebookName.isNotEmpty) {
+            _selectedNotebook = _notebooks.firstWhere(
+              (notebook) => notebook.name == selectedNotebookName,
+              orElse: () => _notebooks[0],
+            );
+          } else {
+            _selectedNotebook = _notebooks[0];
+          }
         }
       });
     });
     // 默认选择第一个笔记本
+
+    String gitPlatform = SPUtil.get<String>('gitPlatform', '');
+    if (gitPlatform.isNotEmpty) {
+      print('当前使用的 Git 平台：$gitPlatform');
+      if (gitPlatform == 'gitee') {
+        String token = SPUtil.get<String>('giteeToken', '');
+        remoteUrl = SPUtil.get<String>('giteeRemoteUrl', '');
+        git = GitFactory.getGitService(gitPlatform, token);
+      }
+    }
   }
 
   Future<void> _loadNotebookList() async {
@@ -50,7 +76,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
         workingDirectory,
         book,
       );
-      print('notebookes: $book , notes: $notes');
+      // print('notebookes: $book , notes: $notes');
       _notebooks.add(Notebook(name: book, notes: notes, color: Colors.blue));
     }
   }
@@ -153,7 +179,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
               workingDirectory,
               _selectedNotebook!.name,
               newFileName,
-              updatedNote.content,
+              utf8.encode(updatedNote.content),
             )
             .then((_) {
               // 删除旧文件（oldId 可能是完整路径，也可能是文件名，依实现而定）
@@ -184,6 +210,46 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
         backgroundColor: Theme.of(context).canvasColor,
         foregroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
+        actions: [
+          SizedBox(
+            width: 200,
+            height: 40,
+            child: TextField(
+              style: TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: '搜索笔记',
+                hintStyle: TextStyle(color: Colors.white54),
+                border: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white),
+                ),
+                prefixIcon: Icon(Icons.search, color: Colors.white54),
+              ),
+              onChanged: (value) {
+                // 实现搜索逻辑
+              },
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.sync),
+            color: Colors.blue,
+            onPressed: () {
+              if (git == null || remoteUrl == null) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Git 服务未配置，无法同步')));
+                return;
+              }
+              var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+              print('开始同步仓库 $owner/$repo');
+              git!.push(
+                owner,
+                repo,
+                workingDirectory,
+                deleteRemoteMissing: true,
+              );
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -328,6 +394,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                     setState(() {
                       _selectedNotebook = notebook;
                       _isNotebookListExpanded = false;
+                      SPUtil.set("selectedNotebook", notebook.name);
                     });
                   },
                 ),
@@ -565,7 +632,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                       _noteTitleController.text.endsWith('.md')
                           ? _noteTitleController.text
                           : '${_noteTitleController.text}.md',
-                      '',
+                      utf8.encode(''),
                     )
                     .then((value) {
                       print('note saved: $value');
@@ -636,7 +703,7 @@ class NoteDetailState extends State<NoteDetailPage> {
           SPUtil.get<String>('workingDirectory', ''),
           note.id.substring(0, note.id.lastIndexOf('/')),
           note.title,
-          note.content,
+          utf8.encode(note.content),
         );
       });
     });

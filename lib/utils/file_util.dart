@@ -11,7 +11,7 @@ abstract class FileUtil {
     String rootPath,
     String path,
     String filename,
-    String content,
+    List<int>? content,
   );
   Future<String> readFile(String rootPath, String path, String filename);
   Future<void> deleteFile(String rootPath, String path, String filename);

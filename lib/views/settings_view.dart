@@ -1,6 +1,6 @@
 //设置页面 显示工作目录，可以修改，有保存按钮
 import 'package:ashes_note/utils/file_util.dart';
-import 'package:ashes_note/utils/gitee_service.dart';
+import 'package:ashes_note/utils/git_service.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 
@@ -248,72 +248,69 @@ class _SettingsViewState extends State<SettingsView> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-              onPressed: () async {
-                if (_remoteUrl == null || _token == null) {
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text('请填写完整的Git配置')));
-                  return;
-                }
+            Row(
+              children: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                  onPressed: () async {
+                    if (_remoteUrl == null || _token == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('请填写完整的Git配置')),
+                      );
+                      return;
+                    }
 
-                String owner = _remoteUrl!
-                    .split('/')
-                    .reversed
-                    .toList()[1]; // 获取倒数第二部分作为owner
-                String repo = _remoteUrl!
-                    .split('/')
-                    .reversed
-                    .toList()[0]; // 获取最后一部分作为repo
-                if (repo.endsWith('.git')) {
-                  repo = repo.substring(0, repo.length - 4);
-                }
+                    String owner = _remoteUrl!
+                        .split('/')
+                        .reversed
+                        .toList()[1]; // 获取倒数第二部分作为owner
+                    String repo = _remoteUrl!
+                        .split('/')
+                        .reversed
+                        .toList()[0]; // 获取最后一部分作为repo
+                    if (repo.endsWith('.git')) {
+                      repo = repo.substring(0, repo.length - 4);
+                    }
 
-                print('Owner: $owner, Repo: $repo');
-                if (_gitPlatform == 'gitee') {
-                  GiteeService(accessToken: _token)
-                      .getRepoInfo(owner, repo)
-                      .then((repoInfo) {
-                        print('Repo Info: $repoInfo');
-                        SPUtil.set<String>('gitPlatform', _gitPlatform);
-                        SPUtil.set<String>('giteeToken', _token!);
-                        SPUtil.set<String>('giteeRemoteUrl', _remoteUrl!);
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(const SnackBar(content: Text('设置已保存')));
-                      })
-                      .catchError((error) {
-                        print('Error fetching repo info: $error');
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('获取仓库信息失败: $error')),
-                        );
-                      });
-                } else if (_gitPlatform == 'github') {
-                  // GitHubService(accessToken: _token)
-                  //     .getRepoInfo(owner, repo)
-                  //     .then((repoInfo) {
-                  //       print('Repo Info: $repoInfo');
-                  //       SPUtil.set<String>('gitPlatform', _gitPlatform);
-                  //       SPUtil.set<String>('githubToken', _token!);
-                  //       SPUtil.set<String>('githubRemoteUrl', _remoteUrl!);
-                  //       ScaffoldMessenger.of(
-                  //         context,
-                  //       ).showSnackBar(const SnackBar(content: Text('设置已保存')));
-                  //     })
-                  //     .catchError((error) {
-                  //       print('Error fetching repo info: $error');
-                  //       ScaffoldMessenger.of(context).showSnackBar(
-                  //         SnackBar(content: Text('获取仓库信息失败: $error')),
-                  //       );
-                  //     });
-                }
+                    print('Owner: $owner, Repo: $repo');
 
-                // ScaffoldMessenger.of(
-                //   context,
-                // ).showSnackBar(SnackBar(content: Text('设置已保存')));
-              },
-              child: Text('保存配置'),
+                    GitFactory.getGitService(_gitPlatform, _token!)
+                        .getRepoInfo(owner, repo)
+                        .then((repoInfo) {
+                          print('Repo Info: $repoInfo');
+                          SPUtil.set<String>('gitPlatform', _gitPlatform);
+                          SPUtil.set<String>('giteeToken', _token!);
+                          SPUtil.set<String>('giteeRemoteUrl', _remoteUrl!);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('设置已保存')),
+                          );
+                        })
+                        .catchError((error) {
+                          print('Error fetching repo info: $error');
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('获取仓库信息失败: $error')),
+                          );
+                        });
+                  },
+                  child: Text('保存配置'),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                  ),
+                  onPressed: () {
+                    GitService git = GitFactory.getGitService(
+                      _gitPlatform,
+                      _token!,
+                    );
+                    var (owner, repo) = git.getOwnerRepoFromUrl(_remoteUrl!);
+                    print('开始同步仓库 $owner/$repo');
+                    git.pull(owner, repo, _workingDirectory!);
+                  },
+                  child: Text('同步仓库'),
+                ),
+              ],
             ),
           ],
         ),

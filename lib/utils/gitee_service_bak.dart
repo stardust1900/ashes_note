@@ -1,8 +1,12 @@
 import 'dart:async' show Completer;
 import 'dart:convert';
 import 'dart:io';
-
+import 'package:crypto/crypto.dart';
+import 'package:ashes_note/utils/file_util.dart';
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
+
+enum ConflictAction { remoteWins, localWins, createConflictCopy }
 
 class GiteeService {
   // Gitee service implementation
@@ -10,6 +14,9 @@ class GiteeService {
   final String? accessToken;
 
   GiteeService({this.accessToken});
+
+  // 计算 bytes 的 sha1（用于快速比较）
+  String _sha1Bytes(List<int> bytes) => sha1.convert(bytes).toString();
 
   /// 通过 Gitee API 获取仓库信息
   /// owner: 仓库所属用户或组织
@@ -72,6 +79,231 @@ class GiteeService {
         'Failed to create repo: ${response.statusCode} ${response.body}',
       );
     }
+  }
+
+  Future<void> pull(
+    String owner,
+    String repo,
+    String workingDir, {
+    ConflictAction conflictAction = ConflictAction.remoteWins,
+    String? branch,
+  }) async {
+    print('DateTime now: ${DateTime.now().toIso8601String()} pull start');
+    var usedBranch = branch;
+    if (usedBranch == null) {
+      final repoInfo = await getRepoInfo(owner, repo);
+      usedBranch = (repoInfo['default_branch'] as String?) ?? 'master';
+    }
+
+    final remoteFiles = await listAllFiles(owner, repo, branch: branch);
+
+    final _Semaphore sem = _Semaphore.getInstance();
+
+    // 并发分块拉取，限制同时运行任务数，完成后清空 remoteFiles 避免后续重复处理
+    final int _calculatedConcurrency = (Platform.numberOfProcessors > 0)
+        ? Platform.numberOfProcessors * 2
+        : 8;
+    final int _maxConcurrent =
+        (_calculatedConcurrency.clamp(1, 64)) as int; // 控制最大并发
+    final List<String> _errors = [];
+
+    // 分块执行，保证内存占用受控：每个批次最多 _maxConcurrent 个并发请求
+    for (var i = 0; i < remoteFiles.length; i += _maxConcurrent) {
+      final end = (i + _maxConcurrent) > remoteFiles.length
+          ? remoteFiles.length
+          : (i + _maxConcurrent);
+      final chunk = remoteFiles.sublist(i, end);
+
+      final futures = <Future<void>>[];
+      for (final entry in chunk) {
+        futures.add(
+          sem.withPermit(() async {
+            String path;
+            try {
+              path = (entry['path'] as String);
+            } catch (e) {
+              _errors.add('Invalid entry format: $e');
+              return;
+            }
+
+            try {
+              print('同步文件（并发）: $path');
+
+              // 拉取远端内容并立即处理（写盘后尽快释放内存）
+              final fileInfo = await getFile(
+                owner,
+                repo,
+                path,
+                ref: usedBranch,
+              );
+              List<int>? remoteBytes = fileInfo['content_bytes'] as List<int>?;
+              if (remoteBytes == null && fileInfo.containsKey('content')) {
+                final raw = (fileInfo['content'] as String).replaceAll(
+                  '\n',
+                  '',
+                );
+                remoteBytes = base64.decode(raw);
+              }
+              if (remoteBytes == null) {
+                throw Exception('No content for file: $path');
+              }
+
+              // 检查本地是否存在；使用 readFile 抛异常判断
+              bool localExists = true;
+              String localText = '';
+              try {
+                localText = await FileUtil().readFile(
+                  workingDir,
+                  p.dirname(path),
+                  p.basename(path),
+                );
+              } catch (_) {
+                localExists = false;
+              }
+
+              if (!localExists) {
+                // 直接写入远端内容
+                await FileUtil().saveFile(
+                  workingDir,
+                  p.dirname(path),
+                  p.basename(path),
+                  remoteBytes,
+                );
+                // 释放内存引用
+                remoteBytes = <int>[];
+                return;
+              }
+
+              // 比较 sha1，若相同则跳过
+              final localBytes = utf8.encode(localText);
+              final localSha = _sha1Bytes(localBytes);
+              final remoteSha =
+                  fileInfo['sha'] as String? ?? _sha1Bytes(remoteBytes);
+              if (localSha == _sha1Bytes(remoteBytes)) {
+                // 相同，跳过
+                remoteBytes = <int>[];
+                return;
+              }
+
+              // 冲突处理
+              switch (conflictAction) {
+                case ConflictAction.remoteWins:
+                  await FileUtil().saveFile(
+                    workingDir,
+                    p.dirname(path),
+                    p.basename(path),
+                    remoteBytes,
+                  );
+                  break;
+                case ConflictAction.localWins:
+                  // 不修改本地，后续可 push 覆盖远端
+                  break;
+                case ConflictAction.createConflictCopy:
+                  final conflictPath = _conflictCopyPath(path);
+                  await FileUtil().saveFile(
+                    workingDir,
+                    p.dirname(path),
+                    p.basename(conflictPath),
+                    remoteBytes,
+                  );
+                  break;
+              }
+
+              // 及时释放对大字节数组的引用，帮助 GC 回收
+              remoteBytes = <int>[];
+            } catch (e, st) {
+              _errors.add('$path: $e\n$st');
+            }
+          }),
+        );
+      }
+
+      // 等待当前批次完成后再继续下一批，避免过多未完成 Future 占用内存
+      await Future.wait(futures);
+    }
+
+    // 清理已处理列表，避免后面的同步逻辑重复工作
+    remoteFiles.clear();
+
+    // 若有失败，抛出第一个错误以便上层知晓（也可改为记录日志）
+    if (_errors.isNotEmpty) {
+      print('Failed to pull ${_errors.length} files. First: ${_errors.first}');
+    }
+    print('DateTime now: ${DateTime.now().toIso8601String()} pull end');
+    // for (final f in remoteFiles) {
+    //   final path = f['path'] as String;
+    //   print('同步文件: $path');
+    //   print('dir:${p.dirname(path)}, basename: ${p.basename(path)}');
+    //   // 读取远程内容
+    //   final fileInfo = await getFile(owner, repo, path, ref: branch);
+    //   // print('fileInfo: $fileInfo');
+    //   List<int>? remoteBytes = fileInfo['content_bytes'] as List<int>?;
+    //   final remoteSha = fileInfo['sha'] as String?;
+    //   if (remoteBytes == null) continue;
+
+    //   // 读取本地内容（若存在）
+    //   try {
+    //     await FileUtil().readFile(
+    //       workingDir,
+    //       p.dirname(path),
+    //       p.basename(path),
+    //     );
+    //   } catch (e) {
+    //     // 本地不存在 -> 创建本地文件及目录
+    //     await FileUtil().saveFile(
+    //       workingDir,
+    //       p.dirname(path),
+    //       p.basename(path),
+    //       remoteBytes,
+    //     );
+    //     continue;
+    //   }
+    //   final localContent = await FileUtil().readFile(
+    //     workingDir,
+    //     p.dirname(path),
+    //     p.basename(path),
+    //   );
+
+    //   print('localContent: $localContent');
+
+    //   final localBytes = utf8.encode(localContent);
+    //   if (_sha1Bytes(localBytes) == _sha1Bytes(remoteBytes)) {
+    //     // 相同，跳过
+    //     continue;
+    //   }
+
+    //   // 冲突处理
+    //   switch (conflictAction) {
+    //     case ConflictAction.remoteWins:
+    //       await FileUtil().saveFile(
+    //         workingDir,
+    //         p.dirname(path),
+    //         p.basename(path),
+    //         remoteBytes,
+    //       );
+    //       break;
+    //     case ConflictAction.localWins:
+    //       // 不做任何操作；后续可以 push 将本地覆盖远端
+    //       break;
+    //     case ConflictAction.createConflictCopy:
+    //       final conflictPath = _conflictCopyPath(path);
+    //       await FileUtil().saveFile(
+    //         workingDir,
+    //         p.dirname(path),
+    //         p.basename(conflictPath),
+    //         remoteBytes,
+    //       );
+    //       break;
+    //   }
+    // }
+  }
+
+  String _conflictCopyPath(String original) {
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-');
+    final dir = p.dirname(original);
+    final base = p.basename(original);
+    final conflictName = '$base.conflict.$ts';
+    return dir == '.' ? conflictName : p.join(dir, conflictName);
   }
 
   /// 下载仓库中所有文件到指定工作目录
@@ -348,6 +580,21 @@ class GiteeService {
       );
     }
   }
+
+  (String, String) getOwnerRepoFromUrl(String url) {
+    // 示例 URL: https://gitee.com/owner/repo.git
+    final uri = Uri.parse(url);
+    final segments = uri.pathSegments;
+    if (segments.length < 2) {
+      throw Exception('Invalid Gitee repository URL: $url');
+    }
+    final owner = segments[0];
+    var repo = segments[1];
+    if (repo.endsWith('.git')) {
+      repo = repo.substring(0, repo.length - 4);
+    }
+    return (owner, repo);
+  }
 }
 
 /// 简单异步信号量，限制并发数
@@ -357,6 +604,14 @@ class _Semaphore {
   final List<Completer<void>> _waiters = [];
 
   _Semaphore(this._max);
+
+  static _Semaphore getInstance() {
+    final int defaultConcurrency = (Platform.numberOfProcessors > 0)
+        ? Platform.numberOfProcessors * 2
+        : 8;
+    final int maxConcurrent = (defaultConcurrency).clamp(1, 64);
+    return _Semaphore(maxConcurrent);
+  }
 
   Future<T> withPermit<T>(Future<T> Function() action) async {
     await _acquire();

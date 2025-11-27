@@ -78,7 +78,7 @@ class FileUtilImpl implements FileUtil {
     String rootPath,
     String path,
     String filename,
-    String content,
+    List<int>? content,
   ) async {
     await _ensureRootDirectory();
     try {
@@ -113,7 +113,7 @@ class FileUtilImpl implements FileUtil {
       );
 
       await js_util.promiseToFuture(
-        js_util.callMethod(writableStream, 'write', [content]),
+        js_util.callMethod(writableStream, 'write', content ?? []),
       );
       await js_util.promiseToFuture(
         js_util.callMethod(writableStream, 'close', []),
@@ -135,6 +135,7 @@ class FileUtilImpl implements FileUtil {
         [path],
       );
       final dirHandle = await js_util.promiseToFuture(getDirHandlePromise);
+      // 检查文件是否存在：调用 getFileHandle(create: false)，若被拒绝则认为不存在
       final getFileHandlePromise = js_util.callMethod(
         dirHandle!,
         'getFileHandle',

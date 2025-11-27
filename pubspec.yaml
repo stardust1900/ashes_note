@@ -41,6 +41,7 @@ dependencies:
   path: ^1.9.1
   # intl: ^0.20.2
   http: ^1.6.0
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:
