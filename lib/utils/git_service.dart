@@ -169,18 +169,17 @@ class GiteeService extends GitService {
     final _Semaphore sem = _Semaphore.getInstance();
 
     // 并发分块拉取，限制同时运行任务数，完成后清空 remoteFiles 避免后续重复处理
-    final int _calculatedConcurrency = (Platform.numberOfProcessors > 0)
+    final int calculatedConcurrency = (Platform.numberOfProcessors > 0)
         ? Platform.numberOfProcessors * 2
         : 8;
-    final int _maxConcurrent =
-        (_calculatedConcurrency.clamp(1, 64)) as int; // 控制最大并发
-    final List<String> _errors = [];
+    final int maxConcurrent = (calculatedConcurrency.clamp(1, 64)); // 控制最大并发
+    final List<String> errors = [];
 
     // 分块执行，保证内存占用受控：每个批次最多 _maxConcurrent 个并发请求
-    for (var i = 0; i < remoteFiles.length; i += _maxConcurrent) {
-      final end = (i + _maxConcurrent) > remoteFiles.length
+    for (var i = 0; i < remoteFiles.length; i += maxConcurrent) {
+      final end = (i + maxConcurrent) > remoteFiles.length
           ? remoteFiles.length
-          : (i + _maxConcurrent);
+          : (i + maxConcurrent);
       final chunk = remoteFiles.sublist(i, end);
 
       final futures = <Future<void>>[];
@@ -191,7 +190,7 @@ class GiteeService extends GitService {
             try {
               path = (entry['path'] as String);
             } catch (e) {
-              _errors.add('Invalid entry format: $e');
+              errors.add('Invalid entry format: $e');
               return;
             }
 
@@ -246,8 +245,6 @@ class GiteeService extends GitService {
               // 比较 sha1，若相同则跳过
               final localBytes = utf8.encode(localText);
               final localSha = _sha1Bytes(localBytes);
-              final remoteSha =
-                  fileInfo['sha'] as String? ?? _sha1Bytes(remoteBytes);
               if (localSha == _sha1Bytes(remoteBytes)) {
                 // 相同，跳过
                 remoteBytes = <int>[];
@@ -281,7 +278,7 @@ class GiteeService extends GitService {
               // 及时释放对大字节数组的引用，帮助 GC 回收
               remoteBytes = <int>[];
             } catch (e, st) {
-              _errors.add('$path: $e\n$st');
+              errors.add('$path: $e\n$st');
             }
           }),
         );
@@ -295,8 +292,8 @@ class GiteeService extends GitService {
     remoteFiles.clear();
 
     // 若有失败，抛出第一个错误以便上层知晓（也可改为记录日志）
-    if (_errors.isNotEmpty) {
-      print('Failed to pull ${_errors.length} files. First: ${_errors.first}');
+    if (errors.isNotEmpty) {
+      print('Failed to pull ${errors.length} files. First: ${errors.first}');
     }
     print('DateTime now: ${DateTime.now().toIso8601String()} pull end');
     // for (final f in remoteFiles) {
@@ -588,52 +585,9 @@ class GiteeService extends GitService {
     }
   }
 
-  Future<Map<String, List<int>>> _downloadAllFiles(
-    String owner,
-    String repo,
-    String workingDirectory, {
-    String? branch,
-  }) async {
-    // 需要导入：import 'dart:io';
-    var usedBranch = branch;
-    if (usedBranch == null) {
-      final repoInfo = await getRepoInfo(owner, repo);
-      usedBranch = (repoInfo['default_branch'] as String?) ?? 'master';
-    }
-
-    final files = await listAllFiles(owner, repo, branch: usedBranch);
-    final Map<String, List<int>> result = {};
-
-    for (final entry in files) {
-      final path = entry['path'] as String;
-      final fileInfo = await getFile(owner, repo, path, ref: usedBranch);
-
-      List<int>? bytes = fileInfo['content_bytes'] as List<int>?;
-      if (bytes == null && fileInfo.containsKey('content')) {
-        final raw = (fileInfo['content'] as String).replaceAll('\n', '');
-        bytes = base64.decode(raw);
-      }
-      if (bytes == null) {
-        throw Exception('No content for file: $path');
-      }
-
-      // 写入到工作目录
-      final sep = Platform.pathSeparator;
-      final localPath = workingDirectory.endsWith(sep)
-          ? '$workingDirectory$path'
-          : '$workingDirectory$sep$path';
-      final file = File(localPath);
-      await file.create(recursive: true);
-      await file.writeAsBytes(bytes, flush: true);
-
-      result[path] = bytes;
-    }
-
-    return result;
-  }
-
   /// 获取仓库中所有文件（递归列出 tree 中所有 blob）
   /// 返回 List<Map<String,dynamic>>，每项包含 path、mode、type、sha、size 等字段
+  @override
   Future<List<Map<String, dynamic>>> listAllFiles(
     String owner,
     String repo, {
