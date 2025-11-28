@@ -129,6 +129,13 @@ class _SettingsViewState extends State<SettingsView> {
                     //     _workingDirectory = selectedDirectory;
                     //   });
                     // }
+                    FileUtil().getApplicationDocumentsPath().then((rootPath) {
+                      print('rootPath: $rootPath');
+                      setState(() {
+                        _workingDirectory = rootPath;
+                      });
+                      _saveSettings();
+                    });
                   },
                 ),
               ],

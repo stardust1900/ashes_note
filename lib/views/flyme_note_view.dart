@@ -229,6 +229,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
     //   utf8.encode(note.content),
     // );
     // 如果配置了 Git 服务，则同步更新远程仓库
+    if (git == null || remoteUrl == null) return;
     var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
     String path = note.id;
     git?.uploadFile(
