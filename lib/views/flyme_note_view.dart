@@ -29,6 +29,28 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
   @override
   void initState() {
     super.initState();
+    workingDirectory = SPUtil.get<String>('workingDirectory', '');
+    String gitPlatform = SPUtil.get<String>('gitPlatform', '');
+    if (gitPlatform.isNotEmpty) {
+      print('当前使用的 Git 平台：$gitPlatform');
+      if (gitPlatform == 'gitee') {
+        String token = SPUtil.get<String>('giteeToken', '');
+        remoteUrl = SPUtil.get<String>('giteeRemoteUrl', '');
+        git = GitFactory.getGitService(gitPlatform, token);
+      }
+
+      String lastPullTime = SPUtil.get('lastPullTime', '');
+      print('上次拉取时间：$lastPullTime');
+      if (lastPullTime == '' ||
+          DateTime.now().difference(DateTime.parse(lastPullTime)).inHours >=
+              1) {
+        var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+        print('初始化拉取仓库 $owner/$repo');
+        git!.pull(owner, repo, workingDirectory);
+        SPUtil.set("lastPullTime", DateTime.now().toIso8601String());
+      }
+    }
+
     _loadNotebookList().then((_) {
       setState(() {
         if (_notebooks.isNotEmpty) {
@@ -48,20 +70,17 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
       });
     });
     // 默认选择第一个笔记本
+  }
 
-    String gitPlatform = SPUtil.get<String>('gitPlatform', '');
-    if (gitPlatform.isNotEmpty) {
-      print('当前使用的 Git 平台：$gitPlatform');
-      if (gitPlatform == 'gitee') {
-        String token = SPUtil.get<String>('giteeToken', '');
-        remoteUrl = SPUtil.get<String>('giteeRemoteUrl', '');
-        git = GitFactory.getGitService(gitPlatform, token);
-      }
-    }
+  @override
+  void dispose() {
+    _notebookNameController.dispose();
+    _noteTitleController.dispose();
+    _noteContentController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadNotebookList() async {
-    workingDirectory = SPUtil.get<String>('workingDirectory', '');
     if (workingDirectory.isEmpty) {
       print('工作目录未设置，无法加载笔记本列表');
       return;
@@ -202,6 +221,25 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
     });
   }
 
+  void saveNote(Note note) {
+    // FileUtil().saveFile(
+    //   workingDirectory,
+    //   note.id.substring(0, note.id.lastIndexOf('/')),
+    //   note.title,
+    //   utf8.encode(note.content),
+    // );
+    // 如果配置了 Git 服务，则同步更新远程仓库
+    var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+    String path = note.id;
+    git?.uploadFile(
+      owner,
+      repo,
+      path,
+      utf8.encode(note.content),
+      'Update note ${note.title}',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -304,7 +342,7 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                   if (_selectedNotebook != null)
                     Text(
                       _selectedNotebook!.name,
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      style: Theme.of(context).textTheme.labelSmall,
                     ),
                 ],
               ),
@@ -512,8 +550,11 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        NoteDetailPage(note: note, onNoteChanged: noteChanged),
+                    builder: (context) => NoteDetailPage(
+                      note: note,
+                      onNoteChanged: noteChanged,
+                      saveNote: saveNote,
+                    ),
                   ),
                 );
               },
@@ -666,10 +707,12 @@ class _NotebookHomePageState extends State<NotebookHomePage> {
 class NoteDetailPage extends StatefulWidget {
   final Note note;
   final Function(Note, {String? newTitle}) onNoteChanged;
+  final Function(Note) saveNote;
   const NoteDetailPage({
     super.key,
     required this.note,
     required this.onNoteChanged,
+    required this.saveNote,
   });
   @override
   State<StatefulWidget> createState() => NoteDetailState();
@@ -693,6 +736,7 @@ class NoteDetailState extends State<NoteDetailPage> {
 
     // 3. 监听文本变化 定时保存文本
     _textController.addListener(() {
+      if (_textController.text == note.content) return;
       //刷新父页面，更新笔记列表中note内容
       note.content = _textController.text;
       // widget.onNoteChanged(note);
@@ -722,7 +766,10 @@ class NoteDetailState extends State<NoteDetailPage> {
       appBar: AppBar(
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            widget.saveNote(note);
+            Navigator.pop(context);
+          },
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -783,6 +830,19 @@ class NoteDetailState extends State<NoteDetailPage> {
                 });
               },
               tooltip: '预览',
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.only(right: 16.0),
+            child: IconButton(
+              icon: Icon(Icons.save, size: 16),
+              onPressed: () {
+                widget.saveNote(note);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('笔记已保存')));
+              },
+              tooltip: '保存',
             ),
           ),
         ],

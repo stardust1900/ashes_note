@@ -37,7 +37,6 @@ abstract class GitService {
     List<int> content,
     String message, {
     String branch,
-    String? sha,
   });
 
   Future<void> deleteFile(
@@ -65,6 +64,7 @@ abstract class GitService {
   });
 
   (String, String) getOwnerRepoFromUrl(String url);
+  String hashObject(List<int> bytes);
 }
 
 class GiteeService extends GitService {
@@ -80,7 +80,8 @@ class GiteeService extends GitService {
   // 计算 git 对象（blob）的 sha1（git hash-object 行为）
   // 输入：文件内容的字节数组
   // 返回：hex 格式的 sha1 值（与 `git hash-object` 生成的值一致）
-  String _hashObject(List<int> bytes) {
+  @override
+  String hashObject(List<int> bytes) {
     // git blob header: "blob {size}\0"
     final header = utf8.encode('blob ${bytes.length}\u0000');
     final payload = <int>[...header, ...bytes];
@@ -366,6 +367,7 @@ class GiteeService extends GitService {
 
   // 将本地变更推送到远端（push）
   // deleteRemoteMissing: 若 true，会删除远端上不存在于本地的文件（危险，默认 false）
+  @override
   Future<void> push(
     String owner,
     String repo,
@@ -379,7 +381,8 @@ class GiteeService extends GitService {
     final Map<String, String?> remoteMap = {
       for (final e in remoteFiles) e['path'] as String: e['sha'] as String?,
     };
-
+    // 仅保留多级路径文件，忽略根目录文件
+    remoteMap.removeWhere((key, value) => !key.contains('/'));
     // remoteMap.forEach((key, value) {
     //   print('remote file: $key, sha: $value');
     // });
@@ -411,7 +414,7 @@ class GiteeService extends GitService {
         //   needUpload = false; // 内容相同，无需上传
         // }
 
-        if (remoteSha == _hashObject(localBytes)) {
+        if (remoteSha == hashObject(localBytes)) {
           needUpload = false; // 内容相同，无需上传
         }
       }
@@ -625,6 +628,7 @@ class GiteeService extends GitService {
   /// 获取仓库中文件的信息和内容（解码后）
   /// path: 文件在仓库中的路径（可以包含多级目录，例如 "dir/file.md"）
   /// ref: 分支或 tag（可选）
+  @override
   Future<Map<String, dynamic>> getFile(
     String owner,
     String repo,
@@ -651,8 +655,12 @@ class GiteeService extends GitService {
 
     final response = await http.get(uri);
     if (response.statusCode == 200) {
-      final Map<String, dynamic> data =
-          json.decode(response.body) as Map<String, dynamic>;
+      final data = json.decode(response.body);
+      if (data is! Map<String, dynamic>) {
+        print('Unexpected response format: ${response.body}');
+        return {};
+      }
+
       if (data.containsKey('content')) {
         final raw = (data['content'] as String).replaceAll('\n', '');
         final bytes = base64.decode(raw);
@@ -675,6 +683,7 @@ class GiteeService extends GitService {
   /// contentBytes: 文件内容的字节数组
   /// message: 提交信息
   /// sha: 如果是更新文件，需传入当前文件的 sha（可选，如果是更新应提供）
+  @override
   Future<Map<String, dynamic>> uploadFile(
     String owner,
     String repo,
@@ -682,8 +691,31 @@ class GiteeService extends GitService {
     List<int> contentBytes,
     String message, {
     String? branch,
-    String? sha,
   }) async {
+    Map<String, dynamic> existingFile = await getFile(owner, repo, path);
+    if (existingFile.isNotEmpty) {
+      final existingSha = existingFile['sha'] as String?;
+      if (existingSha != null && existingSha.isNotEmpty) {
+        print('File $path exists, updating existing file.');
+        final localSha = hashObject(contentBytes);
+        if (localSha == existingSha) {
+          print('File $path content is identical, skipping upload.');
+          return existingFile; // 内容相同，跳过上传
+        }
+        // 更新文件时需要提供 sha
+        //https://gitee.com/api/v5/repos/{owner}/{repo}/contents/{path}
+        return await _updateFile(
+          owner,
+          repo,
+          path,
+          contentBytes,
+          message,
+          existingSha,
+          branch: branch,
+        );
+      }
+    }
+
     final encodedPath = path.split('/').map(Uri.encodeComponent).join('/');
     // final query = accessToken != null ? '?access_token=$accessToken' : '';
     final uri = Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$encodedPath');
@@ -764,6 +796,43 @@ class GiteeService extends GitService {
       repo = repo.substring(0, repo.length - 4);
     }
     return (owner, repo);
+  }
+
+  Future<Map<String, dynamic>> _updateFile(
+    String owner,
+    String repo,
+    String path,
+    List<int> contentBytes,
+    String message,
+    String existingSha, {
+    String? branch,
+  }) async {
+    final encodedPath = path.split('/').map(Uri.encodeComponent).join('/');
+    final uri = Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$encodedPath');
+
+    print('Updating file at $uri with message: $message');
+
+    final payload = <String, dynamic>{
+      'access_token': accessToken,
+      'message': message,
+      'content': base64.encode(contentBytes),
+      'sha': existingSha,
+      if (branch != null) 'branch': branch,
+    };
+
+    final response = await http.put(
+      uri,
+      headers: {'Content-Type': 'application/json;charset=UTF-8'},
+      body: json.encode(payload),
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception(
+        'Failed to update file: ${response.statusCode} ${response.body}',
+      );
+    }
   }
 }
 

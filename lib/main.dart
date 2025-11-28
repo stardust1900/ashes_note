@@ -41,6 +41,11 @@ class AshesNoteApp extends StatelessWidget {
             fontWeight: FontWeight.w800,
           ),
           labelMedium: TextStyle(color: Colors.white, fontSize: 30),
+          labelSmall: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
           bodyMedium: TextStyle(color: Colors.white, fontSize: 15),
         ),
         dialogTheme: DialogThemeData(

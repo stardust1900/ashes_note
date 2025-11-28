@@ -106,7 +106,6 @@ class SyncService {
             localBytes,
             message,
             branch: branch,
-            sha: remoteSha,
           );
         } catch (e) {
           // 可在此记录或抛出错误，当前简单继续

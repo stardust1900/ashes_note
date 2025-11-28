@@ -307,6 +307,10 @@ class _SettingsViewState extends State<SettingsView> {
                     var (owner, repo) = git.getOwnerRepoFromUrl(_remoteUrl!);
                     print('开始同步仓库 $owner/$repo');
                     git.pull(owner, repo, _workingDirectory!);
+                    SPUtil.set(
+                      "lastPullTime",
+                      DateTime.now().toIso8601String(),
+                    );
                   },
                   child: Text('同步仓库'),
                 ),
