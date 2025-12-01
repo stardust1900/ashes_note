@@ -1,129 +1,183 @@
 import 'package:flutter/material.dart';
 import 'package:sidebarx/sidebarx.dart';
 
-// 极简风格主题
+// 主题与侧边栏风格（极简、层次清晰）
 final ThemeData ashesNoteMinimalTheme = ThemeData(
   brightness: Brightness.light,
-  primaryColor: Colors.white,
-  scaffoldBackgroundColor: Colors.white,
-  colorScheme: ColorScheme.light(
-    primary: Colors.black,
-    secondary: Colors.grey[800]!,
+  primaryColor: const Color(0xFF685BFF),
+  canvasColor: Colors.white,
+  scaffoldBackgroundColor: const Color(0xFFF6F7FB),
+  colorScheme: const ColorScheme.light(
+    primary: Color(0xFF685BFF),
+    secondary: Color(0xFF5F5FA7),
+    background: Color(0xFFF6F7FB),
     surface: Colors.white,
-    onPrimary: Colors.black,
-    onSecondary: Colors.black,
-    onSurface: Colors.black,
+    onPrimary: Colors.white,
+    onSecondary: Colors.white,
+    onBackground: Colors.black87,
+    onSurface: Colors.black87,
   ),
-
-  // 应用栏主题
   appBarTheme: const AppBarTheme(
     backgroundColor: Colors.white,
     elevation: 0,
-    iconTheme: IconThemeData(color: Colors.black),
+    iconTheme: IconThemeData(color: Colors.black54),
     titleTextStyle: TextStyle(
-      color: Colors.black,
-      fontSize: 20,
-      fontWeight: FontWeight.bold,
-    ),
-  ),
-
-  // 文本主题 - 增强层次感
-  textTheme: const TextTheme(
-    bodyMedium: TextStyle(color: Colors.black, fontSize: 16),
-    headlineMedium: TextStyle(
-      color: Colors.black,
-      fontSize: 28,
-      fontWeight: FontWeight.bold,
-    ),
-    // 新增：专门用于笔记本标题
-    titleLarge: TextStyle(
-      color: Colors.black,
+      color: Colors.black87,
       fontSize: 18,
       fontWeight: FontWeight.w600,
-      letterSpacing: -0.3,
     ),
-    // 新增：专门用于笔记标题
-    bodyLarge: TextStyle(
-      color: Colors.grey,
-      fontSize: 15,
-      fontWeight: FontWeight.normal,
-      height: 1.4,
-    ),
-    // 建议新增：选中笔记的专用样式
+  ),
+  textTheme: const TextTheme(
+    bodyMedium: TextStyle(color: Colors.black87, fontSize: 14),
     titleMedium: TextStyle(
-      // 可以使用更高层级的样式
-      color: Colors.black, // 深黑色，突出显示
-      fontSize: 15,
-      fontWeight: FontWeight.w600, // 中等加粗，增加视觉重量
-      height: 1.4,
+      color: Colors.black87,
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+    ),
+    headlineSmall: TextStyle(
+      color: Colors.black87,
+      fontSize: 20,
+      fontWeight: FontWeight.w700,
     ),
   ),
-
-  // 分割线颜色
-  dividerColor: Colors.grey[300],
-
-  // 图标主题
-  iconTheme: const IconThemeData(color: Colors.black),
-
-  // 浮动操作按钮主题
-  floatingActionButtonTheme: const FloatingActionButtonThemeData(
-    backgroundColor: Colors.black,
-    foregroundColor: Colors.white,
-    elevation: 0,
-  ),
-
-  // 卡片主题 - 为笔记本容器优化
-  cardTheme: CardThemeData(
+  dividerColor: const Color(0xFFE9E9F0),
+  cardTheme: const CardThemeData(
     color: Colors.white,
-    elevation: 1,
-    margin: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+    elevation: 2,
+    margin: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
     shape: RoundedRectangleBorder(
-      side: BorderSide(color: Colors.grey[100]!, width: 1),
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.all(Radius.circular(10)),
     ),
-    shadowColor: Colors.black.withOpacity(0.1),
   ),
-
-  // 列表瓦片主题 - 专门优化笔记项
-  listTileTheme: ListTileThemeData(
-    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-    dense: true, // 紧凑布局
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+  iconTheme: const IconThemeData(color: Colors.black54),
+  floatingActionButtonTheme: const FloatingActionButtonThemeData(
+    backgroundColor: Color(0xFF685BFF),
+    elevation: 4,
   ),
 );
 
 // SidebarX 极简风格
-final SidebarXTheme ashesSidebarTheme = SidebarXTheme(
-  decoration: BoxDecoration(color: Colors.grey[200]),
-  selectedTextStyle: const TextStyle(
-    color: Colors.black,
-    fontWeight: FontWeight.bold,
+final SidebarXTheme ashesSidebarMinimalTheme = SidebarXTheme(
+  width: 72,
+  decoration: const BoxDecoration(
+    color: Colors.white,
+    border: Border(right: BorderSide(color: Color(0xFFECECF2), width: 1)),
   ),
-  selectedIconTheme: const IconThemeData(color: Colors.black),
-  textStyle: const TextStyle(color: Colors.grey),
-  iconTheme: const IconThemeData(color: Colors.grey),
-  hoverColor: Colors.grey[200],
-  hoverTextStyle: const TextStyle(color: Colors.black),
-  hoverIconTheme: const IconThemeData(color: Colors.black),
+  selectedIconTheme: const IconThemeData(color: Color(0xFF685BFF), size: 22),
+  textStyle: const TextStyle(
+    color: Colors.black54,
+    fontWeight: FontWeight.w700,
+  ),
+  iconTheme: const IconThemeData(color: Colors.black38, size: 20),
+  hoverColor: const Color(0xFFF2F4FF),
+  hoverIconTheme: const IconThemeData(color: Color(0xFF3B3B8E)),
+  hoverTextStyle: const TextStyle(color: Color(0xFF3B3B8E)),
   selectedItemDecoration: BoxDecoration(
-    color: Colors.grey[200],
-    borderRadius: BorderRadius.circular(8),
+    color: const Color(0xFFF2F4FF),
+    borderRadius: BorderRadius.circular(10),
+  ),
+  // Removed showToggleButton as it is not defined in SidebarXTheme
+);
+
+final SidebarXTheme ashesSidebarExtendedMinimalTheme = ashesSidebarMinimalTheme
+    .copyWith(width: 200);
+
+final ThemeData ashesDarkTheme = ThemeData(
+  primaryColor: Colors.blue,
+  canvasColor: Color.fromARGB(255, 48, 48, 48),
+  scaffoldBackgroundColor: Colors.grey[800],
+  textTheme: const TextTheme(
+    headlineMedium: TextStyle(
+      color: Colors.white,
+      fontSize: 20,
+      fontWeight: FontWeight.w800,
+    ),
+    headlineSmall: TextStyle(
+      color: Colors.white,
+      fontSize: 15,
+      fontWeight: FontWeight.w800,
+    ),
+    labelMedium: TextStyle(color: Colors.white, fontSize: 30),
+    labelSmall: TextStyle(
+      color: Colors.white,
+      fontSize: 18,
+      fontWeight: FontWeight.w600,
+    ),
+    bodyMedium: TextStyle(color: Colors.white, fontSize: 15),
+  ),
+  dialogTheme: DialogThemeData(
+    backgroundColor: Colors.grey[800],
+    titleTextStyle: const TextStyle(color: Colors.white),
+    contentTextStyle: const TextStyle(color: Colors.white),
+  ),
+  buttonTheme: const ButtonThemeData(
+    buttonColor: Colors.blue,
+    textTheme: ButtonTextTheme.primary,
+  ),
+  iconTheme: const IconThemeData(color: Colors.white),
+  textButtonTheme: TextButtonThemeData(
+    style: TextButton.styleFrom(foregroundColor: Colors.blue),
+  ),
+  elevatedButtonTheme: ElevatedButtonThemeData(
+    style: ElevatedButton.styleFrom(foregroundColor: Colors.white),
   ),
 );
 
-final SidebarXTheme ashesSidebarExtendedTheme = SidebarXTheme(
-  width: 200,
-  decoration: BoxDecoration(color: Colors.grey[200]),
-  selectedTextStyle: const TextStyle(
-    color: Colors.black,
-    fontWeight: FontWeight.bold,
+final SidebarXTheme ashesSidebarDarkTheme = SidebarXTheme(
+  margin: const EdgeInsets.all(10),
+  decoration: BoxDecoration(
+    color: Color.fromARGB(255, 48, 48, 48),
+    borderRadius: BorderRadius.circular(20),
   ),
-  selectedIconTheme: const IconThemeData(color: Colors.black),
-  textStyle: const TextStyle(color: Colors.grey),
-  iconTheme: const IconThemeData(color: Colors.grey),
-  hoverColor: Colors.grey[400],
+  hoverColor: Color(0xFF464667),
+  textStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
+  selectedTextStyle: const TextStyle(color: Colors.white),
+  hoverTextStyle: const TextStyle(
+    color: Colors.white,
+    fontWeight: FontWeight.w500,
+  ),
+  itemTextPadding: const EdgeInsets.only(left: 30),
+  selectedItemTextPadding: const EdgeInsets.only(left: 30),
+  itemDecoration: BoxDecoration(
+    borderRadius: BorderRadius.circular(10),
+    border: Border.all(color: Color.fromARGB(255, 48, 48, 48)),
+  ),
   selectedItemDecoration: BoxDecoration(
-    color: Colors.grey[200],
-    borderRadius: BorderRadius.circular(8),
+    borderRadius: BorderRadius.circular(10),
+    border: Border.all(
+      color: Color(0xFF5F5FA7).withOpacity(0.6).withOpacity(0.37),
+    ),
+    gradient: const LinearGradient(
+      colors: [Color(0xFF3E3E61), Color.fromARGB(255, 48, 48, 48)],
+    ),
+    boxShadow: [
+      BoxShadow(color: Colors.black.withOpacity(0.28), blurRadius: 30),
+    ],
   ),
+  iconTheme: IconThemeData(color: Colors.white.withOpacity(0.7), size: 20),
+  selectedIconTheme: const IconThemeData(color: Colors.white, size: 20),
+);
+final SidebarXTheme ashesSidebarExtendedDarkTheme = ashesSidebarDarkTheme
+    .copyWith(width: 200);
+
+class AshesTheme {
+  ThemeData _mainTheme;
+  SidebarXTheme _sidebarTheme;
+  SidebarXTheme _sidebarExtendedTheme;
+  AshesTheme(this._mainTheme, this._sidebarTheme, this._sidebarExtendedTheme);
+  ThemeData get mainTheme => _mainTheme;
+  SidebarXTheme get sidebarTheme => _sidebarTheme;
+  SidebarXTheme get sidebarExtendedTheme => _sidebarExtendedTheme;
+}
+
+final AshesTheme lightTheme = AshesTheme(
+  ashesNoteMinimalTheme,
+  ashesSidebarMinimalTheme,
+  ashesSidebarExtendedMinimalTheme,
+);
+
+final AshesTheme darkTheme = AshesTheme(
+  ashesDarkTheme,
+  ashesSidebarDarkTheme,
+  ashesSidebarExtendedDarkTheme,
 );

@@ -123,12 +123,6 @@ class _SettingsViewState extends State<SettingsView> {
                   icon: const Icon(Icons.folder_open),
                   color: Colors.blue,
                   onPressed: () async {
-                    // String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
-                    // if (selectedDirectory != null) {
-                    //   setState(() {
-                    //     _workingDirectory = selectedDirectory;
-                    //   });
-                    // }
                     FileUtil().getApplicationDocumentsPath().then((rootPath) {
                       print('rootPath: $rootPath');
                       setState(() {
@@ -326,37 +320,6 @@ class _SettingsViewState extends State<SettingsView> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: ElevatedButton(
-            onPressed: _saveSettings,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
-            child: const Text('保存设置'),
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: ElevatedButton(
-            //onPressed: _initializeAndSyncRepository,
-            onPressed: () {},
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
-            child: const Text('初始化并同步仓库'),
-          ),
-        ),
-      ],
     );
   }
 

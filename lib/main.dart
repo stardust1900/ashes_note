@@ -1,3 +1,4 @@
+import 'package:ashes_note/ashes_theme.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 // import 'package:ashes_note/views/editor_view.dart';
@@ -6,7 +7,6 @@ import 'package:ashes_note/views/flyme_note_view.dart';
 import 'package:ashes_note/views/settings_view.dart';
 import 'package:flutter/material.dart';
 import 'package:sidebarx/sidebarx.dart';
-// import 'ashes_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,46 +25,7 @@ class AshesNoteApp extends StatelessWidget {
     return MaterialApp(
       title: '草灰笔记',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primaryColor: Colors.blue,
-        canvasColor: canvasColor,
-        scaffoldBackgroundColor: Colors.grey[800],
-        textTheme: const TextTheme(
-          headlineMedium: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-          ),
-          headlineSmall: TextStyle(
-            color: Colors.white,
-            fontSize: 15,
-            fontWeight: FontWeight.w800,
-          ),
-          labelMedium: TextStyle(color: Colors.white, fontSize: 30),
-          labelSmall: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-          bodyMedium: TextStyle(color: Colors.white, fontSize: 15),
-        ),
-        dialogTheme: DialogThemeData(
-          backgroundColor: Colors.grey[800],
-          titleTextStyle: const TextStyle(color: Colors.white),
-          contentTextStyle: const TextStyle(color: Colors.white),
-        ),
-        buttonTheme: const ButtonThemeData(
-          buttonColor: Colors.blue,
-          textTheme: ButtonTextTheme.primary,
-        ),
-        iconTheme: const IconThemeData(color: Colors.white),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(foregroundColor: Colors.blue),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(foregroundColor: Colors.white),
-        ),
-      ),
+      theme: darkTheme.mainTheme,
       home: Builder(
         builder: (context) {
           //从本地存储中读取工作目录，判断工作目录是否设置
@@ -138,45 +99,8 @@ class AshesNoteSidebarX extends StatelessWidget {
   Widget build(BuildContext context) {
     return SidebarX(
       controller: _controller,
-      theme: SidebarXTheme(
-        margin: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: canvasColor,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        hoverColor: scaffoldBackgroundColor,
-        textStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
-        selectedTextStyle: const TextStyle(color: Colors.white),
-        hoverTextStyle: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w500,
-        ),
-        itemTextPadding: const EdgeInsets.only(left: 30),
-        selectedItemTextPadding: const EdgeInsets.only(left: 30),
-        itemDecoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: canvasColor),
-        ),
-        selectedItemDecoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: actionColor.withOpacity(0.37)),
-          gradient: const LinearGradient(
-            colors: [accentCanvasColor, canvasColor],
-          ),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.28), blurRadius: 30),
-          ],
-        ),
-        iconTheme: IconThemeData(
-          color: Colors.white.withOpacity(0.7),
-          size: 20,
-        ),
-        selectedIconTheme: const IconThemeData(color: Colors.white, size: 20),
-      ),
-      extendedTheme: const SidebarXTheme(
-        width: 200,
-        decoration: BoxDecoration(color: canvasColor),
-      ),
+      theme: darkTheme.sidebarTheme,
+      extendedTheme: darkTheme.sidebarExtendedTheme,
       footerDivider: Divider(color: Theme.of(context).dividerColor),
       // headerBuilder: (context, extended) => SizedBox(
       //   height: 100,
@@ -246,12 +170,3 @@ class AshesNoteScreens extends StatelessWidget {
     );
   }
 }
-
-const primaryColor = Color(0xFF685BFF);
-// const canvasColor = Color(0xFF2E2E48);
-const canvasColor = Color.fromARGB(255, 48, 48, 48);
-const scaffoldBackgroundColor = Color(0xFF464667);
-const accentCanvasColor = Color(0xFF3E3E61);
-const white = Colors.white;
-final actionColor = const Color(0xFF5F5FA7).withOpacity(0.6);
-final divider = Divider(color: white.withOpacity(0.3), height: 1);
