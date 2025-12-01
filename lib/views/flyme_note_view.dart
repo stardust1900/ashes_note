@@ -9,11 +9,13 @@ import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 class NotebookHomePage extends StatefulWidget {
+  const NotebookHomePage({super.key});
+
   @override
-  _NotebookHomePageState createState() => _NotebookHomePageState();
+  NotebookHomePageState createState() => NotebookHomePageState();
 }
 
-class _NotebookHomePageState extends State<NotebookHomePage> {
+class NotebookHomePageState extends State<NotebookHomePage> {
   // 模拟数据
   final List<Notebook> _notebooks = [];
   late String workingDirectory;
@@ -802,7 +804,7 @@ class NoteDetailState extends State<NoteDetailPage> {
         ),
         actions: [
           Padding(
-            padding: EdgeInsets.only(right: 0.0),
+            padding: EdgeInsets.only(right: 16.0),
             child: IconButton(
               icon: Icon(
                 Icons.edit,
@@ -818,7 +820,7 @@ class NoteDetailState extends State<NoteDetailPage> {
             ),
           ),
           Padding(
-            padding: EdgeInsets.only(right: 32.0),
+            padding: EdgeInsets.only(right: 16.0),
             child: IconButton(
               icon: Icon(
                 Icons.preview,
@@ -898,31 +900,98 @@ class NoteDetailState extends State<NoteDetailPage> {
             data: note.content,
             selectable: false,
             styleSheet: MarkdownStyleSheet(
-              p: TextStyle(fontSize: 14, color: Colors.white70),
+              a: TextStyle(
+                color: Colors.lightBlueAccent,
+                decoration: TextDecoration.underline,
+              ),
+              p: TextStyle(fontSize: 14, color: Colors.white70, height: 1.6),
               h1: TextStyle(
-                fontSize: 24,
+                fontSize: 26,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
               ),
               h2: TextStyle(
-                fontSize: 20,
+                fontSize: 22,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
               ),
               h3: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+              h4: TextStyle(
                 fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+              h5: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+              h6: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white70,
+              ),
+              em: TextStyle(fontStyle: FontStyle.italic, color: Colors.white70),
+              strong: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
               ),
               code: TextStyle(
-                backgroundColor: Colors.grey[800],
-                color: Colors.orange,
+                backgroundColor: Colors.grey[850],
+                color: Colors.orangeAccent,
                 fontFamily: 'Monospace',
+                fontSize: 13,
               ),
-              codeblockPadding: EdgeInsets.all(8),
+              codeblockPadding: EdgeInsets.all(12),
               codeblockDecoration: BoxDecoration(
                 color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black38,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              blockquote: TextStyle(
+                color: Colors.grey[300],
+                fontStyle: FontStyle.italic,
+              ),
+              blockquoteDecoration: BoxDecoration(
+                color: Colors.grey[900],
+                border: Border(
+                  left: BorderSide(color: Colors.blueAccent, width: 4),
+                ),
                 borderRadius: BorderRadius.circular(4),
+              ),
+              listBullet: TextStyle(color: Colors.white70),
+              checkbox: TextStyle(color: Colors.white70),
+              tableHead: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              tableBody: TextStyle(color: Colors.white70),
+              tableCellsDecoration: BoxDecoration(
+                color: Colors.transparent,
+                border: Border.all(color: Colors.grey.shade800, width: 0.5),
+              ),
+              horizontalRuleDecoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: Colors.grey.shade700, width: 1),
+                ),
+              ),
+              blockSpacing: 8.0,
+              listIndent: 24.0,
+              del: TextStyle(
+                decoration: TextDecoration.lineThrough,
+                decorationColor: Colors.yellow,
+                color: Colors.white70,
+                fontStyle: FontStyle.italic,
               ),
             ),
             shrinkWrap: true,

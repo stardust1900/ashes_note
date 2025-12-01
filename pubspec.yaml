@@ -53,6 +53,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -95,3 +96,32 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  # 通用图标路径，如果未指定平台专用路径，则默认使用此路径
+  image_path: "assets/icons/ashes_note_logo.png"
+  
+  # Android 配置
+  android: true
+  # 如果需要自适应图标，取消以下注释并配置前景和背景
+  # adaptive_icon_foreground: "assets/icons/adaptive_foreground.png"
+  # adaptive_icon_background: "#FFFFFF"
+  
+  # iOS 配置
+  ios: true
+  remove_alpha_ios: true # 推荐设置，移除iOS图标的透明通道
+
+  # Web 配置
+  web:
+    generate: true
+    # theme_color: "#FF1A237E"   # 可选：定义PWA主题色
+    # background_color: "#FFFFFFFF" # 可选：定义PWA背景色
+
+  # Windows 配置
+  windows:
+    generate: true
+    # icon_size: 256  # 可选：图标尺寸，范围48-256
+
+  # macOS 配置
+  macos:
+    generate: true

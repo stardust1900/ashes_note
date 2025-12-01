@@ -108,7 +108,7 @@ class _SettingsViewState extends State<SettingsView> {
                   child: TextField(
                     decoration: const InputDecoration(
                       labelText: '工作目录路径',
-                      border: OutlineInputBorder(),
+                      // border: OutlineInputBorder(),
                     ),
                     controller: TextEditingController(text: _workingDirectory),
                     onChanged: (value) {
@@ -158,6 +158,7 @@ class _SettingsViewState extends State<SettingsView> {
 
   Widget _buildGitConfigSection() {
     return Card(
+      // color: Theme.of(context).canvasColor,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -169,7 +170,7 @@ class _SettingsViewState extends State<SettingsView> {
               dropdownColor: Colors.grey[300],
               decoration: const InputDecoration(
                 labelText: 'Git平台',
-                border: OutlineInputBorder(),
+                // border: OutlineInputBorder(),
               ),
               initialValue: _gitPlatform,
               items: [
@@ -200,7 +201,7 @@ class _SettingsViewState extends State<SettingsView> {
               controller: _tokenController,
               decoration: InputDecoration(
                 labelText: 'Personal Token',
-                border: OutlineInputBorder(),
+                // border: OutlineInputBorder(),
                 hintText: '输入您的Git Personal Token',
                 suffixIcon: IconButton(
                   icon: Icon(
@@ -314,6 +315,17 @@ class _SettingsViewState extends State<SettingsView> {
                     );
                   },
                   child: Text('同步仓库'),
+                ),
+
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  onPressed: () {
+                    SPUtil.clear();
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(const SnackBar(content: Text('缓存已清空')));
+                  },
+                  child: Text('清空缓存'),
                 ),
               ],
             ),

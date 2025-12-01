@@ -61,7 +61,7 @@ class AshesNoteApp extends StatelessWidget {
             key: _key,
             appBar: isSmallScreen
                 ? AppBar(
-                    title: Text('灰烬笔记'),
+                    title: Text('草灰笔记'),
                     leading: IconButton(
                       onPressed: () {
                         _key.currentState?.openDrawer();

@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="ashes_note"
+        android:label="草灰笔记"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
