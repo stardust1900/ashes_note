@@ -97,9 +97,6 @@ class GiteeService extends GitService {
     final uri = Uri.parse('$_baseUrl/repos/$owner/$repo$query');
 
     try {
-      // 需要在文件顶部引入：
-      // import 'package:http/http.dart' as http;
-      // import 'dart:convert';
       final response = await http.get(uri);
       if (response.statusCode == 200) {
         return json.decode(response.body) as Map<String, dynamic>;

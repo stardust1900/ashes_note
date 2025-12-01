@@ -316,17 +316,6 @@ class _SettingsViewState extends State<SettingsView> {
                   },
                   child: Text('同步仓库'),
                 ),
-
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                  onPressed: () {
-                    SPUtil.clear();
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('缓存已清空')));
-                  },
-                  child: Text('清空缓存'),
-                ),
               ],
             ),
           ],
