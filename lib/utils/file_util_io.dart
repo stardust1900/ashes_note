@@ -110,6 +110,20 @@ class FileUtilImpl implements FileUtil {
     final dir = io.Directory('$rootPath/$path');
     if (!await dir.exists()) return <Note>[];
     final entities = await dir.list().toList();
+    // 按最后修改时间降序排序
+    final pairs = await Future.wait(
+      entities.map((e) async {
+        final lm = e is io.File
+            ? await e.lastModified()
+            : DateTime.fromMillisecondsSinceEpoch(0);
+        return MapEntry(e, lm);
+      }),
+    );
+    pairs.sort((a, b) => b.value.compareTo(a.value));
+    entities
+      ..clear()
+      ..addAll(pairs.map((p) => p.key).toList());
+
     for (var entity in entities) {
       if (entity is io.File) {
         final content = await entity.readAsString();

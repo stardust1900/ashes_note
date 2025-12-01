@@ -30,6 +30,8 @@ class _SettingsViewState extends State<SettingsView> {
   TextEditingController? _tokenController;
   TextEditingController? _remoteUrlController;
 
+  bool _isLoading = false;
+
   @override
   void initState() {
     super.initState();
@@ -284,7 +286,7 @@ class _SettingsViewState extends State<SettingsView> {
                           SPUtil.set<String>('giteeToken', _token!);
                           SPUtil.set<String>('giteeRemoteUrl', _remoteUrl!);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('设置已保存')),
+                            const SnackBar(content: Text('配置已保存')),
                           );
                         })
                         .catchError((error) {
@@ -297,24 +299,57 @@ class _SettingsViewState extends State<SettingsView> {
                   child: Text('保存配置'),
                 ),
                 const SizedBox(width: 8),
-                ElevatedButton(
+                ElevatedButton.icon(
+                  icon: _isLoading ? Icon(Icons.downloading) : Icon(Icons.sync),
+                  label: Text('同步仓库'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
+                    backgroundColor: _isLoading ? Colors.grey : Colors.green,
                   ),
                   onPressed: () {
+                    if (_remoteUrl == null ||
+                        _token == null ||
+                        _workingDirectory == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('请填写完整的Git配置和工作目录')),
+                      );
+                      return;
+                    }
+                    if (_isLoading) {
+                      return;
+                    }
                     GitService git = GitFactory.getGitService(
                       _gitPlatform,
                       _token!,
                     );
                     var (owner, repo) = git.getOwnerRepoFromUrl(_remoteUrl!);
                     print('开始同步仓库 $owner/$repo');
-                    git.pull(owner, repo, _workingDirectory!);
+                    setState(() {
+                      _isLoading = true;
+                    });
+                    git
+                        .pull(owner, repo, _workingDirectory!)
+                        .then((_) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('仓库同步完成')),
+                          );
+                          setState(() {
+                            _isLoading = false;
+                          });
+                        })
+                        .catchError((error) {
+                          print('Error pulling repo: $error');
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('仓库同步失败: $error')),
+                          );
+                          setState(() {
+                            _isLoading = false;
+                          });
+                        });
                     SPUtil.set(
                       "lastPullTime",
                       DateTime.now().toIso8601String(),
                     );
                   },
-                  child: Text('同步仓库'),
                 ),
               ],
             ),
