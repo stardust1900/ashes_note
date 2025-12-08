@@ -27,6 +27,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
 
   GitService? git;
   String? remoteUrl;
+  bool _isSyncing = false;
 
   @override
   void initState() {
@@ -93,11 +94,12 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       type: 'directory',
     );
     for (var book in bookList) {
+      print('workingDirectory: $workingDirectory, book: $book');
       final List<Note> notes = await FileUtil().listNotes(
         workingDirectory,
         book,
       );
-      // print('notebookes: $book , notes: $notes');
+      print('notebookes: $book , notes: $notes');
       _notebooks.add(Notebook(name: book, notes: notes, color: Colors.blue));
     }
   }
@@ -272,7 +274,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
           ),
           IconButton(
             icon: Icon(Icons.sync),
-            color: Colors.blue,
+            color: _isSyncing ? Colors.grey : Colors.blue,
             onPressed: () {
               if (git == null || remoteUrl == null) {
                 ScaffoldMessenger.of(
@@ -281,13 +283,37 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 return;
               }
               var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+              if (_isSyncing) {
+                return;
+              }
               print('开始同步仓库 $owner/$repo');
-              git!.push(
-                owner,
-                repo,
-                workingDirectory,
-                deleteRemoteMissing: true,
-              );
+              setState(() {
+                _isSyncing = true;
+              });
+              git!
+                  .push(
+                    owner,
+                    repo,
+                    workingDirectory,
+                    deleteRemoteMissing: true,
+                  )
+                  .then((_) {
+                    setState(() {
+                      _isSyncing = false;
+                    });
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(const SnackBar(content: Text('仓库同步完成')));
+                  })
+                  .catchError((error) {
+                    setState(() {
+                      _isSyncing = false;
+                    });
+                    print('Error pushing repo: $error');
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('仓库同步失败: $error')));
+                  });
             },
           ),
         ],
@@ -727,6 +753,8 @@ class NoteDetailState extends State<NoteDetailPage> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _textController = TextEditingController();
 
+  final ScrollController _scrollController = ScrollController();
+
   bool _isEditing = true; // 切换编辑/预览模式
   @override
   void initState() {
@@ -851,15 +879,11 @@ class NoteDetailState extends State<NoteDetailPage> {
         ],
         elevation: 0,
       ),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 代码编辑器区域
-            _isEditing ? _buildEditor() : _buildPreview(),
-          ],
-        ),
+      body: Column(
+        children: [
+          // 代码编辑器区域
+          Expanded(child: _isEditing ? _buildEditor() : _buildPreview()),
+        ],
       ),
     );
   }
@@ -870,7 +894,7 @@ class NoteDetailState extends State<NoteDetailPage> {
       child: TextField(
         controller: _textController,
         maxLines: null, // 允许多行
-        // expands: true, // 填充可用空间
+        expands: true, // 填充可用空间
         decoration: InputDecoration(
           border: InputBorder.none,
           hintText: '开始输入内容...',
@@ -892,10 +916,15 @@ class NoteDetailState extends State<NoteDetailPage> {
   }
 
   Widget _buildPreview() {
-    return SelectionArea(
-      child: Container(
-        padding: EdgeInsets.all(16),
-        child: SingleChildScrollView(
+    return Scrollbar(
+      thumbVisibility: true,
+      trackVisibility: true,
+      controller: _scrollController,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        physics: const AlwaysScrollableScrollPhysics(), // 强制可滚动手势
+        controller: _scrollController,
+        child: SelectionArea(
           child: Markdown(
             data: note.content,
             selectable: false,

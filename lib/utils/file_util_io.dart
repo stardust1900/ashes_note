@@ -108,8 +108,13 @@ class FileUtilImpl implements FileUtil {
   Future<List<Note>> listNotes(String rootPath, String path) async {
     final notes = <Note>[];
     final dir = io.Directory('$rootPath/$path');
+    print('检查目录路径: ${dir.path}');
+    print('目录是否存在: ${await dir.exists()}');
     if (!await dir.exists()) return <Note>[];
+
     final entities = await dir.list().toList();
+
+    print('entities: $entities');
     // 按最后修改时间降序排序
     final pairs = await Future.wait(
       entities.map((e) async {

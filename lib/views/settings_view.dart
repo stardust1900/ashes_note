@@ -3,6 +3,7 @@ import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
+import 'package:path_provider/path_provider.dart';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({super.key});
@@ -29,6 +30,7 @@ class _SettingsViewState extends State<SettingsView> {
   // TextEditingController? _workingDirectoryController;
   TextEditingController? _tokenController;
   TextEditingController? _remoteUrlController;
+  late final TextEditingController _workingDirectoryController;
 
   bool _isLoading = false;
 
@@ -38,23 +40,38 @@ class _SettingsViewState extends State<SettingsView> {
     _loadSettings();
     _tokenController = TextEditingController(text: _token);
     _remoteUrlController = TextEditingController(text: _remoteUrl);
+    _workingDirectoryController = TextEditingController(
+      text: _workingDirectory,
+    );
+
+    getApplicationDocumentsDirectory().then((value) {
+      print('getApplicationDocumentsDirectory: $value');
+    });
+
+    getDownloadsDirectory().then((value) {
+      print('getDownloadsDirectory: $value');
+    });
   }
 
   @override
   void dispose() {
     _tokenController?.dispose();
     _remoteUrlController?.dispose();
+    _workingDirectoryController.dispose();
     super.dispose();
   }
 
   Future<void> _loadSettings() async {
+    _workingDirectory = SPUtil.get<String>('workingDirectory', '');
+    if (_workingDirectory == '') {
+      _workingDirectory = (await getApplicationDocumentsDirectory()).path;
+    }
+    _gitPlatform = SPUtil.get<String>('gitPlatform', 'gitee');
+    _giteeToken = SPUtil.get<String>('giteeToken', '');
+    _giteeRemoteUrl = SPUtil.get<String>('giteeRemoteUrl', '');
+    _githubToken = SPUtil.get<String>('githubToken', '');
+    _githubRemoteUrl = SPUtil.get<String>('githubRemoteUrl', '');
     setState(() {
-      _workingDirectory = SPUtil.get<String>('workingDirectory', '');
-      _gitPlatform = SPUtil.get<String>('gitPlatform', 'gitee');
-      _giteeToken = SPUtil.get<String>('giteeToken', '');
-      _giteeRemoteUrl = SPUtil.get<String>('giteeRemoteUrl', '');
-      _githubToken = SPUtil.get<String>('githubToken', '');
-      _githubRemoteUrl = SPUtil.get<String>('githubRemoteUrl', '');
       if (_gitPlatform == 'gitee') {
         _token = _giteeToken;
         _remoteUrl = _giteeRemoteUrl;
@@ -66,7 +83,6 @@ class _SettingsViewState extends State<SettingsView> {
   }
 
   Future<void> _saveSettings() async {
-    print('_saveSettings _workingDirectory: $_workingDirectory');
     if (_workingDirectory != '') {
       await SPUtil.set<String>('workingDirectory', _workingDirectory!);
     }
@@ -112,10 +128,11 @@ class _SettingsViewState extends State<SettingsView> {
                       labelText: '工作目录路径',
                       // border: OutlineInputBorder(),
                     ),
-                    controller: TextEditingController(text: _workingDirectory),
+                    controller: _workingDirectoryController,
+                    readOnly: true,
                     onChanged: (value) {
                       setState(() {
-                        _workingDirectory = value;
+                        // _workingDirectory = value;
                       });
                     },
                   ),
@@ -129,6 +146,7 @@ class _SettingsViewState extends State<SettingsView> {
                       print('rootPath: $rootPath');
                       setState(() {
                         _workingDirectory = rootPath;
+                        _workingDirectoryController.text = rootPath;
                       });
                       _saveSettings();
                     });
@@ -355,76 +373,6 @@ class _SettingsViewState extends State<SettingsView> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _build(BuildContext context) {
-    final controller = TextEditingController(text: _workingDirectory);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(64, 64, 64, 0),
-      // color: Colors.grey[80],
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  decoration: InputDecoration(
-                    labelText: '工作目录',
-                    // helperStyle: Theme.of(context).textTheme.headlineSmall,
-                    labelStyle: Theme.of(context).textTheme.labelMedium,
-                  ),
-                  controller: controller,
-                  onChanged: (value) {
-                    setState(() {
-                      _workingDirectory = value;
-                    });
-                  },
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ),
-              IconButton(
-                icon: Icon(Icons.folder_open),
-                // color: Colors.white,
-                onPressed: () {
-                  // 使用 file_picker 选择目录：
-                  // 在 pubspec.yaml 添加依赖: file_picker
-                  // 并在文件顶部添加: import 'package:file_picker/file_picker.dart';
-                  // final String? selected = await FilePicker.platform.getDirectoryPath();
-                  // if (selected != null) {
-                  //   setState(() {
-                  //     _workingDirectory = selected;
-                  //   });
-                  // }
-                  // final fileUtil = FileUtil();
-
-                  // fileUtil.resetDirectoryHandle();
-                  FileUtil().getApplicationDocumentsPath().then((rootPath) {
-                    print('rootPath: $rootPath');
-                    setState(() {
-                      _workingDirectory = rootPath;
-                    });
-                    _saveSettings();
-                  });
-                  // final files = await fileUtil.listFiles("");
-                  // print('files: $files');
-                },
-              ),
-            ],
-          ),
-          SizedBox(height: 16),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-            onPressed: () {
-              _saveSettings();
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('设置已保存')));
-            },
-            child: Text('保存'),
-          ),
-        ],
       ),
     );
   }

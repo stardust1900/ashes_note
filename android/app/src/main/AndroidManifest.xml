@@ -3,7 +3,7 @@
         android:label="草灰笔记"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:requestsLegacyExternalStorage="true">
+        android:requestLegacyExternalStorage="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -49,4 +49,8 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <!-- 如果应用需要写入文件，也请添加以下权限 -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- 对于 Android 13 (API 33) 及以上，访问图片等媒体文件可能需要 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- 对于 Android 11 (API 30) 及以上，如需更广泛的管理权限，可申请（但上架商店可能受限） -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 </manifest>

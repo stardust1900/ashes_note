@@ -1,4 +1,4 @@
-package com.example.ashes_note
+package me.wangxuan.ashes_note
 
 import io.flutter.embedding.android.FlutterActivity
 
