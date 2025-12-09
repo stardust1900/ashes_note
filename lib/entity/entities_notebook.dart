@@ -16,11 +16,12 @@ class Note {
   String title;
   String content;
   DateTime lastModified;
-
+  String? notebookName;
   Note({
     required this.id,
     required this.title,
     required this.content,
     required this.lastModified,
+    this.notebookName,
   });
 }

@@ -5,6 +5,7 @@ import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 class NotebookHomePage extends StatefulWidget {
@@ -1001,51 +1002,68 @@ class NoteDetailPage extends StatefulWidget {
 }
 
 class NoteDetailState extends State<NoteDetailPage> {
-  late Note note = widget.note;
+  late Note note;
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _textController = TextEditingController();
 
   // 查找功能相关变量
   final TextEditingController _findController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   bool _showFindPanel = false;
   int _currentFindIndex = -1;
   int _totalMatches = 0;
   List<TextSelection> _matches = [];
-
+  FocusNode _findFocusNode = FocusNode();
   bool _isEditing = true;
+
+  // 快捷键支持
+  final Map<LogicalKeySet, Intent> _shortcuts = {
+    LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyF):
+        const ToggleFindIntent(),
+    LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyF):
+        const ToggleFindIntent(),
+    LogicalKeySet(LogicalKeyboardKey.f3): const FindNextIntent(),
+    LogicalKeySet(LogicalKeyboardKey.shift, LogicalKeyboardKey.f3):
+        const FindPreviousIntent(),
+  };
 
   @override
   void initState() {
     super.initState();
-    _titleController.text = note.title.endsWith('.md')
-        ? note.title.substring(0, note.title.length - 3)
-        : note.title;
+    note = widget.note;
+    _titleController.text = note.title.replaceAll('.md', '');
     _textController.text = note.content;
 
-    _textController.addListener(() {
-      if (_textController.text == note.content) return;
-      note.content = _textController.text;
-      widget.onNoteChanged(note);
-      Timer(const Duration(seconds: 1), () {
-        FileUtil().saveFile(
-          SPUtil.get<String>('workingDirectory', ''),
-          note.id.substring(0, note.id.lastIndexOf('/')),
-          note.title,
-          utf8.encode(note.content),
-        );
-      });
-    });
-
+    _textController.addListener(_onTextChanged);
     _findController.addListener(_onFindTextChanged);
+
+    // 初始化高亮文本
+    _updateHighlightedText();
   }
 
   @override
   void dispose() {
+    _textController.removeListener(_onTextChanged);
+    _findController.removeListener(_onFindTextChanged);
     _titleController.dispose();
     _textController.dispose();
-    _findController.removeListener(_onFindTextChanged);
     _findController.dispose();
+    _scrollController.dispose();
+    _findFocusNode.dispose();
     super.dispose();
+  }
+
+  void _onTextChanged() {
+    if (_textController.text != note.content) {
+      setState(() {
+        note.content = _textController.text;
+        widget.onNoteChanged(note);
+        // 如果正在查找，更新高亮
+        if (_findController.text.isNotEmpty) {
+          _findMatches();
+        }
+      });
+    }
   }
 
   void _onFindTextChanged() {
@@ -1054,11 +1072,13 @@ class NoteDetailState extends State<NoteDetailPage> {
 
   void _findMatches() {
     final query = _findController.text.trim();
+
     if (query.isEmpty) {
       setState(() {
         _matches.clear();
         _currentFindIndex = -1;
         _totalMatches = 0;
+        _updateHighlightedText();
       });
       return;
     }
@@ -1075,27 +1095,125 @@ class NoteDetailState extends State<NoteDetailPage> {
           )
           .toList();
       _totalMatches = _matches.length;
-      if (_matches.isNotEmpty && _currentFindIndex == -1) {
-        _currentFindIndex = 0;
-      } else if (_matches.isEmpty) {
-        _currentFindIndex = -1;
-      }
+      _currentFindIndex = _matches.isNotEmpty ? 0 : -1;
+      _updateHighlightedText();
     });
+
+    if (_matches.isNotEmpty) {
+      _scrollToCurrentMatch();
+    }
   }
 
   void _findNext() {
     if (_totalMatches == 0) return;
+
     setState(() {
       _currentFindIndex = (_currentFindIndex + 1) % _totalMatches;
+      _updateHighlightedText();
     });
+
+    _scrollToCurrentMatch();
   }
 
   void _findPrevious() {
     if (_totalMatches == 0) return;
+
     setState(() {
       _currentFindIndex =
           (_currentFindIndex - 1 + _totalMatches) % _totalMatches;
+      _updateHighlightedText();
     });
+
+    _scrollToCurrentMatch();
+  }
+
+  // 构建高亮文本的TextSpan列表
+  List<TextSpan> _highlightedSpans = [];
+
+  void _updateHighlightedText() {
+    final text = _textController.text;
+    final query = _findController.text.trim();
+
+    if (query.isEmpty || _matches.isEmpty) {
+      _highlightedSpans = [
+        TextSpan(
+          text: text,
+          style: TextStyle(color: Colors.white, fontSize: 14),
+        ),
+      ];
+      return;
+    }
+
+    final spans = <TextSpan>[];
+    int currentStart = 0;
+
+    for (int i = 0; i < _matches.length; i++) {
+      final match = _matches[i];
+
+      // 添加匹配前的文本
+      if (match.start > currentStart) {
+        spans.add(
+          TextSpan(
+            text: text.substring(currentStart, match.start),
+            style: TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        );
+      }
+
+      // 添加匹配的文本，当前匹配项用不同颜色
+      final isCurrent = i == _currentFindIndex;
+      spans.add(
+        TextSpan(
+          text: text.substring(match.start, match.end),
+          style: TextStyle(
+            backgroundColor: isCurrent ? Colors.orange : Colors.yellow,
+            color: isCurrent ? Colors.black : Colors.black87,
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+      );
+
+      currentStart = match.end;
+    }
+
+    // 添加剩余文本
+    if (currentStart < text.length) {
+      spans.add(
+        TextSpan(
+          text: text.substring(currentStart),
+          style: TextStyle(color: Colors.white, fontSize: 14),
+        ),
+      );
+    }
+
+    _highlightedSpans = spans;
+  }
+
+  void _scrollToCurrentMatch() {
+    if (_currentFindIndex < 0 || _currentFindIndex >= _matches.length) return;
+
+    final match = _matches[_currentFindIndex];
+    final text = _textController.text;
+
+    // 计算匹配文本的大致行号（简单估算）
+    final textBeforeMatch = text.substring(0, match.start);
+    final linesBefore = textBeforeMatch.split('\n');
+    final lineCount = linesBefore.length;
+
+    // 估算行高（根据字体大小估算）
+    const estimatedLineHeight = 20.0;
+    final targetOffset = (lineCount - 1) * estimatedLineHeight;
+
+    // 确保滚动位置在合理范围内
+    final maxScrollExtent = _scrollController.position.maxScrollExtent;
+    final clampedOffset = targetOffset.clamp(0.0, maxScrollExtent);
+
+    _scrollController.animateTo(
+      clampedOffset,
+      duration: Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
   }
 
   void _toggleFindPanel() {
@@ -1103,139 +1221,171 @@ class NoteDetailState extends State<NoteDetailPage> {
       _showFindPanel = !_showFindPanel;
       if (!_showFindPanel) {
         _findController.clear();
+        _findMatches(); // 清除高亮
+      } else {
+        // 打开查找面板时自动聚焦
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _findFocusNode.requestFocus();
+        });
       }
+    });
+  }
+
+  void _closeFindPanel() {
+    setState(() {
+      _showFindPanel = false;
+      _findController.clear();
+      _findMatches(); // 清除高亮
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back),
-          onPressed: () {
-            widget.saveNote(note);
-            Navigator.pop(context);
-          },
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _titleController,
-              onEditingComplete: () {
-                widget.onNoteChanged(note, newTitle: _titleController.text);
-              },
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                errorBorder: InputBorder.none,
-                disabledBorder: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
+    return Shortcuts(
+      shortcuts: _shortcuts,
+      child: Actions(
+        actions: {
+          ToggleFindIntent: ToggleFindAction(_toggleFindPanel),
+          FindNextIntent: FindNextAction(_findNext),
+          FindPreviousIntent: FindPreviousAction(_findPrevious),
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            appBar: AppBar(
+              leading: IconButton(
+                icon: Icon(Icons.arrow_back),
+                onPressed: () {
+                  widget.saveNote(note);
+                  Navigator.pop(context);
+                },
               ),
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: _titleController,
+                    onEditingComplete: () {
+                      widget.onNoteChanged(
+                        note,
+                        newTitle: _titleController.text,
+                      );
+                    },
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    decoration: InputDecoration(
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                      isDense: true,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    '修改时间: ${note.lastModified.toString().substring(0, 16)}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+              actions: [
+                if (_isEditing)
+                  IconButton(
+                    icon: Icon(Icons.find_in_page),
+                    onPressed: _toggleFindPanel,
+                    tooltip: '查找 (Ctrl+F)',
+                  ),
+                IconButton(
+                  icon: Icon(
+                    Icons.edit,
+                    color: _isEditing ? Colors.blue : Colors.grey,
+                  ),
+                  onPressed: () => setState(() {
+                    _isEditing = true;
+                  }),
+                  tooltip: '编辑',
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.preview,
+                    color: !_isEditing ? Colors.blue : Colors.grey,
+                  ),
+                  onPressed: () => setState(() {
+                    _isEditing = false;
+                  }),
+                  tooltip: '预览',
+                ),
+                IconButton(
+                  icon: Icon(Icons.save),
+                  onPressed: () {
+                    widget.saveNote(note);
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('笔记已保存')));
+                  },
+                  tooltip: '保存',
+                ),
+              ],
             ),
-            SizedBox(height: 2),
-            Text(
-              note.lastModified.toString().substring(0, 16),
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            body: Column(
+              children: [
+                if (_showFindPanel) _buildFindPanel(),
+                Expanded(child: _isEditing ? _buildEditor() : _buildPreview()),
+              ],
             ),
-          ],
+          ),
         ),
-        actions: [
-          if (_isEditing)
-            IconButton(
-              icon: Icon(Icons.find_in_page),
-              onPressed: _toggleFindPanel,
-              tooltip: '查找',
-            ),
-          IconButton(
-            icon: Icon(
-              Icons.edit,
-              size: 16,
-              color: _isEditing ? Colors.blue : Colors.grey,
-            ),
-            onPressed: () => setState(() {
-              _isEditing = true;
-            }),
-            tooltip: '编辑',
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.preview,
-              size: 16,
-              color: !_isEditing ? Colors.blue : Colors.grey,
-            ),
-            onPressed: () => setState(() {
-              _isEditing = false;
-            }),
-            tooltip: '预览',
-          ),
-          IconButton(
-            icon: Icon(Icons.save, size: 16),
-            onPressed: () {
-              widget.saveNote(note);
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('笔记已保存')));
-            },
-            tooltip: '保存',
-          ),
-        ],
-        elevation: 0,
-      ),
-      body: Column(
-        children: [
-          if (_showFindPanel && _isEditing) _buildFindPanel(),
-          Expanded(child: _isEditing ? _buildEditor() : _buildPreview()),
-        ],
       ),
     );
   }
 
   Widget _buildFindPanel() {
     return Container(
-      padding: EdgeInsets.all(8),
-      color: Colors.grey[900],
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        border: Border(bottom: BorderSide(color: Colors.grey.shade700)),
+      ),
       child: Row(
         children: [
           Expanded(
             child: TextField(
               controller: _findController,
+              focusNode: _findFocusNode,
               style: TextStyle(color: Colors.white, fontSize: 14),
               decoration: InputDecoration(
                 hintText: '查找...',
                 hintStyle: TextStyle(color: Colors.white54),
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
+                  horizontal: 12,
+                  vertical: 8,
                 ),
+                isDense: true,
               ),
             ),
           ),
-          SizedBox(width: 8),
+          SizedBox(width: 12),
           Text(
-            '${_currentFindIndex + 1}/$_totalMatches',
-            style: TextStyle(color: Colors.white70, fontSize: 12),
+            _totalMatches > 0
+                ? '${_currentFindIndex + 1}/$_totalMatches'
+                : '无匹配',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
           ),
           SizedBox(width: 8),
           IconButton(
             icon: Icon(Icons.keyboard_arrow_up, size: 20),
             onPressed: _findPrevious,
-            tooltip: '上一个',
+            tooltip: '上一个 (Shift+F3)',
+            color: _totalMatches > 0 ? Colors.white : Colors.grey,
           ),
           IconButton(
             icon: Icon(Icons.keyboard_arrow_down, size: 20),
             onPressed: _findNext,
-            tooltip: '下一个',
+            tooltip: '下一个 (F3)',
+            color: _totalMatches > 0 ? Colors.white : Colors.grey,
           ),
           IconButton(
             icon: Icon(Icons.close, size: 20),
-            onPressed: _toggleFindPanel,
+            onPressed: _closeFindPanel,
             tooltip: '关闭',
           ),
         ],
@@ -1244,51 +1394,102 @@ class NoteDetailState extends State<NoteDetailPage> {
   }
 
   Widget _buildEditor() {
-    return Container(
-      padding: EdgeInsets.only(left: 16, top: 8, right: 16, bottom: 8),
-      child: TextField(
-        controller: _textController,
-        maxLines: null,
-        expands: true,
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          hintText: '开始输入内容...',
-          hintStyle: TextStyle(color: Colors.white30),
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          controller: _scrollController,
+          padding: EdgeInsets.all(16),
+          child: _findController.text.isNotEmpty && _matches.isNotEmpty
+              ? SelectableText.rich(
+                  TextSpan(children: _highlightedSpans),
+                  style: TextStyle(fontSize: 14),
+                )
+              : TextField(
+                  controller: _textController,
+                  maxLines: null,
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    hintText: '开始输入内容...',
+                    hintStyle: TextStyle(color: Colors.white30),
+                  ),
+                  style: TextStyle(fontSize: 14, color: Colors.white),
+                ),
         ),
-        style: TextStyle(fontSize: 14, color: Colors.white),
-      ),
+        // 在右下角显示查找状态
+        if (_findController.text.isNotEmpty && _totalMatches > 0)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '${_currentFindIndex + 1}/$_totalMatches',
+                style: TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
   Widget _buildPreview() {
-    return Markdown(
-      data: note.content,
-      selectable: true,
-      styleSheet: MarkdownStyleSheet(
-        p: TextStyle(fontSize: 14, color: Colors.white70, height: 1.6),
-        h1: TextStyle(
-          fontSize: 26,
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
-        h2: TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
-        h3: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-          color: Colors.white,
-        ),
-        code: TextStyle(
-          backgroundColor: Colors.grey[850],
-          color: Colors.orangeAccent,
-          fontFamily: 'Monospace',
-          fontSize: 13,
-        ),
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(16),
+      child: Text(
+        note.content,
+        style: TextStyle(fontSize: 14, color: Colors.white70, height: 1.6),
       ),
-      shrinkWrap: true,
     );
+  }
+}
+
+// 快捷键相关的Intent类
+class ToggleFindIntent extends Intent {
+  const ToggleFindIntent();
+}
+
+class FindNextIntent extends Intent {
+  const FindNextIntent();
+}
+
+class FindPreviousIntent extends Intent {
+  const FindPreviousIntent();
+}
+
+// 快捷键相关的Action类
+class ToggleFindAction extends Action<ToggleFindIntent> {
+  final VoidCallback onToggle;
+
+  ToggleFindAction(this.onToggle);
+
+  @override
+  void invoke(covariant ToggleFindIntent intent) {
+    onToggle();
+  }
+}
+
+class FindNextAction extends Action<FindNextIntent> {
+  final VoidCallback onFindNext;
+
+  FindNextAction(this.onFindNext);
+
+  @override
+  void invoke(covariant FindNextIntent intent) {
+    onFindNext();
+  }
+}
+
+class FindPreviousAction extends Action<FindPreviousIntent> {
+  final VoidCallback onFindPrevious;
+
+  FindPreviousAction(this.onFindPrevious);
+
+  @override
+  void invoke(covariant FindPreviousIntent intent) {
+    onFindPrevious();
   }
 }
