@@ -24,7 +24,7 @@ abstract class FileUtil {
   Future<List<Note>> listNotes(String rootPath, String path);
 
   // 目录操作
-  Future<String> getApplicationDocumentsPath();
+  Future<String?> getApplicationDocumentsPath();
   Future<void> createDirectory(String rootPath, String path);
   Future<void> deleteDirectory(String rootPath, String path);
 

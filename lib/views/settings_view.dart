@@ -3,7 +3,6 @@ import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
-import 'package:path_provider/path_provider.dart';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({super.key});
@@ -28,49 +27,24 @@ class _SettingsViewState extends State<SettingsView> {
   bool _isObscure = true;
 
   // TextEditingController? _workingDirectoryController;
-  TextEditingController? _tokenController;
-  TextEditingController? _remoteUrlController;
-  late final TextEditingController _workingDirectoryController;
+  final TextEditingController _tokenController = TextEditingController();
+  final TextEditingController _remoteUrlController = TextEditingController();
+  final TextEditingController _workingDirectoryController =
+      TextEditingController();
 
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
-    _tokenController = TextEditingController(text: _token);
-    _remoteUrlController = TextEditingController(text: _remoteUrl);
-    _workingDirectoryController = TextEditingController(
-      text: _workingDirectory,
-    );
-
-    getApplicationDocumentsDirectory().then((value) {
-      print('getApplicationDocumentsDirectory: $value');
-    });
-
-    getDownloadsDirectory().then((value) {
-      print('getDownloadsDirectory: $value');
-    });
-  }
-
-  @override
-  void dispose() {
-    _tokenController?.dispose();
-    _remoteUrlController?.dispose();
-    _workingDirectoryController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadSettings() async {
+    print('initState');
     _workingDirectory = SPUtil.get<String>('workingDirectory', '');
-    if (_workingDirectory == '') {
-      _workingDirectory = (await getApplicationDocumentsDirectory()).path;
-    }
     _gitPlatform = SPUtil.get<String>('gitPlatform', 'gitee');
     _giteeToken = SPUtil.get<String>('giteeToken', '');
     _giteeRemoteUrl = SPUtil.get<String>('giteeRemoteUrl', '');
     _githubToken = SPUtil.get<String>('githubToken', '');
     _githubRemoteUrl = SPUtil.get<String>('githubRemoteUrl', '');
+
     setState(() {
       if (_gitPlatform == 'gitee') {
         _token = _giteeToken;
@@ -79,7 +53,19 @@ class _SettingsViewState extends State<SettingsView> {
         _token = _githubToken;
         _remoteUrl = _githubRemoteUrl;
       }
+
+      _tokenController.text = _token!;
+      _remoteUrlController.text = _remoteUrl!;
+      _workingDirectoryController.text = _workingDirectory!;
     });
+  }
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    _remoteUrlController.dispose();
+    _workingDirectoryController.dispose();
+    super.dispose();
   }
 
   Future<void> _saveSettings() async {
@@ -142,12 +128,17 @@ class _SettingsViewState extends State<SettingsView> {
                   icon: const Icon(Icons.folder_open),
                   color: Colors.blue,
                   onPressed: () async {
+                    // print('on press workingDirectory: $_workingDirectory');
+
                     FileUtil().getApplicationDocumentsPath().then((rootPath) {
-                      print('rootPath: $rootPath');
+                      // print('rootPath: $rootPath');
                       setState(() {
                         _workingDirectory = rootPath;
-                        _workingDirectoryController.text = rootPath;
+                        _workingDirectoryController.text = rootPath!;
                       });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('android ios无法选择目录，直接保存即可')),
+                      );
                       _saveSettings();
                     });
                   },

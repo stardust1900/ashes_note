@@ -38,6 +38,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
   @override
   void initState() {
     super.initState();
+    print('NotebookHomePageState initState');
     workingDirectory = SPUtil.get<String>('workingDirectory', '');
     String gitPlatform = SPUtil.get<String>('gitPlatform', '');
 

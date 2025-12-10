@@ -5,6 +5,7 @@ import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 class FileUtilImpl implements FileUtil {
   @override
@@ -90,9 +91,14 @@ class FileUtilImpl implements FileUtil {
   }
 
   @override
-  Future<String> getApplicationDocumentsPath() {
+  Future<String?> getApplicationDocumentsPath() {
+    if (io.Platform.isIOS || io.Platform.isAndroid) {
+      return getApplicationDocumentsDirectory().then(
+        (d) => '${d.path}/ashesNote',
+      );
+    }
     // 调用此方法会打开系统原生的目录选择对话框
-    return FilePicker.platform.getDirectoryPath().then((value) => value!);
+    return FilePicker.platform.getDirectoryPath();
   }
 
   FileUtilImpl._internal(); // 私有构造函数
@@ -108,13 +114,13 @@ class FileUtilImpl implements FileUtil {
   Future<List<Note>> listNotes(String rootPath, String path) async {
     final notes = <Note>[];
     final dir = io.Directory('$rootPath/$path');
-    print('检查目录路径: ${dir.path}');
-    print('目录是否存在: ${await dir.exists()}');
+    // print('检查目录路径: ${dir.path}');
+    // print('目录是否存在: ${await dir.exists()}');
     if (!await dir.exists()) return <Note>[];
 
     final entities = await dir.list().toList();
 
-    print('entities: $entities');
+    // print('entities: $entities');
     // 按最后修改时间降序排序
     final pairs = await Future.wait(
       entities.map((e) async {
