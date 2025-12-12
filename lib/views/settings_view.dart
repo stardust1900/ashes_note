@@ -1,4 +1,7 @@
 //设置页面 显示工作目录，可以修改，有保存按钮
+import 'dart:math';
+
+import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:flutter/material.dart';
@@ -27,10 +30,9 @@ class _SettingsViewState extends State<SettingsView> {
   bool _isObscure = true;
 
   // TextEditingController? _workingDirectoryController;
-  final TextEditingController _tokenController = TextEditingController();
-  final TextEditingController _remoteUrlController = TextEditingController();
-  final TextEditingController _workingDirectoryController =
-      TextEditingController();
+  late final TextEditingController _tokenController;
+  late final TextEditingController _remoteUrlController;
+  late final TextEditingController _workingDirectoryController;
 
   bool _isLoading = false;
 
@@ -38,15 +40,15 @@ class _SettingsViewState extends State<SettingsView> {
   void initState() {
     super.initState();
     print('initState');
-    _workingDirectory = SPUtil.get<String>('workingDirectory', '');
-    _gitPlatform = SPUtil.get<String>('gitPlatform', 'gitee');
-    _giteeToken = SPUtil.get<String>('giteeToken', '');
-    _giteeRemoteUrl = SPUtil.get<String>('giteeRemoteUrl', '');
-    _githubToken = SPUtil.get<String>('githubToken', '');
-    _githubRemoteUrl = SPUtil.get<String>('githubRemoteUrl', '');
+    _workingDirectory = SPUtil.get<String>(PrefKeys.workingDirectory, '');
+    _gitPlatform = SPUtil.get<String>(PrefKeys.gitPlatform, GitPlatforms.gitee);
+    _giteeToken = SPUtil.get<String>(PrefKeys.giteeToken, '');
+    _giteeRemoteUrl = SPUtil.get<String>(PrefKeys.giteeRemoteUrl, '');
+    _githubToken = SPUtil.get<String>(PrefKeys.githubToken, '');
+    _githubRemoteUrl = SPUtil.get<String>(PrefKeys.githubRemoteUrl, '');
 
     setState(() {
-      if (_gitPlatform == 'gitee') {
+      if (_gitPlatform == GitPlatforms.gitee) {
         _token = _giteeToken;
         _remoteUrl = _giteeRemoteUrl;
       } else {
@@ -54,9 +56,11 @@ class _SettingsViewState extends State<SettingsView> {
         _remoteUrl = _githubRemoteUrl;
       }
 
-      _tokenController.text = _token!;
-      _remoteUrlController.text = _remoteUrl!;
-      _workingDirectoryController.text = _workingDirectory!;
+      _tokenController = TextEditingController(text: _token!);
+      _remoteUrlController = TextEditingController(text: _remoteUrl!);
+      _workingDirectoryController = TextEditingController(
+        text: _workingDirectory!,
+      );
     });
   }
 
@@ -70,7 +74,7 @@ class _SettingsViewState extends State<SettingsView> {
 
   Future<void> _saveSettings() async {
     if (_workingDirectory != '') {
-      await SPUtil.set<String>('workingDirectory', _workingDirectory!);
+      await SPUtil.set<String>(PrefKeys.workingDirectory, _workingDirectory!);
     }
   }
 
@@ -291,9 +295,23 @@ class _SettingsViewState extends State<SettingsView> {
                         .getRepoInfo(owner, repo)
                         .then((repoInfo) {
                           print('Repo Info: $repoInfo');
-                          SPUtil.set<String>('gitPlatform', _gitPlatform);
-                          SPUtil.set<String>('giteeToken', _token!);
-                          SPUtil.set<String>('giteeRemoteUrl', _remoteUrl!);
+                          SPUtil.set<String>(
+                            PrefKeys.gitPlatform,
+                            _gitPlatform,
+                          );
+                          if (_gitPlatform == GitPlatforms.github) {
+                            SPUtil.set<String>(PrefKeys.githubToken, _token!);
+                            SPUtil.set<String>(
+                              PrefKeys.githubRemoteUrl,
+                              _remoteUrl!,
+                            );
+                          } else if (_gitPlatform == GitPlatforms.gitee) {
+                            SPUtil.set<String>(PrefKeys.giteeToken, _token!);
+                            SPUtil.set<String>(
+                              PrefKeys.giteeRemoteUrl,
+                              _remoteUrl!,
+                            );
+                          }
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('配置已保存')),
                           );
@@ -309,10 +327,12 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton.icon(
-                  icon: _isLoading ? Icon(Icons.downloading) : Icon(Icons.sync),
-                  label: Text('同步仓库'),
+                  icon: _isLoading
+                      ? Icon(Icons.downloading)
+                      : Icon(Icons.cloud_download_outlined),
+                  label: Text('初始化仓库'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _isLoading ? Colors.grey : Colors.green,
+                    backgroundColor: _isLoading ? Colors.grey : Colors.orange,
                   ),
                   onPressed: () {
                     if (_remoteUrl == null ||
@@ -326,37 +346,28 @@ class _SettingsViewState extends State<SettingsView> {
                     if (_isLoading) {
                       return;
                     }
-                    GitService git = GitFactory.getGitService(
-                      _gitPlatform,
-                      _token!,
-                    );
-                    var (owner, repo) = git.getOwnerRepoFromUrl(_remoteUrl!);
-                    print('开始同步仓库 $owner/$repo');
-                    setState(() {
-                      _isLoading = true;
-                    });
-                    git
-                        .pull(owner, repo, _workingDirectory!)
-                        .then((_) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('仓库同步完成')),
-                          );
-                          setState(() {
-                            _isLoading = false;
-                          });
-                        })
-                        .catchError((error) {
-                          print('Error pulling repo: $error');
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('仓库同步失败: $error')),
-                          );
-                          setState(() {
-                            _isLoading = false;
-                          });
-                        });
-                    SPUtil.set(
-                      "lastPullTime",
-                      DateTime.now().toIso8601String(),
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: Text('初始化仓库'),
+                        content: Text('该操作会删除未保存的本地文件，确定要初始化仓库吗？'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: Text('取消'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              _initRepo();
+                              Navigator.pop(context);
+                            },
+                            child: Text(
+                              '初始化',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -366,5 +377,48 @@ class _SettingsViewState extends State<SettingsView> {
         ),
       ),
     );
+  }
+
+  void _initRepo() {
+    GitService git = GitFactory.getGitService(_gitPlatform, _token!);
+    var (owner, repo) = git.getOwnerRepoFromUrl(_remoteUrl!);
+    print('开始同步仓库 $owner/$repo');
+    setState(() {
+      _isLoading = true;
+    });
+
+    FileUtil()
+        .deleteDirectory(_workingDirectory!, '*')
+        .then((_) {
+          git
+              .pull(owner, repo, _workingDirectory!)
+              .then((_) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('仓库初始化完成')));
+                setState(() {
+                  _isLoading = false;
+                });
+              })
+              .catchError((error) {
+                print('Error pulling repo: $error');
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('仓库初始化失败: $error')));
+                setState(() {
+                  _isLoading = false;
+                });
+              });
+          SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
+        })
+        .catchError((error) {
+          print('Error deleting directory: $error');
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('删除文件失败: $error')));
+          setState(() {
+            _isLoading = false;
+          });
+        });
   }
 }

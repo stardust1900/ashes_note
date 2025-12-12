@@ -48,9 +48,17 @@ class FileUtilImpl implements FileUtil {
 
   @override
   Future<void> deleteDirectory(String rootPath, String path) async {
-    final dir = io.Directory('$rootPath/$path');
-    if (await dir.exists()) {
-      await dir.delete(recursive: true);
+    if ('*' == path) {
+      final dir = io.Directory(rootPath);
+      if (await dir.exists()) {
+        dir.list().forEach((f) async => await f.delete(recursive: true));
+      }
+    } else {
+      print('deleteDirectory: $rootPath/$path');
+      final dir = io.Directory('$rootPath/$path');
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
     }
   }
 

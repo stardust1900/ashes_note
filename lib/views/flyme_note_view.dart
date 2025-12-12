@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
@@ -39,23 +41,37 @@ class NotebookHomePageState extends State<NotebookHomePage> {
   void initState() {
     super.initState();
     print('NotebookHomePageState initState');
-    workingDirectory = SPUtil.get<String>('workingDirectory', '');
-    String gitPlatform = SPUtil.get<String>('gitPlatform', '');
+
+    workingDirectory = SPUtil.get<String>(PrefKeys.workingDirectory, '');
+    String gitPlatform = SPUtil.get<String>(PrefKeys.gitPlatform, '');
 
     if (gitPlatform.isNotEmpty) {
-      if (gitPlatform == 'gitee') {
-        String token = SPUtil.get<String>('giteeToken', '');
-        remoteUrl = SPUtil.get<String>('giteeRemoteUrl', '');
+      if (gitPlatform == GitPlatforms.gitee) {
+        String token = SPUtil.get<String>(PrefKeys.giteeToken, '');
+        remoteUrl = SPUtil.get<String>(PrefKeys.giteeRemoteUrl, '');
         git = GitFactory.getGitService(gitPlatform, token);
       }
-
-      String lastPullTime = SPUtil.get('lastPullTime', '');
-      if (lastPullTime == '' ||
-          DateTime.now().difference(DateTime.parse(lastPullTime)).inHours >=
-              1) {
-        var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
-        git!.pull(owner, repo, workingDirectory);
-        SPUtil.set("lastPullTime", DateTime.now().toIso8601String());
+      String lastPullTime = SPUtil.get(PrefKeys.lastPullTime, '');
+      print('lastPullTime: $lastPullTime');
+      var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+      if (lastPullTime == '') {
+        git!.pull(owner, repo, workingDirectory).then((_) {
+          SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
+        });
+      } else {
+        // 查看上一次pull后远程有没有提交记录
+        git!.getCommits(owner, repo, since: lastPullTime).then((
+          List<Map<String, dynamic>> commits,
+        ) {
+          if (commits.isNotEmpty) {
+            git!.pull(owner, repo, workingDirectory).then((_) {
+              SPUtil.set(
+                PrefKeys.lastPullTime,
+                DateTime.now().toIso8601String(),
+              );
+            });
+          }
+        });
       }
     }
 
@@ -63,7 +79,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       setState(() {
         if (_notebooks.isNotEmpty) {
           String selectedNotebookName = SPUtil.get<String>(
-            'selectedNotebook',
+            PrefKeys.selectedNotebook,
             '',
           );
           if (selectedNotebookName.isNotEmpty) {
@@ -172,11 +188,34 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 }
                 _isNotebookListExpanded = false;
               });
+              final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+              FileUtil()
+                  .listNotes(workingDirectory, notebookName)
+                  .then((notes) {
+                    print('notes: $notes');
+                    for (var note in notes) {
+                      git?.deleteFile(
+                        owner,
+                        repo,
+                        note.id,
+                        '删除笔记本 ${note.id}',
+                        git!.hashObject(utf8.encode(note.content)),
+                      );
+                    }
+                  })
+                  .then((_) {
+                    print("delete first then");
+                    print(
+                      'workingDirectory: $workingDirectory notebookName: $notebookName',
+                    );
+                    FileUtil().deleteDirectory(workingDirectory, notebookName);
+                    print("delete second then");
+                  });
+
               Navigator.pop(context);
               ScaffoldMessenger.of(
                 context,
               ).showSnackBar(SnackBar(content: Text('笔记本已删除')));
-              FileUtil().deleteDirectory(workingDirectory, notebookName);
             },
             child: Text('删除', style: TextStyle(color: Colors.red)),
           ),
@@ -188,15 +227,20 @@ class NotebookHomePageState extends State<NotebookHomePage> {
   // 删除笔记
   void _deleteNote(String noteId) {
     if (_selectedNotebook == null) return;
-
+    final note = _selectedNotebook!.notes.firstWhere(
+      (note) => note.id == noteId,
+    );
     setState(() {
       _selectedNotebook!.notes.removeWhere((note) => note.id == noteId);
     });
-    FileUtil().deleteFile(
-      workingDirectory,
-      noteId.substring(0, noteId.lastIndexOf('/')),
-      noteId.substring(noteId.lastIndexOf('/') + 1),
-    );
+
+    final path = noteId.substring(0, noteId.lastIndexOf('/'));
+    final filename = noteId.substring(noteId.lastIndexOf('/') + 1);
+    String sha = git!.hashObject(utf8.encode(note.content));
+    FileUtil().deleteFile(workingDirectory, path, filename);
+    final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+    git?.deleteFile(owner, repo, noteId, 'Delete note $noteId', sha);
+
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('笔记已删除')));
@@ -357,28 +401,48 @@ class NotebookHomePageState extends State<NotebookHomePage> {
               setState(() {
                 _isSyncing = true;
               });
+
+              // 拉取远程仓库的数据
               git!
-                  .push(
-                    owner,
-                    repo,
-                    workingDirectory,
-                    deleteRemoteMissing: true,
-                  )
+                  .pull(owner, repo, workingDirectory)
                   .then((_) {
-                    setState(() {
-                      _isSyncing = false;
-                    });
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('仓库同步完成')));
+                    SPUtil.set(
+                      PrefKeys.lastPullTime,
+                      DateTime.now().toIso8601String(),
+                    );
+                    // 推送本地仓库的数据
+                    //pull完成再push，远程有的文件本地不可能没有，所以不会删除远程文件
+                    git!
+                        .push(
+                          owner,
+                          repo,
+                          workingDirectory,
+                          deleteRemoteMissing: true,
+                        )
+                        .then((_) {
+                          setState(() {
+                            _isSyncing = false;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('仓库同步完成')),
+                          );
+                        })
+                        .catchError((error) {
+                          setState(() {
+                            _isSyncing = false;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('仓库同步push失败: $error')),
+                          );
+                        });
                   })
                   .catchError((error) {
                     setState(() {
                       _isSyncing = false;
                     });
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text('仓库同步失败: $error')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('仓库同步pull失败: $error')),
+                    );
                   });
             },
           ),
@@ -715,7 +779,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     setState(() {
                       _selectedNotebook = notebook;
                       _isNotebookListExpanded = false;
-                      SPUtil.set("selectedNotebook", notebook.name);
+                      SPUtil.set(PrefKeys.selectedNotebook, notebook.name);
                     });
                   },
                 ),
@@ -1067,7 +1131,7 @@ class NoteDetailState extends State<NoteDetailPage> {
       // 延迟保存，避免频繁写文件
       Timer(const Duration(seconds: 1), () {
         FileUtil().saveFile(
-          SPUtil.get<String>('workingDirectory', ''),
+          SPUtil.get<String>(PrefKeys.workingDirectory, ''),
           note.id.substring(0, note.id.lastIndexOf('/')),
           note.title,
           utf8.encode(note.content),

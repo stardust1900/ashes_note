@@ -1,6 +1,7 @@
 import 'dart:async' show Completer;
 import 'dart:convert';
 import 'dart:io';
+import 'package:ashes_note/utils/const.dart' show GitPlatforms;
 import 'package:crypto/crypto.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:http/http.dart' as http;
@@ -8,7 +9,7 @@ import 'package:path/path.dart' as p;
 
 class GitFactory {
   static GitService getGitService(String gitPlatform, String accessToken) {
-    if (gitPlatform == 'gitee') {
+    if (gitPlatform == GitPlatforms.gitee) {
       return GiteeService(accessToken: accessToken);
     }
     throw UnimplementedError();
@@ -65,6 +66,17 @@ abstract class GitService {
 
   (String, String) getOwnerRepoFromUrl(String url);
   String hashObject(List<int> bytes);
+
+  //获取仓库的提交记录
+  Future<List<Map<String, dynamic>>> getCommits(
+    String owner,
+    String repo, {
+    String branch,
+    String? since,
+    String? until,
+    int page = 1,
+    int perPage = 10,
+  });
 }
 
 class GiteeService extends GitService {
@@ -148,6 +160,7 @@ class GiteeService extends GitService {
     }
   }
 
+  @override
   Future<void> pull(
     String owner,
     String repo,
@@ -401,37 +414,29 @@ class GiteeService extends GitService {
 
       if (remoteSha != null) {
         //使用和git相同方法计算sha值，不需要再次拉文件
-        // final remoteInfo = await getFile(owner, repo, path, ref: branch);
-        // List<int>? remoteBytes = remoteInfo['content_bytes'] as List<int>?;
-        // print(
-        //   '$path  $remoteSha  ${_hashObject(remoteBytes ?? [])} local sha ${_hashObject(localBytes)}',
-        // );
-        // if (remoteBytes != null &&
-        //     _sha1Bytes(remoteBytes) == _sha1Bytes(localBytes)) {
-        //   needUpload = false; // 内容相同，无需上传
-        // }
-
         if (remoteSha == hashObject(localBytes)) {
           needUpload = false; // 内容相同，无需上传
         }
-      }
 
-      if (needUpload) {
-        final message = 'Sync: update $path';
-        print(message);
-        try {
-          await uploadFile(
-            owner,
-            repo,
-            path,
-            localBytes,
-            message,
-            branch: branch,
-            // sha: remoteSha,
-          );
-        } catch (e) {
-          print('Failed to upload $path: $e');
+        if (needUpload) {
+          final message = 'Sync: update $path';
+          print(message);
+          try {
+            await uploadFile(
+              owner,
+              repo,
+              path,
+              localBytes,
+              message,
+              branch: branch,
+              // sha: remoteSha,
+            );
+          } catch (e) {
+            print('Failed to upload $path: $e');
+          }
         }
+      } else {
+        //对于本地有 远程没有的老文件
       }
     }
 
@@ -828,6 +833,46 @@ class GiteeService extends GitService {
     } else {
       throw Exception(
         'Failed to update file: ${response.statusCode} ${response.body}',
+      );
+    }
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getCommits(
+    String owner,
+    String repo, {
+    String? branch,
+    String? since,
+    String? until,
+    int page = 1,
+    int perPage = 10,
+  }) async {
+    // 若未指定分支，读取仓库默认分支
+    var usedBranch = branch;
+    if (usedBranch == null) {
+      final repoInfo = await getRepoInfo(owner, repo);
+      usedBranch = (repoInfo['default_branch'] as String?) ?? 'master';
+    }
+    //curl -X GET --header 'Content-Type: application/json;charset=UTF-8' 'https://gitee.com/api/v5/repos/wangyidao/onlynote/commits?access_token=47ff3896a60337244662241db90ba171&page=1&per_page=20'
+    final params = <String, String>{
+      'sha': usedBranch,
+      if (since != null) 'since': since,
+      if (until != null) 'until': until,
+      'page': page.toString(),
+      'per_page': perPage.toString(),
+    };
+    if (accessToken != null) params['access_token'] = accessToken!;
+    final uri = Uri.parse(
+      '$_baseUrl/repos/$owner/$repo/commits',
+    ).replace(queryParameters: params);
+
+    final response = await http.get(uri);
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body) as List;
+      return data.map((e) => e as Map<String, dynamic>).toList();
+    } else {
+      throw Exception(
+        'Failed to get commits: ${response.statusCode} ${response.body}',
       );
     }
   }
