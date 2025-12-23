@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
@@ -58,6 +57,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         git!.pull(owner, repo, workingDirectory).then((_) {
           SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
         });
+        _loadNotebookList();
       } else {
         // 查看上一次pull后远程有没有提交记录
         git!.getCommits(owner, repo, since: lastPullTime).then((
@@ -69,30 +69,13 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 PrefKeys.lastPullTime,
                 DateTime.now().toIso8601String(),
               );
+              _loadNotebookList();
             });
           }
         });
       }
     }
-
-    _loadNotebookList().then((_) {
-      setState(() {
-        if (_notebooks.isNotEmpty) {
-          String selectedNotebookName = SPUtil.get<String>(
-            PrefKeys.selectedNotebook,
-            '',
-          );
-          if (selectedNotebookName.isNotEmpty) {
-            _selectedNotebook = _notebooks.firstWhere(
-              (notebook) => notebook.name == selectedNotebookName,
-              orElse: () => _notebooks[0],
-            );
-          } else {
-            _selectedNotebook = _notebooks[0];
-          }
-        }
-      });
-    });
+    _loadNotebookList();
 
     _searchController.addListener(_onSearchChanged);
   }
@@ -154,6 +137,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       '/',
       type: 'directory',
     );
+    _notebooks.clear();
     for (var book in bookList) {
       final List<Note> notes = await FileUtil().listNotes(
         workingDirectory,
@@ -161,6 +145,23 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       );
       _notebooks.add(Notebook(name: book, notes: notes, color: Colors.blue));
     }
+
+    setState(() {
+      if (_notebooks.isNotEmpty) {
+        String selectedNotebookName = SPUtil.get<String>(
+          PrefKeys.selectedNotebook,
+          '',
+        );
+        if (selectedNotebookName.isNotEmpty) {
+          _selectedNotebook = _notebooks.firstWhere(
+            (notebook) => notebook.name == selectedNotebookName,
+            orElse: () => _notebooks[0],
+          );
+        } else {
+          _selectedNotebook = _notebooks[0];
+        }
+      }
+    });
   }
 
   // 删除笔记本
@@ -1174,7 +1175,7 @@ class NoteDetailState extends State<NoteDetailPage> {
     });
 
     if (_matches.isNotEmpty) {
-      _scrollToCurrentMatch();
+      _scrollToMatchWithTextPainter();
     }
   }
 
@@ -1186,7 +1187,10 @@ class NoteDetailState extends State<NoteDetailPage> {
       _updateHighlightedText();
     });
 
-    _scrollToCurrentMatch();
+    // 在下一帧执行滚动，确保布局已完成
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToMatchWithTextPainter();
+    });
   }
 
   void _findPrevious() {
@@ -1198,7 +1202,9 @@ class NoteDetailState extends State<NoteDetailPage> {
       _updateHighlightedText();
     });
 
-    _scrollToCurrentMatch();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToMatchWithTextPainter();
+    });
   }
 
   // 构建高亮文本的TextSpan列表
@@ -1264,25 +1270,49 @@ class NoteDetailState extends State<NoteDetailPage> {
     _highlightedSpans = spans;
   }
 
-  void _scrollToCurrentMatch() {
+  void _scrollToMatchWithTextPainter() {
     if (_currentFindIndex < 0 || _currentFindIndex >= _matches.length) return;
 
     final match = _matches[_currentFindIndex];
     final text = _textController.text;
 
-    // 计算匹配文本的大致行号（简单估算）
+    // 使用TextPainter精确计算文本布局
+    final textStyle = TextStyle(fontSize: 14, height: 1.4);
     final textBeforeMatch = text.substring(0, match.start);
-    final linesBefore = textBeforeMatch.split('\n');
-    final lineCount = linesBefore.length;
 
-    // 估算行高（根据字体大小估算）
-    const estimatedLineHeight = 20.0;
-    final targetOffset = (lineCount - 1) * estimatedLineHeight;
+    final textPainter = TextPainter(
+      text: TextSpan(text: textBeforeMatch, style: textStyle),
+      textDirection: TextDirection.ltr,
+      maxLines: null,
+    );
+
+    // 获取滚动视图的实际宽度（考虑padding）
+    final screenWidth = MediaQuery.of(context).size.width;
+    print('screenWidth: $screenWidth');
+    final horizontalPadding = 32; // 左右各16px 啊用44是最终测试出来的效果更好...
+    final availableWidth = screenWidth - horizontalPadding;
+    textPainter.layout(maxWidth: availableWidth);
+
+    // 计算匹配文本前的行数
+    final lineMetrics = textPainter.computeLineMetrics();
+    final lineCount = lineMetrics.length;
+
+    print('lineCount: $lineCount lineMetrics height: ${lineMetrics[0].height}');
+
+    // 计算精确的垂直偏移量
+    double totalHeight = 0.0;
+    for (int i = 0; i < lineCount - 1; i++) {
+      totalHeight += lineMetrics[i].height;
+    }
+    print('totalHeight before match: $totalHeight');
+    // 添加一些边距确保匹配项可见
+    final verticalPadding = 20.0;
+    final targetOffset = totalHeight - verticalPadding;
 
     // 确保滚动位置在合理范围内
     final maxScrollExtent = _scrollController.position.maxScrollExtent;
     final clampedOffset = targetOffset.clamp(0.0, maxScrollExtent);
-
+    print('Scrolling to offset: $clampedOffset');
     _scrollController.animateTo(
       clampedOffset,
       duration: Duration(milliseconds: 300),
@@ -1489,7 +1519,7 @@ class NoteDetailState extends State<NoteDetailPage> {
           child: _findController.text.isNotEmpty && _matches.isNotEmpty
               ? SelectableText.rich(
                   TextSpan(children: _highlightedSpans),
-                  style: TextStyle(fontSize: 14),
+                  style: TextStyle(fontSize: 14, height: 1.4),
                 )
               : TextField(
                   controller: _textController,
@@ -1499,7 +1529,11 @@ class NoteDetailState extends State<NoteDetailPage> {
                     hintText: '开始输入内容...',
                     hintStyle: TextStyle(color: Colors.white30),
                   ),
-                  style: TextStyle(fontSize: 14, color: Colors.white),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white,
+                    height: 1.4,
+                  ),
                 ),
         ),
         // 在右下角显示查找状态（只在编辑模式且有匹配时显示）
