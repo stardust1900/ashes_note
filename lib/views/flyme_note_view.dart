@@ -6,6 +6,7 @@ import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
+import 'package:flutter/rendering.dart' show RenderProxyBox, RenderEditable;
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -1218,7 +1219,7 @@ class NoteDetailState extends State<NoteDetailPage> {
       _highlightedSpans = [
         TextSpan(
           text: text,
-          style: TextStyle(color: Colors.white, fontSize: 14),
+          style: TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
         ),
       ];
       return;
@@ -1262,12 +1263,28 @@ class NoteDetailState extends State<NoteDetailPage> {
       spans.add(
         TextSpan(
           text: text.substring(currentStart),
-          style: TextStyle(color: Colors.white, fontSize: 14),
+          style: TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
         ),
       );
     }
 
     _highlightedSpans = spans;
+  }
+
+  RenderEditable? _findRenderEditable(RenderObject? object) {
+    RenderObject? current = object;
+    while (current != null) {
+      if (current is RenderEditable) {
+        return current;
+      }
+      if (current is RenderProxyBox) {
+        current = current.child;
+      } else {
+        // 大多数装饰层都是 proxy box，非 proxy 则停止
+        break;
+      }
+    }
+    return null;
   }
 
   void _scrollToMatchWithTextPainter() {
@@ -1276,42 +1293,54 @@ class NoteDetailState extends State<NoteDetailPage> {
     final match = _matches[_currentFindIndex];
     final text = _textController.text;
 
-    // 使用TextPainter精确计算文本布局
-    final textStyle = TextStyle(fontSize: 14, height: 1.4);
-    final textBeforeMatch = text.substring(0, match.start);
+    final renderObject = _selectableTextKey.currentContext?.findRenderObject();
+    print('SelectableText renderObject: $renderObject');
+    final editable = _findRenderEditable(renderObject);
+    final boxes1 = editable?.getBoxesForSelection(match);
+    var clampedOffset = boxes1?.first.top;
+    print('SelectableText editable: $editable boxoffset: $clampedOffset');
+    if (clampedOffset == null) {
+      // 使用TextPainter精确计算文本布局
+      final textStyle = TextStyle(fontSize: 14, height: 1.4);
+      final textBeforeMatch = text.substring(0, match.start);
 
-    final textPainter = TextPainter(
-      text: TextSpan(text: textBeforeMatch, style: textStyle),
-      textDirection: TextDirection.ltr,
-      maxLines: null,
-    );
+      final textPainter = TextPainter(
+        text: TextSpan(text: textBeforeMatch, style: textStyle),
+        textDirection: TextDirection.ltr,
+        maxLines: null,
+      );
 
-    // 获取滚动视图的实际宽度（考虑padding）
-    final screenWidth = MediaQuery.of(context).size.width;
-    print('screenWidth: $screenWidth');
-    final horizontalPadding = 32; // 左右各16px 啊用44是最终测试出来的效果更好...
-    final availableWidth = screenWidth - horizontalPadding;
-    textPainter.layout(maxWidth: availableWidth);
+      // 获取滚动视图的实际宽度（考虑padding）
+      final screenWidth = MediaQuery.of(context).size.width;
+      final padding = MediaQuery.of(context).padding;
+      final horizontalPadding = 32; // 左右各16px 啊用44是最终测试出来的效果更好...
+      final availableWidth =
+          screenWidth - horizontalPadding - padding.left - padding.right;
+      textPainter.layout(maxWidth: availableWidth);
 
-    // 计算匹配文本前的行数
-    final lineMetrics = textPainter.computeLineMetrics();
-    final lineCount = lineMetrics.length;
+      // 计算匹配文本前的行数
+      final lineMetrics = textPainter.computeLineMetrics();
+      final lineCount = lineMetrics.length;
 
-    print('lineCount: $lineCount lineMetrics height: ${lineMetrics[0].height}');
+      // 计算精确的垂直偏移量
+      //lineMetrics[0].height = 20 但是实际测试发现有点偏差，所以乘以一个系数1.02
+      double totalHeight = 20.0 * lineCount;
+      print('Total lines: $lineCount Approx height: $totalHeight');
+      final boxes = textPainter.getBoxesForSelection(match);
+      if (boxes.isNotEmpty) {
+        final box = boxes.first;
+        totalHeight = box.top;
+        print('Total height to match: $totalHeight');
+      }
+      // 添加一些边距确保匹配项可见
+      final verticalPadding = 20.0;
+      final targetOffset = totalHeight - verticalPadding;
 
-    // 计算精确的垂直偏移量
-    double totalHeight = 0.0;
-    for (int i = 0; i < lineCount - 1; i++) {
-      totalHeight += lineMetrics[i].height;
+      // 确保滚动位置在合理范围内
+      final maxScrollExtent = _scrollController.position.maxScrollExtent;
+      clampedOffset = targetOffset.clamp(0.0, maxScrollExtent);
     }
-    print('totalHeight before match: $totalHeight');
-    // 添加一些边距确保匹配项可见
-    final verticalPadding = 20.0;
-    final targetOffset = totalHeight - verticalPadding;
 
-    // 确保滚动位置在合理范围内
-    final maxScrollExtent = _scrollController.position.maxScrollExtent;
-    final clampedOffset = targetOffset.clamp(0.0, maxScrollExtent);
     print('Scrolling to offset: $clampedOffset');
     _scrollController.animateTo(
       clampedOffset,
@@ -1510,6 +1539,7 @@ class NoteDetailState extends State<NoteDetailPage> {
     );
   }
 
+  final _selectableTextKey = GlobalKey();
   Widget _buildEditor() {
     return Stack(
       children: [
@@ -1517,9 +1547,14 @@ class NoteDetailState extends State<NoteDetailPage> {
           controller: _scrollController,
           padding: EdgeInsets.all(16),
           child: _findController.text.isNotEmpty && _matches.isNotEmpty
-              ? SelectableText.rich(
-                  TextSpan(children: _highlightedSpans),
-                  style: TextStyle(fontSize: 14, height: 1.4),
+              ? LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SelectableText.rich(
+                      key: _selectableTextKey,
+                      TextSpan(children: _highlightedSpans),
+                      style: TextStyle(fontSize: 14, height: 1.4),
+                    );
+                  },
                 )
               : TextField(
                   controller: _textController,
