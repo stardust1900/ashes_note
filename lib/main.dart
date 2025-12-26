@@ -1,4 +1,5 @@
 import 'package:ashes_note/ashes_theme.dart';
+import 'package:ashes_note/l10n/app_localizations.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 // import 'package:ashes_note/views/editor_view.dart';
@@ -26,6 +27,9 @@ class AshesNoteApp extends StatelessWidget {
       title: '草灰笔记',
       debugShowCheckedModeBanner: false,
       theme: darkTheme.mainTheme,
+      localizationsDelegates: const [
+        ...AppLocalizations.localizationsDelegates,
+      ],
       home: Builder(
         builder: (context) {
           //从本地存储中读取工作目录，判断工作目录是否设置

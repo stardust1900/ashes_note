@@ -1,6 +1,4 @@
 //设置页面 显示工作目录，可以修改，有保存按钮
-import 'dart:math';
-
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
@@ -270,8 +268,10 @@ class _SettingsViewState extends State<SettingsView> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                   onPressed: () async {
+                    ScaffoldMessengerState messengerState =
+                        ScaffoldMessenger.of(context);
                     if (_remoteUrl == null || _token == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      messengerState.showSnackBar(
                         const SnackBar(content: Text('请填写完整的Git配置')),
                       );
                       return;
@@ -312,13 +312,13 @@ class _SettingsViewState extends State<SettingsView> {
                               _remoteUrl!,
                             );
                           }
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          messengerState.showSnackBar(
                             const SnackBar(content: Text('配置已保存')),
                           );
                         })
                         .catchError((error) {
                           print('Error fetching repo info: $error');
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          messengerState.showSnackBar(
                             SnackBar(content: Text('获取仓库信息失败: $error')),
                           );
                         });
@@ -386,6 +386,7 @@ class _SettingsViewState extends State<SettingsView> {
     setState(() {
       _isLoading = true;
     });
+    ScaffoldMessengerState messengerState = ScaffoldMessenger.of(context);
 
     FileUtil()
         .deleteDirectory(_workingDirectory!, '*')
@@ -393,18 +394,18 @@ class _SettingsViewState extends State<SettingsView> {
           git
               .pull(owner, repo, _workingDirectory!)
               .then((_) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('仓库初始化完成')));
+                messengerState.showSnackBar(
+                  const SnackBar(content: Text('仓库初始化完成')),
+                );
                 setState(() {
                   _isLoading = false;
                 });
               })
               .catchError((error) {
                 print('Error pulling repo: $error');
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text('仓库初始化失败: $error')));
+                messengerState.showSnackBar(
+                  SnackBar(content: Text('仓库初始化失败: $error')),
+                );
                 setState(() {
                   _isLoading = false;
                 });
@@ -413,9 +414,9 @@ class _SettingsViewState extends State<SettingsView> {
         })
         .catchError((error) {
           print('Error deleting directory: $error');
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('删除文件失败: $error')));
+          messengerState.showSnackBar(
+            SnackBar(content: Text('删除文件失败: $error')),
+          );
           setState(() {
             _isLoading = false;
           });

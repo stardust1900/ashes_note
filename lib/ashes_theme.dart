@@ -10,11 +10,9 @@ final ThemeData ashesNoteMinimalTheme = ThemeData(
   colorScheme: const ColorScheme.light(
     primary: Color(0xFF685BFF),
     secondary: Color(0xFF5F5FA7),
-    background: Color(0xFFF6F7FB),
     surface: Colors.white,
     onPrimary: Colors.white,
     onSecondary: Colors.white,
-    onBackground: Colors.black87,
     onSurface: Colors.black87,
   ),
   appBarTheme: const AppBarTheme(
@@ -83,6 +81,7 @@ final SidebarXTheme ashesSidebarExtendedMinimalTheme = ashesSidebarMinimalTheme
     .copyWith(width: 200);
 
 final ThemeData ashesDarkTheme = ThemeData(
+  brightness: Brightness.dark,
   primaryColor: Colors.blue,
   canvasColor: Color.fromARGB(255, 48, 48, 48),
   scaffoldBackgroundColor: Colors.grey[800],
@@ -130,7 +129,7 @@ final SidebarXTheme ashesSidebarDarkTheme = SidebarXTheme(
     borderRadius: BorderRadius.circular(20),
   ),
   hoverColor: Color(0xFF464667),
-  textStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
+  textStyle: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
   selectedTextStyle: const TextStyle(color: Colors.white),
   hoverTextStyle: const TextStyle(
     color: Colors.white,
@@ -144,26 +143,27 @@ final SidebarXTheme ashesSidebarDarkTheme = SidebarXTheme(
   ),
   selectedItemDecoration: BoxDecoration(
     borderRadius: BorderRadius.circular(10),
-    border: Border.all(
-      color: Color(0xFF5F5FA7).withOpacity(0.6).withOpacity(0.37),
-    ),
+    border: Border.all(color: Color(0xFF5F5FA7).withValues(alpha: 0.6)),
     gradient: const LinearGradient(
       colors: [Color(0xFF3E3E61), Color.fromARGB(255, 48, 48, 48)],
     ),
     boxShadow: [
-      BoxShadow(color: Colors.black.withOpacity(0.28), blurRadius: 30),
+      BoxShadow(color: Colors.black.withValues(alpha: 0.28), blurRadius: 30),
     ],
   ),
-  iconTheme: IconThemeData(color: Colors.white.withOpacity(0.7), size: 20),
+  iconTheme: IconThemeData(
+    color: Colors.white.withValues(alpha: 0.7),
+    size: 20,
+  ),
   selectedIconTheme: const IconThemeData(color: Colors.white, size: 20),
 );
 final SidebarXTheme ashesSidebarExtendedDarkTheme = ashesSidebarDarkTheme
     .copyWith(width: 200);
 
 class AshesTheme {
-  ThemeData _mainTheme;
-  SidebarXTheme _sidebarTheme;
-  SidebarXTheme _sidebarExtendedTheme;
+  final ThemeData _mainTheme;
+  final SidebarXTheme _sidebarTheme;
+  final SidebarXTheme _sidebarExtendedTheme;
   AshesTheme(this._mainTheme, this._sidebarTheme, this._sidebarExtendedTheme);
   ThemeData get mainTheme => _mainTheme;
   SidebarXTheme get sidebarTheme => _sidebarTheme;
