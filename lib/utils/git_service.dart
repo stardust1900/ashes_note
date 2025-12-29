@@ -11,6 +11,8 @@ class GitFactory {
   static GitService getGitService(String gitPlatform, String accessToken) {
     if (gitPlatform == GitPlatforms.gitee) {
       return GiteeService(accessToken: accessToken);
+    } else if (gitPlatform == GitPlatforms.github) {
+      return GitHubService(accessToken: accessToken);
     }
     throw UnimplementedError();
   }
@@ -65,7 +67,15 @@ abstract class GitService {
   });
 
   (String, String) getOwnerRepoFromUrl(String url);
-  String hashObject(List<int> bytes);
+
+  String _sha1Bytes(List<int> bytes) => sha1.convert(bytes).toString();
+
+  String hashObject(List<int> bytes) {
+    // git blob header: "blob {size}\0"
+    final header = utf8.encode('blob ${bytes.length}\u0000');
+    final payload = <int>[...header, ...bytes];
+    return sha1.convert(payload).toString();
+  }
 
   //获取仓库的提交记录
   Future<List<Map<String, dynamic>>> getCommits(
@@ -87,23 +97,13 @@ class GiteeService extends GitService {
   GiteeService({this.accessToken});
 
   // 计算 bytes 的 sha1（用于快速比较）
-  String _sha1Bytes(List<int> bytes) => sha1.convert(bytes).toString();
-
-  // 计算 git 对象（blob）的 sha1（git hash-object 行为）
-  // 输入：文件内容的字节数组
-  // 返回：hex 格式的 sha1 值（与 `git hash-object` 生成的值一致）
-  @override
-  String hashObject(List<int> bytes) {
-    // git blob header: "blob {size}\0"
-    final header = utf8.encode('blob ${bytes.length}\u0000');
-    final payload = <int>[...header, ...bytes];
-    return sha1.convert(payload).toString();
-  }
+  // String _sha1Bytes(List<int> bytes) => sha1.convert(bytes).toString();
 
   /// 通过 Gitee API 获取仓库信息
   /// owner: 仓库所属用户或组织
   /// repo: 仓库名称
   /// 返回 Map 表示 JSON 对象，失败时抛出异常
+  @override
   Future<Map<String, dynamic>> getRepoInfo(String owner, String repo) async {
     final query = accessToken != null ? '?access_token=$accessToken' : '';
     final uri = Uri.parse('$_baseUrl/repos/$owner/$repo$query');
@@ -307,72 +307,6 @@ class GiteeService extends GitService {
       print('Failed to pull ${errors.length} files. First: ${errors.first}');
     }
     print('DateTime now: ${DateTime.now().toIso8601String()} pull end');
-    // for (final f in remoteFiles) {
-    //   final path = f['path'] as String;
-    //   print('同步文件: $path');
-    //   print('dir:${p.dirname(path)}, basename: ${p.basename(path)}');
-    //   // 读取远程内容
-    //   final fileInfo = await getFile(owner, repo, path, ref: branch);
-    //   // print('fileInfo: $fileInfo');
-    //   List<int>? remoteBytes = fileInfo['content_bytes'] as List<int>?;
-    //   final remoteSha = fileInfo['sha'] as String?;
-    //   if (remoteBytes == null) continue;
-
-    //   // 读取本地内容（若存在）
-    //   try {
-    //     await FileUtil().readFile(
-    //       workingDir,
-    //       p.dirname(path),
-    //       p.basename(path),
-    //     );
-    //   } catch (e) {
-    //     // 本地不存在 -> 创建本地文件及目录
-    //     await FileUtil().saveFile(
-    //       workingDir,
-    //       p.dirname(path),
-    //       p.basename(path),
-    //       remoteBytes,
-    //     );
-    //     continue;
-    //   }
-    //   final localContent = await FileUtil().readFile(
-    //     workingDir,
-    //     p.dirname(path),
-    //     p.basename(path),
-    //   );
-
-    //   print('localContent: $localContent');
-
-    //   final localBytes = utf8.encode(localContent);
-    //   if (_sha1Bytes(localBytes) == _sha1Bytes(remoteBytes)) {
-    //     // 相同，跳过
-    //     continue;
-    //   }
-
-    //   // 冲突处理
-    //   switch (conflictAction) {
-    //     case ConflictAction.remoteWins:
-    //       await FileUtil().saveFile(
-    //         workingDir,
-    //         p.dirname(path),
-    //         p.basename(path),
-    //         remoteBytes,
-    //       );
-    //       break;
-    //     case ConflictAction.localWins:
-    //       // 不做任何操作；后续可以 push 将本地覆盖远端
-    //       break;
-    //     case ConflictAction.createConflictCopy:
-    //       final conflictPath = _conflictCopyPath(path);
-    //       await FileUtil().saveFile(
-    //         workingDir,
-    //         p.dirname(path),
-    //         p.basename(conflictPath),
-    //         remoteBytes,
-    //       );
-    //       break;
-    //   }
-    // }
   }
 
   // 将本地变更推送到远端（push）
@@ -591,7 +525,7 @@ class GiteeService extends GitService {
   }
 
   /// 获取仓库中所有文件（递归列出 tree 中所有 blob）
-  /// 返回 List<Map<String,dynamic>>，每项包含 path、mode、type、sha、size 等字段
+  /// 返回 List<Map<String, dynamic>>，每项包含 path、mode、type、sha、size 等字段
   @override
   Future<List<Map<String, dynamic>>> listAllFiles(
     String owner,
@@ -750,6 +684,7 @@ class GiteeService extends GitService {
   /// path: 文件路径
   /// message: 提交信息
   /// sha: 要删除文件的当前 sha（必填）
+  @override
   Future<void> deleteFile(
     String owner,
     String repo,
@@ -785,6 +720,7 @@ class GiteeService extends GitService {
     }
   }
 
+  @override
   (String, String) getOwnerRepoFromUrl(String url) {
     // 示例 URL: https://gitee.com/owner/repo.git
     final uri = Uri.parse(url);
@@ -921,5 +857,533 @@ class _Semaphore {
     } else {
       _current--;
     }
+  }
+}
+
+class GitHubService extends GitService {
+  final String _baseUrl = 'https://api.github.com';
+  final String? accessToken;
+
+  GitHubService({this.accessToken});
+
+  Map<String, String> _headers({bool json = false}) {
+    final h = <String, String>{
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'ashes_note',
+    };
+    if (accessToken != null && accessToken!.isNotEmpty) {
+      h['Authorization'] = 'Bearer $accessToken';
+    }
+    if (json) {
+      h['Content-Type'] = 'application/json; charset=utf-8';
+    }
+    return h;
+  }
+
+  @override
+  Future<Map<String, dynamic>> getRepoInfo(String owner, String repo) async {
+    final uri = Uri.parse('$_baseUrl/repos/$owner/$repo');
+    final resp = await http.get(uri, headers: _headers());
+    if (resp.statusCode == 200) {
+      return json.decode(resp.body) as Map<String, dynamic>;
+    }
+    throw Exception(
+      'Failed to load repo info: ${resp.statusCode} ${resp.body}',
+    );
+  }
+
+  Future<String> _resolveTreeSha(String owner, String repo, String ref) async {
+    // Try branches endpoint first
+    final branchUri = Uri.parse('$_baseUrl/repos/$owner/$repo/branches/$ref');
+    var resp = await http.get(branchUri, headers: _headers());
+    if (resp.statusCode == 200) {
+      final data = json.decode(resp.body) as Map<String, dynamic>;
+      try {
+        final commit = data['commit'];
+        if (commit is Map<String, dynamic>) {
+          if (commit.containsKey('commit') &&
+              commit['commit'] is Map &&
+              (commit['commit'] as Map).containsKey('tree')) {
+            final tree =
+                (commit['commit'] as Map)['tree'] as Map<String, dynamic>?;
+            final sha = tree != null ? tree['sha'] as String? : null;
+            if (sha != null) return sha;
+          }
+          if (commit.containsKey('tree') && (commit['tree'] is Map)) {
+            final sha = (commit['tree'] as Map)['sha'] as String?;
+            if (sha != null) return sha;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Fallback to commit object (if ref is a commit SHA)
+    final commitUri = Uri.parse(
+      '$_baseUrl/repos/$owner/$repo/git/commits/$ref',
+    );
+    resp = await http.get(commitUri, headers: _headers());
+    if (resp.statusCode == 200) {
+      final data = json.decode(resp.body) as Map<String, dynamic>;
+      final tree = data['tree'] as Map<String, dynamic>?;
+      final sha = tree != null ? tree['sha'] as String? : null;
+      if (sha != null) return sha;
+    }
+
+    // Final fallback: use default branch
+    final repoInfo = await getRepoInfo(owner, repo);
+    final defaultBranch = (repoInfo['default_branch'] as String?) ?? 'main';
+    if (defaultBranch != ref) {
+      return await _resolveTreeSha(owner, repo, defaultBranch);
+    }
+
+    throw Exception('Unable to resolve tree sha for $owner/$repo@$ref');
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listAllFiles(
+    String owner,
+    String repo, {
+    String? branch,
+  }) async {
+    var usedBranch = branch;
+    if (usedBranch == null) {
+      final repoInfo = await getRepoInfo(owner, repo);
+      usedBranch = (repoInfo['default_branch'] as String?) ?? 'main';
+    }
+    final treeSha = await _resolveTreeSha(owner, repo, usedBranch);
+    final uri = Uri.parse(
+      '$_baseUrl/repos/$owner/$repo/git/trees/$treeSha',
+    ).replace(queryParameters: {'recursive': '1'});
+    final resp = await http.get(uri, headers: _headers());
+    if (resp.statusCode == 200) {
+      final data = json.decode(resp.body) as Map<String, dynamic>;
+      final tree = data['tree'] as List<dynamic>? ?? <dynamic>[];
+      final files = tree
+          .where((e) => e is Map<String, dynamic> && e['type'] == 'blob')
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      return files;
+    }
+    throw Exception('Failed to list files: ${resp.statusCode} ${resp.body}');
+  }
+
+  @override
+  Future<Map<String, dynamic>> getFile(
+    String owner,
+    String repo,
+    String path, {
+    String? ref,
+  }) async {
+    final encodedPath = path.split('/').map(Uri.encodeComponent).join('/');
+    final params = <String, String>{};
+    if (ref != null) params['ref'] = ref;
+    final uri = Uri.parse(
+      '$_baseUrl/repos/$owner/$repo/contents/$encodedPath',
+    ).replace(queryParameters: params.isEmpty ? null : params);
+    final resp = await http.get(uri, headers: _headers());
+    if (resp.statusCode == 200) {
+      final data = json.decode(resp.body);
+      if (data is Map<String, dynamic>) {
+        if (data.containsKey('content')) {
+          final raw = (data['content'] as String).replaceAll('\n', '');
+          final bytes = base64.decode(raw);
+          data['content_bytes'] = bytes;
+          try {
+            data['content_text'] = utf8.decode(bytes);
+          } catch (_) {
+            data['content_text'] = null;
+          }
+        }
+        return data;
+      }
+      return {};
+    } else if (resp.statusCode == 404) {
+      return <String, dynamic>{};
+    }
+    throw Exception('Failed to get file: ${resp.statusCode} ${resp.body}');
+  }
+
+  @override
+  Future<Map<String, dynamic>> uploadFile(
+    String owner,
+    String repo,
+    String path,
+    List<int> contentBytes,
+    String message, {
+    String? branch,
+  }) async {
+    final encodedPath = path.split('/').map(Uri.encodeComponent).join('/');
+    final uri = Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$encodedPath');
+
+    String? existingSha;
+    try {
+      final existing = await getFile(owner, repo, path, ref: branch);
+      if (existing.isNotEmpty) {
+        existingSha = existing['sha'] as String?;
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    final payload = <String, dynamic>{
+      'message': message,
+      'content': base64.encode(contentBytes),
+      if (branch != null) 'branch': branch,
+      if (existingSha != null) 'sha': existingSha,
+    };
+
+    final resp = await http.put(
+      uri,
+      headers: _headers(json: true),
+      body: json.encode(payload),
+    );
+    if (resp.statusCode == 201 || resp.statusCode == 200) {
+      return json.decode(resp.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to upload file: ${resp.statusCode} ${resp.body}');
+  }
+
+  @override
+  Future<void> deleteFile(
+    String owner,
+    String repo,
+    String path,
+    String message,
+    String sha, {
+    String? branch,
+  }) async {
+    final encodedPath = path.split('/').map(Uri.encodeComponent).join('/');
+    final uri = Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$encodedPath');
+
+    final payload = <String, dynamic>{
+      'message': message,
+      'sha': sha,
+      if (branch != null) 'branch': branch,
+    };
+
+    final resp = await http.delete(
+      uri,
+      headers: _headers(json: true),
+      body: json.encode(payload),
+    );
+    if (resp.statusCode == 200 || resp.statusCode == 204) {
+      return;
+    }
+    throw Exception('Failed to delete file: ${resp.statusCode} ${resp.body}');
+  }
+
+  @override
+  (String, String) getOwnerRepoFromUrl(String url) {
+    final uri = Uri.parse(url);
+    final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    if (segments.length < 2) {
+      throw Exception('Invalid GitHub repository URL: $url');
+    }
+    var owner = segments[0];
+    var repo = segments[1];
+    if (repo.endsWith('.git')) repo = repo.substring(0, repo.length - 4);
+    return (owner, repo);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getCommits(
+    String owner,
+    String repo, {
+    String? branch,
+    String? since,
+    String? until,
+    int page = 1,
+    int perPage = 10,
+  }) async {
+    var usedBranch = branch;
+    if (usedBranch == null) {
+      final repoInfo = await getRepoInfo(owner, repo);
+      usedBranch = (repoInfo['default_branch'] as String?) ?? 'main';
+    }
+    final params = <String, String>{
+      'sha': usedBranch,
+      if (since != null) 'since': since,
+      if (until != null) 'until': until,
+      'page': page.toString(),
+      'per_page': perPage.toString(),
+    };
+    final uri = Uri.parse(
+      '$_baseUrl/repos/$owner/$repo/commits',
+    ).replace(queryParameters: params);
+    final resp = await http.get(uri, headers: _headers());
+    if (resp.statusCode == 200) {
+      final data = json.decode(resp.body) as List;
+      return data.map((e) => e as Map<String, dynamic>).toList();
+    }
+    throw Exception('Failed to get commits: ${resp.statusCode} ${resp.body}');
+  }
+
+  // --- 添加缺失的 pull 和 push 实现，以及辅助方法 ----
+
+  @override
+  Future<void> pull(
+    String owner,
+    String repo,
+    String workingDir, {
+    ConflictAction conflictAction = ConflictAction.remoteWins,
+    String? branch,
+  }) async {
+    var usedBranch = branch;
+    if (usedBranch == null) {
+      final repoInfo = await getRepoInfo(owner, repo);
+      usedBranch = (repoInfo['default_branch'] as String?) ?? 'main';
+    }
+
+    final remoteFiles = await listAllFiles(owner, repo, branch: usedBranch);
+
+    final _Semaphore sem = _Semaphore.getInstance();
+
+    final int calculatedConcurrency = (Platform.numberOfProcessors > 0)
+        ? Platform.numberOfProcessors * 2
+        : 8;
+    final int maxConcurrent = (calculatedConcurrency.clamp(1, 64));
+    final List<String> errors = [];
+
+    for (var i = 0; i < remoteFiles.length; i += maxConcurrent) {
+      final end = (i + maxConcurrent) > remoteFiles.length
+          ? remoteFiles.length
+          : (i + maxConcurrent);
+      final chunk = remoteFiles.sublist(i, end);
+
+      final futures = <Future<void>>[];
+      for (final entry in chunk) {
+        futures.add(
+          sem.withPermit(() async {
+            String path;
+            try {
+              path = (entry['path'] as String);
+            } catch (e) {
+              errors.add('Invalid entry format: $e');
+              return;
+            }
+
+            try {
+              final fileInfo = await getFile(
+                owner,
+                repo,
+                path,
+                ref: usedBranch,
+              );
+              List<int>? remoteBytes = fileInfo['content_bytes'] as List<int>?;
+              if (remoteBytes == null && fileInfo.containsKey('content')) {
+                final raw = (fileInfo['content'] as String).replaceAll(
+                  '\n',
+                  '',
+                );
+                remoteBytes = base64.decode(raw);
+              }
+              if (remoteBytes == null) {
+                throw Exception('No content for file: $path');
+              }
+
+              bool localExists = true;
+              String localText = '';
+              try {
+                localText = await FileUtil().readFile(
+                  workingDir,
+                  p.dirname(path),
+                  p.basename(path),
+                );
+              } catch (_) {
+                localExists = false;
+              }
+
+              if (!localExists) {
+                await FileUtil().saveFile(
+                  workingDir,
+                  p.dirname(path),
+                  p.basename(path),
+                  remoteBytes,
+                );
+                remoteBytes = <int>[];
+                return;
+              }
+
+              final localBytes = utf8.encode(localText);
+              final localSha = _sha1Bytes(localBytes);
+              if (localSha == _sha1Bytes(remoteBytes)) {
+                remoteBytes = <int>[];
+                return;
+              }
+
+              switch (conflictAction) {
+                case ConflictAction.remoteWins:
+                  await FileUtil().saveFile(
+                    workingDir,
+                    p.dirname(path),
+                    p.basename(path),
+                    remoteBytes,
+                  );
+                  break;
+                case ConflictAction.localWins:
+                  break;
+                case ConflictAction.createConflictCopy:
+                  final conflictPath = _conflictCopyPath(path);
+                  await FileUtil().saveFile(
+                    workingDir,
+                    p.dirname(path),
+                    p.basename(conflictPath),
+                    remoteBytes,
+                  );
+                  break;
+              }
+
+              remoteBytes = <int>[];
+            } catch (e, st) {
+              errors.add('$path: $e\n$st');
+            }
+          }),
+        );
+      }
+
+      await Future.wait(futures);
+    }
+
+    remoteFiles.clear();
+
+    if (errors.isNotEmpty) {
+      print('Failed to pull ${errors.length} files. First: ${errors.first}');
+    }
+  }
+
+  @override
+  Future<void> push(
+    String owner,
+    String repo,
+    String workingDir, {
+    bool deleteRemoteMissing = false,
+    String? branch,
+  }) async {
+    final remoteFiles = await listAllFiles(owner, repo, branch: branch);
+
+    final Map<String, String?> remoteMap = {
+      for (final e in remoteFiles) e['path'] as String: e['sha'] as String?,
+    };
+    remoteMap.removeWhere((key, value) => !key.contains('/'));
+
+    final Map<String, List<int>> localFiles = {};
+    await _collectLocalFilesRecursively(workingDir, '', localFiles);
+
+    for (final entry in localFiles.entries) {
+      final path = entry.key;
+      final localBytes = entry.value;
+      String? remoteSha = remoteMap[path];
+      bool needUpload = true;
+
+      if (remoteSha != null) {
+        if (remoteSha == hashObject(localBytes)) {
+          needUpload = false;
+        }
+
+        if (needUpload) {
+          final message = 'Sync: update $path';
+          try {
+            await uploadFile(
+              owner,
+              repo,
+              path,
+              localBytes,
+              message,
+              branch: branch,
+            );
+          } catch (e) {
+            print('Failed to upload $path: $e');
+          }
+        }
+      } else {
+        // remote doesn't have it, create
+        final message = 'Sync: add $path';
+        try {
+          await uploadFile(
+            owner,
+            repo,
+            path,
+            localBytes,
+            message,
+            branch: branch,
+          );
+        } catch (e) {
+          print('Failed to upload new file $path: $e');
+        }
+      }
+    }
+
+    if (deleteRemoteMissing) {
+      for (final remotePath in remoteMap.keys) {
+        if (!localFiles.containsKey(remotePath)) {
+          print('准备删除远端文件: $remotePath');
+          final remoteInfo = await getFile(
+            owner,
+            repo,
+            remotePath,
+            ref: branch,
+          );
+          final sha = remoteInfo['sha'] as String?;
+          if (sha != null) {
+            final message = 'Sync: delete $remotePath';
+            await deleteFile(
+              owner,
+              repo,
+              remotePath,
+              message,
+              sha,
+              branch: branch,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // 辅助：递归收集本地文件（相对路径 -> bytes）
+  Future<void> _collectLocalFilesRecursively(
+    String workingDir,
+    String relativeDir,
+    Map<String, List<int>> out,
+  ) async {
+    final entries = await FileUtil().listFiles(
+      workingDir,
+      relativeDir,
+      type: 'directory',
+    );
+
+    for (final name in entries) {
+      final candidate = relativeDir.isEmpty ? name : p.join(relativeDir, name);
+
+      final dirs = await FileUtil().listFiles(
+        workingDir,
+        candidate,
+        type: 'directory',
+      );
+      final files = await FileUtil().listFiles(
+        workingDir,
+        candidate,
+        type: 'file',
+      );
+      if (files.isNotEmpty) {
+        for (final fn in files) {
+          final rel = '$candidate/$fn';
+          final content = await FileUtil().readFile(workingDir, "", rel);
+          out[rel] = utf8.encode(content);
+        }
+      }
+      if (dirs.isNotEmpty) {
+        await _collectLocalFilesRecursively(workingDir, candidate, out);
+      }
+    }
+  }
+
+  String _conflictCopyPath(String original) {
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-');
+    final dir = p.dirname(original);
+    final base = p.basename(original);
+    final conflictName = '$base.conflict.$ts';
+    return dir == '.' ? conflictName : p.join(dir, conflictName);
   }
 }

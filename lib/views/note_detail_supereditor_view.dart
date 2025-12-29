@@ -3,6 +3,7 @@ import 'package:ashes_note/logging.dart';
 import 'package:ashes_note/views/_toolbar.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:super_editor/super_editor.dart';
 
 class NoteDetailPage extends StatefulWidget {
@@ -100,8 +101,21 @@ class NoteDetailState extends State<NoteDetailPage> {
             _composer.selection!.base,
             _composer.selection!.extent,
           )!;
-      final docBox =
-          _docLayoutKey.currentContext!.findRenderObject() as RenderBox;
+      final renderObject = _docLayoutKey.currentContext?.findRenderObject();
+      RenderBox? docBox;
+      if (renderObject is RenderBox) {
+        docBox = renderObject;
+      } else if (renderObject is RenderSliverToBoxAdapter) {
+        final child = renderObject.child;
+        if (child is RenderBox) {
+          docBox = child;
+        } else {
+          return;
+        }
+      } else {
+        return;
+      }
+
       final overlayBoundingBox = Rect.fromPoints(
         docBox.localToGlobal(docBoundingBox.topLeft),
         docBox.localToGlobal(docBoundingBox.bottomRight),
