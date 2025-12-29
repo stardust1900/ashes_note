@@ -145,15 +145,19 @@ class FileUtilImpl implements FileUtil {
 
     for (var entity in entities) {
       if (entity is io.File) {
-        final content = await entity.readAsString();
-        final lastModified = await entity.lastModified();
-        final note = Note(
-          id: '$path/${p.basename(entity.path)}',
-          title: p.basename(entity.path),
-          content: content,
-          lastModified: lastModified,
-        );
-        notes.add(note);
+        try {
+          final content = await entity.readAsString();
+          final lastModified = await entity.lastModified();
+          final note = Note(
+            id: '$path/${p.basename(entity.path)}',
+            title: p.basename(entity.path),
+            content: content,
+            lastModified: lastModified,
+          );
+          notes.add(note);
+        } catch (e) {
+          print('读取文件失败: ${entity.path}, 错误: $e');
+        }
       }
     }
 

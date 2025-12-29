@@ -129,18 +129,22 @@ class _SettingsViewState extends State<SettingsView> {
                 IconButton(
                   icon: const Icon(Icons.folder_open),
                   color: Colors.blue,
-                  onPressed: () async {
+                  onPressed: () {
                     // print('on press workingDirectory: $_workingDirectory');
-
+                    final messageState = ScaffoldMessenger.of(context);
+                    final themeData = Theme.of(context);
                     FileUtil().getApplicationDocumentsPath().then((rootPath) {
                       // print('rootPath: $rootPath');
                       setState(() {
                         _workingDirectory = rootPath;
                         _workingDirectoryController.text = rootPath!;
                       });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('android ios无法选择目录，直接保存即可')),
-                      );
+                      if (themeData.platform == TargetPlatform.android ||
+                          themeData.platform == TargetPlatform.iOS) {
+                        messageState.showSnackBar(
+                          SnackBar(content: Text('android ios无法选择目录，直接保存即可')),
+                        );
+                      }
                       _saveSettings();
                     });
                   },
@@ -180,7 +184,7 @@ class _SettingsViewState extends State<SettingsView> {
             Text('Git 配置', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              dropdownColor: Colors.grey[300],
+              dropdownColor: Theme.of(context).canvasColor,
               decoration: const InputDecoration(
                 labelText: 'Git平台',
                 // border: OutlineInputBorder(),

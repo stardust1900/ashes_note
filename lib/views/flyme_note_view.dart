@@ -4,9 +4,9 @@ import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
-import 'package:ashes_note/views/note_detail_supereditor_view.dart'
-    show NoteDetailPage;
-// import 'package:ashes_note/views/note_detail_view.dart' show NoteDetailPage;
+// import 'package:ashes_note/views/note_detail_supereditor_view.dart'
+//     show NoteDetailPage;
+import 'package:ashes_note/views/note_detail_view.dart' show NoteDetailPage;
 import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
 
@@ -50,7 +50,12 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         String token = SPUtil.get<String>(PrefKeys.giteeToken, '');
         remoteUrl = SPUtil.get<String>(PrefKeys.giteeRemoteUrl, '');
         git = GitFactory.getGitService(gitPlatform, token);
+      } else if (gitPlatform == GitPlatforms.github) {
+        String token = SPUtil.get<String>(PrefKeys.githubToken, '');
+        remoteUrl = SPUtil.get<String>(PrefKeys.githubRemoteUrl, '');
+        git = GitFactory.getGitService(gitPlatform, token);
       }
+
       String lastPullTime = SPUtil.get(PrefKeys.lastPullTime, '');
       print('lastPullTime: $lastPullTime');
       var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);

@@ -1162,7 +1162,7 @@ class GitHubService extends GitService {
               errors.add('Invalid entry format: $e');
               return;
             }
-
+            print('同步文件（并发）: $path');
             try {
               final fileInfo = await getFile(
                 owner,
