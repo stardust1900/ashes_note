@@ -17,7 +17,7 @@ import 'package:super_editor/super_editor.dart';
 /// application [Overlay]. Any other [Stack] should work, too.
 class EditorToolbar extends StatefulWidget {
   const EditorToolbar({
-    Key? key,
+    super.key,
     required this.editorViewportKey,
     required this.editorFocusNode,
     required this.editor,
@@ -25,7 +25,7 @@ class EditorToolbar extends StatefulWidget {
     required this.composer,
     required this.anchor,
     required this.closeToolbar,
-  }) : super(key: key);
+  });
 
   /// [GlobalKey] that should be attached to a widget that wraps the viewport
   /// area, which keeps the toolbar from appearing outside of the editor area.
@@ -374,9 +374,60 @@ class _EditorToolbarState extends State<EditorToolbar> {
       // Do nothing when multiple links are selected.
       return;
     }
+    print('找到链接数：${overlappingLinkAttributions}');
+    //无论有没有链接都应该展示url框
+    setState(() {
+      _showUrlField = true;
+      if (overlappingLinkAttributions.isNotEmpty) {
+        final overlappingLinkSpan = overlappingLinkAttributions.first;
+        final linkAttribution =
+            overlappingLinkSpan.attribution as LinkAttribution;
+        final url = linkAttribution.plainTextUri;
+        _urlController!.text = AttributedText(url);
+      }
+      _urlFocusNode.requestFocus();
+    });
 
+    // if (overlappingLinkAttributions.isNotEmpty) {
+    //   // The selected text contains one other link.
+    //   final overlappingLinkSpan = overlappingLinkAttributions.first;
+    //   final isLinkSelectionOnTrailingEdge =
+    //       (overlappingLinkSpan.start >= selectionRange.start &&
+    //           overlappingLinkSpan.start <= selectionRange.end) ||
+    //       (overlappingLinkSpan.end >= selectionRange.start &&
+    //           overlappingLinkSpan.end <= selectionRange.end);
+
+    //   if (isLinkSelectionOnTrailingEdge) {
+    //     // The selected text covers the beginning, or the end, or the entire
+    //     // existing link. Remove the link attribution from the selected text.
+    //     text.removeAttribution(overlappingLinkSpan.attribution, selectionRange);
+    //   } else {
+    //     // The selected text sits somewhere within the existing link. Remove
+    //     // the entire link attribution.
+    //     text.removeAttribution(
+    //       overlappingLinkSpan.attribution,
+    //       overlappingLinkSpan.range,
+    //     );
+    //   }
+    // }
+  }
+
+  void _closeUrlField() {
+    final selection = widget.composer.selection!;
+    final baseOffset = (selection.base.nodePosition as TextPosition).offset;
+    final extentOffset = (selection.extent.nodePosition as TextPosition).offset;
+    final selectionStart = min(baseOffset, extentOffset);
+    final selectionEnd = max(baseOffset, extentOffset);
+    final selectionRange = SpanRange(selectionStart, selectionEnd - 1);
+    final textNode =
+        widget.document.getNodeById(selection.extent.nodeId) as TextNode;
+    final text = textNode.text;
+    final overlappingLinkAttributions = text.getAttributionSpansInRange(
+      attributionFilter: (Attribution attribution) =>
+          attribution is LinkAttribution,
+      range: selectionRange,
+    );
     if (overlappingLinkAttributions.isNotEmpty) {
-      // The selected text contains one other link.
       final overlappingLinkSpan = overlappingLinkAttributions.first;
       final isLinkSelectionOnTrailingEdge =
           (overlappingLinkSpan.start >= selectionRange.start &&
@@ -396,13 +447,37 @@ class _EditorToolbarState extends State<EditorToolbar> {
           overlappingLinkSpan.range,
         );
       }
-    } else {
-      // There are no other links in the selection. Show the URL text field.
-      setState(() {
-        _showUrlField = true;
-        _urlFocusNode.requestFocus();
-      });
+      final spanToRemove = isLinkSelectionOnTrailingEdge
+          ? selectionRange
+          : overlappingLinkSpan.range;
+
+      // Build a DocumentRange for the removal request.
+      final removeRange = DocumentRange(
+        start: DocumentPosition(
+          nodeId: textNode.id,
+          nodePosition: TextNodePosition(offset: spanToRemove.start),
+        ),
+        end: DocumentPosition(
+          nodeId: textNode.id,
+          nodePosition: TextNodePosition(offset: spanToRemove.end),
+        ),
+      );
+
+      // Execute an editor request to remove the link attribution.
+      widget.editor!.execute([
+        RemoveTextAttributionsRequest(
+          documentRange: removeRange,
+          attributions: {overlappingLinkSpan.attribution},
+        ),
+      ]);
     }
+    setState(() {
+      _showUrlField = false;
+      _urlFocusNode.unfocus(
+        disposition: UnfocusDisposition.previouslyFocusedChild,
+      );
+      _urlController!.clearTextAndSelection();
+    });
   }
 
   /// Takes the text from the [urlController] and applies it as a link
@@ -761,13 +836,7 @@ class _EditorToolbarState extends State<EditorToolbar> {
               iconSize: 20,
               splashRadius: 16,
               padding: EdgeInsets.zero,
-              onPressed: () {
-                setState(() {
-                  _urlFocusNode.unfocus();
-                  _showUrlField = false;
-                  _urlController!.clearTextAndSelection();
-                });
-              },
+              onPressed: _closeUrlField,
             ),
           ],
         ),

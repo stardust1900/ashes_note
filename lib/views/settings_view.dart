@@ -197,14 +197,14 @@ class _SettingsViewState extends State<SettingsView> {
                     print('切换到Gitee $_giteeRemoteUrl');
                     _token = _giteeToken;
                     _remoteUrl = _giteeRemoteUrl;
-                    _tokenController?.text = _token!;
-                    _remoteUrlController?.text = _remoteUrl!;
+                    _tokenController.text = _token!;
+                    _remoteUrlController.text = _remoteUrl!;
                   } else {
                     print('切换到GitHub $_githubRemoteUrl');
                     _token = _githubToken;
                     _remoteUrl = _githubRemoteUrl;
-                    _tokenController?.text = _token!;
-                    _remoteUrlController?.text = _remoteUrl!;
+                    _tokenController.text = _token!;
+                    _remoteUrlController.text = _remoteUrl!;
                   }
                 });
               },
