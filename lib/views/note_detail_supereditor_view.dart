@@ -47,6 +47,15 @@ class NoteDetailState extends State<NoteDetailPage> {
         ..screenPadding = const EdgeInsets.all(20.0);
   final MarkdownInlineUpstreamSyntaxPlugin _markdownPlugin =
       MarkdownInlineUpstreamSyntaxPlugin();
+
+  // Search functionality variables
+  final TextEditingController _searchController = TextEditingController();
+  late List<DocumentSelection> _searchResults;
+  int _currentSearchIndex = -1;
+  bool _isSearchVisible = false;
+  String _currentSearchTerm = '';
+  final FocusNode _searchFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
@@ -74,6 +83,8 @@ class NoteDetailState extends State<NoteDetailPage> {
     _editorFocusNode = FocusNode();
     _scrollController = ScrollController()..addListener(_hideOrShowToolbar);
     _iosControlsController = SuperEditorIosControlsController();
+
+    _searchResults = [];
   }
 
   @override
@@ -82,12 +93,138 @@ class NoteDetailState extends State<NoteDetailPage> {
     _scrollController.dispose();
     _editorFocusNode.dispose();
     _composer.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
   void _onDocumentChange(_) {
     _hideOrShowToolbar();
     _docChangeSignal.notifyListeners();
+    // If we're searching, re-run the search after document changes
+    if (_isSearchVisible && _currentSearchTerm.isNotEmpty) {
+      _performSearch(_currentSearchTerm);
+    }
+  }
+
+  void _performSearch(String searchTerm) {
+    if (searchTerm.isEmpty) {
+      _clearSearch();
+      return;
+    }
+
+    _currentSearchTerm = searchTerm;
+    _searchResults = [];
+
+    // Search through all text nodes in the document
+    final it = _doc.iterator;
+    while (it.moveNext()) {
+      final node = it.current;
+      if (node is TextNode) {
+        final text = node.text.toPlainText();
+        int startIndex = 0;
+
+        while (startIndex < text.length) {
+          final index = text.toLowerCase().indexOf(
+            searchTerm.toLowerCase(),
+            startIndex,
+          );
+          if (index == -1) break;
+
+          // Create a selection for this occurrence
+          final start = DocumentPosition(
+            nodeId: node.id,
+            nodePosition: TextNodePosition(offset: index),
+          );
+          final end = DocumentPosition(
+            nodeId: node.id,
+            nodePosition: TextNodePosition(offset: index + searchTerm.length),
+          );
+
+          _searchResults.add(DocumentSelection(base: start, extent: end));
+
+          startIndex = index + 1; // Move past this match to find the next
+        }
+      }
+    }
+
+    if (_searchResults.isNotEmpty) {
+      _currentSearchIndex = 0;
+      _jumpToSearchResult(_currentSearchIndex);
+    } else {
+      _currentSearchIndex = -1;
+    }
+
+    setState(() {});
+  }
+
+  void _jumpToSearchResult(int index) {
+    if (index >= 0 && index < _searchResults.length) {
+      final selection = _searchResults[index];
+      PausableValueNotifier notifier =
+          _composer.selectionNotifier as PausableValueNotifier;
+      notifier.value = selection;
+
+      // Scroll to the found text
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final layout = _docLayoutKey.currentState as DocumentLayout;
+        final rect = layout.getRectForSelection(
+          selection.base,
+          selection.extent,
+        );
+        if (rect != null) {
+          _scrollController.animateTo(
+            rect.top - 100, // Add some padding at the top
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+        }
+      });
+    }
+  }
+
+  void _nextSearchResult() {
+    if (_searchResults.isEmpty) return;
+
+    _currentSearchIndex = (_currentSearchIndex + 1) % _searchResults.length;
+    _jumpToSearchResult(_currentSearchIndex);
+    setState(() {});
+  }
+
+  void _previousSearchResult() {
+    if (_searchResults.isEmpty) return;
+
+    _currentSearchIndex = _currentSearchIndex <= 0
+        ? _searchResults.length - 1
+        : _currentSearchIndex - 1;
+    _jumpToSearchResult(_currentSearchIndex);
+    setState(() {});
+  }
+
+  void _clearSearch() {
+    setState(() {
+      _currentSearchTerm = '';
+      _searchResults = [];
+      _currentSearchIndex = -1;
+      // _isSearchVisible = false;
+      _searchController.clear();
+      _composer.clearSelection();
+    });
+  }
+
+  void _toggleSearch() {
+    _hideEditorToolbar();
+    _hideImageToolbar();
+    setState(() {
+      _isSearchVisible = !_isSearchVisible;
+      if (!_isSearchVisible) {
+        _clearSearch();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _searchFocusNode.requestFocus();
+        });
+      }
+    });
   }
 
   void _showImageToolbar() {
@@ -153,6 +290,13 @@ class NoteDetailState extends State<NoteDetailPage> {
     if (_gestureMode != DocumentGestureMode.mouse) {
       // We only add our own toolbar when using mouse. On mobile, a bar
       // is rendered for us.
+      return;
+    }
+
+    if (_isSearchVisible) {
+      // Don't show toolbars when searching
+      _hideEditorToolbar();
+      _hideImageToolbar();
       return;
     }
 
@@ -354,6 +498,80 @@ class NoteDetailState extends State<NoteDetailPage> {
     );
   }
 
+  Widget _buildSearchBar() {
+    return Container(
+      padding: const EdgeInsets.all(8.0),
+      decoration: BoxDecoration(
+        color: Theme.of(context).appBarTheme.backgroundColor,
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              _clearSearch();
+              _isSearchVisible = false;
+            },
+            tooltip: 'Close search',
+          ),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              decoration: const InputDecoration(
+                hintText: 'Search...',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              ),
+              onChanged: (value) {
+                if (value.isEmpty) {
+                  _clearSearch();
+                  return;
+                }
+                _performSearch(value);
+              },
+              onSubmitted: (value) {
+                _performSearch(value);
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _searchResults.isEmpty || _currentSearchIndex == -1
+                ? '0/0'
+                : '${_currentSearchIndex + 1}/${_searchResults.length}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.navigate_before),
+            onPressed: _searchResults.isEmpty ? null : _previousSearchResult,
+            tooltip: 'Previous match',
+          ),
+          IconButton(
+            icon: const Icon(Icons.navigate_next),
+            onPressed: _searchResults.isEmpty ? null : _nextSearchResult,
+            tooltip: 'Next match',
+          ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () {
+              _clearSearch();
+              _isSearchVisible = false;
+            },
+            tooltip: 'Clear search',
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEditor(BuildContext context) {
     final isLight = Theme.of(context).brightness == Brightness.light;
 
@@ -365,48 +583,72 @@ class NoteDetailState extends State<NoteDetailPage> {
           key: _viewportKey,
           child: SuperEditorIosControlsScope(
             controller: _iosControlsController,
-            child: SuperEditor(
-              editor: _docEditor,
-              focusNode: _editorFocusNode,
-              scrollController: _scrollController,
-              documentLayoutKey: _docLayoutKey,
-              documentOverlayBuilders: [
-                DefaultCaretOverlayBuilder(
-                  caretStyle: const CaretStyle().copyWith(
-                    color: isLight ? Colors.black : Colors.redAccent,
-                  ),
-                ),
-                if (defaultTargetPlatform == TargetPlatform.iOS) ...[
-                  SuperEditorIosHandlesDocumentLayerBuilder(),
-                  SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
-                ],
-                if (defaultTargetPlatform == TargetPlatform.android) ...[
-                  SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
-                  SuperEditorAndroidHandlesDocumentLayerBuilder(),
-                ],
-              ],
-              selectionLayerLinks: _selectionLayerLinks,
-              selectionStyle: isLight
-                  ? defaultSelectionStyle
-                  : SelectionStyles(
-                      selectionColor: Colors.red.withValues(alpha: 0.3),
+            child: _isSearchVisible
+                ? SuperReader(
+                    editor: _docEditor,
+                    scrollController: _scrollController,
+                    documentLayoutKey: _docLayoutKey,
+                    stylesheet: defaultStylesheet.copyWith(
+                      addRulesAfter: [
+                        if (!isLight) ..._darkModeStyles,
+                        taskStyles,
+                      ],
                     ),
-              stylesheet: defaultStylesheet.copyWith(
-                addRulesAfter: [if (!isLight) ..._darkModeStyles, taskStyles],
-              ),
-              componentBuilders: [
-                TaskComponentBuilder(_docEditor),
-                ...defaultComponentBuilders,
-              ],
-              gestureMode: _gestureMode,
-              inputSource: _inputSource,
-              keyboardActions: _inputSource == TextInputSource.ime
-                  ? defaultImeKeyboardActions
-                  : defaultKeyboardActions,
-              androidToolbarBuilder: (_) => _buildAndroidFloatingToolbar(),
-              overlayController: _overlayController,
-              plugins: {_markdownPlugin},
-            ),
+                    selectionLayerLinks: _selectionLayerLinks,
+                    selectionStyle: isLight
+                        ? defaultSelectionStyle
+                        : SelectionStyles(
+                            selectionColor: Colors.yellow.withValues(
+                              alpha: 0.5,
+                            ),
+                          ),
+                  )
+                : SuperEditor(
+                    editor: _docEditor,
+                    focusNode: _editorFocusNode,
+                    scrollController: _scrollController,
+                    documentLayoutKey: _docLayoutKey,
+                    documentOverlayBuilders: [
+                      DefaultCaretOverlayBuilder(
+                        caretStyle: const CaretStyle().copyWith(
+                          color: isLight ? Colors.black : Colors.redAccent,
+                        ),
+                      ),
+                      if (defaultTargetPlatform == TargetPlatform.iOS) ...[
+                        SuperEditorIosHandlesDocumentLayerBuilder(),
+                        SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
+                      ],
+                      if (defaultTargetPlatform == TargetPlatform.android) ...[
+                        SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
+                        SuperEditorAndroidHandlesDocumentLayerBuilder(),
+                      ],
+                    ],
+                    selectionLayerLinks: _selectionLayerLinks,
+                    selectionStyle: isLight
+                        ? defaultSelectionStyle
+                        : SelectionStyles(
+                            selectionColor: Colors.red.withValues(alpha: 0.3),
+                          ),
+                    stylesheet: defaultStylesheet.copyWith(
+                      addRulesAfter: [
+                        if (!isLight) ..._darkModeStyles,
+                        taskStyles,
+                      ],
+                    ),
+                    componentBuilders: [
+                      TaskComponentBuilder(_docEditor),
+                      ...defaultComponentBuilders,
+                    ],
+                    gestureMode: _gestureMode,
+                    inputSource: _inputSource,
+                    keyboardActions: _inputSource == TextInputSource.ime
+                        ? defaultImeKeyboardActions
+                        : defaultKeyboardActions,
+                    androidToolbarBuilder: (_) =>
+                        _buildAndroidFloatingToolbar(),
+                    overlayController: _overlayController,
+                    plugins: {_markdownPlugin},
+                  ),
           ),
         ),
       ),
@@ -438,39 +680,55 @@ class NoteDetailState extends State<NoteDetailPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('编辑')),
-      body: ValueListenableBuilder(
-        valueListenable: _brightness,
-        builder: (context, brightness, child) {
-          return Theme(
-            data: ThemeData(brightness: brightness),
-            child: child!,
-          );
-        },
-        child: Builder(
-          // This builder captures the new theme
-          builder: (themedContext) {
-            return OverlayPortal(
-              controller: _textFormatBarOverlayController,
-              overlayChildBuilder: _buildFloatingToolbar,
-              child: OverlayPortal(
-                controller: _imageFormatBarOverlayController,
-                overlayChildBuilder: _buildImageToolbar,
-                child: Stack(
-                  children: [
-                    Column(
-                      children: [
-                        Expanded(child: _buildEditor(themedContext)),
-                        if (_isMobile) //
-                          _buildMountedToolbar(),
-                      ],
+      appBar: AppBar(
+        title: Text('编辑'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: _toggleSearch,
+            tooltip: 'Search',
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_isSearchVisible) _buildSearchBar(),
+          Expanded(
+            child: ValueListenableBuilder(
+              valueListenable: _brightness,
+              builder: (context, brightness, child) {
+                return Theme(
+                  data: ThemeData(brightness: brightness),
+                  child: child!,
+                );
+              },
+              child: Builder(
+                // This builder captures the new theme
+                builder: (themedContext) {
+                  return OverlayPortal(
+                    controller: _textFormatBarOverlayController,
+                    overlayChildBuilder: _buildFloatingToolbar,
+                    child: OverlayPortal(
+                      controller: _imageFormatBarOverlayController,
+                      overlayChildBuilder: _buildImageToolbar,
+                      child: Stack(
+                        children: [
+                          Column(
+                            children: [
+                              Expanded(child: _buildEditor(themedContext)),
+                              if (_isMobile) //
+                                _buildMountedToolbar(),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
-            );
-          },
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
