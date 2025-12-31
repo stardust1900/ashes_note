@@ -55,6 +55,8 @@ class NoteDetailState extends State<NoteDetailPage> {
   bool _isSearchVisible = false;
   String _currentSearchTerm = '';
   final FocusNode _searchFocusNode = FocusNode();
+  double targetPosition = 0.0;
+  DocumentSelection? targetSelection;
 
   @override
   void initState() {
@@ -164,7 +166,7 @@ class NoteDetailState extends State<NoteDetailPage> {
       PausableValueNotifier notifier =
           _composer.selectionNotifier as PausableValueNotifier;
       notifier.value = selection;
-
+      targetSelection = selection;
       // Scroll to the found text
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final layout = _docLayoutKey.currentState as DocumentLayout;
@@ -173,6 +175,7 @@ class NoteDetailState extends State<NoteDetailPage> {
           selection.extent,
         );
         if (rect != null) {
+          targetPosition = rect.top - 100;
           _scrollController.animateTo(
             rect.top - 100, // Add some padding at the top
             duration: const Duration(milliseconds: 300),
@@ -213,6 +216,8 @@ class NoteDetailState extends State<NoteDetailPage> {
   }
 
   void _toggleSearch() {
+    targetPosition = 0.0;
+    targetSelection = null;
     _hideEditorToolbar();
     _hideImageToolbar();
     setState(() {
@@ -514,6 +519,17 @@ class NoteDetailState extends State<NoteDetailPage> {
             onPressed: () {
               _clearSearch();
               _isSearchVisible = false;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _scrollController.animateTo(
+                  targetPosition,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                );
+
+                PausableValueNotifier notifier =
+                    _composer.selectionNotifier as PausableValueNotifier;
+                notifier.value = targetSelection;
+              });
             },
             tooltip: 'Close search',
           ),
@@ -564,6 +580,16 @@ class NoteDetailState extends State<NoteDetailPage> {
             onPressed: () {
               _clearSearch();
               _isSearchVisible = false;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _scrollController.animateTo(
+                  targetPosition,
+                  duration: const Duration(milliseconds: 30),
+                  curve: Curves.easeInOut,
+                );
+                PausableValueNotifier notifier =
+                    _composer.selectionNotifier as PausableValueNotifier;
+                notifier.value = targetSelection;
+              });
             },
             tooltip: 'Clear search',
           ),
