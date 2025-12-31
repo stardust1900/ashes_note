@@ -729,17 +729,19 @@ class NoteDetailState extends State<NoteDetailPage> {
         if (note.content != content) {
           note.content = content;
           widget.saveNote(note);
-          Navigator.pop(context, true);
-          // Future.microtask(() {
-          //   if (mounted) {
-          //     Navigator.pop(context, true);
-          //   }
-          // });
+          // Navigator.pop(context, true);
+          Future.microtask(() {
+            if (mounted) {
+              Navigator.pop(context, true);
+            }
+          });
         } else {
-          Navigator.pop(context, false);
-          // Future.microtask(() {
-          //   Navigator.pop(context, false);
-          // });
+          // Navigator.pop(context, false);
+          Future.microtask(() {
+            if (mounted) {
+              Navigator.pop(context, false);
+            }
+          });
         }
       },
       child: Scaffold(
