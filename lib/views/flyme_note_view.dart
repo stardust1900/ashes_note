@@ -897,8 +897,8 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 ],
               ),
               trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
-              onTap: () {
-                Navigator.push(
+              onTap: () async {
+                final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => NoteDetailPage(
@@ -908,6 +908,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     ),
                   ),
                 );
+                if (result) {
+                  setState(() {});
+                }
               },
             ),
           ),

@@ -1,5 +1,10 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:ashes_note/logging.dart';
+import 'package:ashes_note/utils/const.dart';
+import 'package:ashes_note/utils/file_util.dart';
+import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:ashes_note/views/_toolbar.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -24,6 +29,7 @@ class NoteDetailPage extends StatefulWidget {
 
 class NoteDetailState extends State<NoteDetailPage> {
   late Note note;
+  final TextEditingController _titleController = TextEditingController();
   final GlobalKey _docLayoutKey = GlobalKey();
   late MutableDocument _doc;
   late final MutableDocumentComposer _composer;
@@ -57,15 +63,18 @@ class NoteDetailState extends State<NoteDetailPage> {
   final FocusNode _searchFocusNode = FocusNode();
   double targetPosition = 0.0;
   DocumentSelection? targetSelection;
+  ThemeData? mainTheme;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _brightness.value = Theme.of(context).brightness;
+      // mainTheme = Theme.of(context);
     });
 
     note = widget.note;
+    _titleController.text = note.title.replaceAll('.md', '');
     _doc = deserializeMarkdownToDocument(note.content)
       ..addListener(_onDocumentChange);
     _composer = MutableDocumentComposer();
@@ -97,6 +106,7 @@ class NoteDetailState extends State<NoteDetailPage> {
     _composer.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _titleController.dispose();
     super.dispose();
   }
 
@@ -106,6 +116,18 @@ class NoteDetailState extends State<NoteDetailPage> {
     // If we're searching, re-run the search after document changes
     if (_isSearchVisible && _currentSearchTerm.isNotEmpty) {
       _performSearch(_currentSearchTerm);
+    }
+
+    if (note.content != serializeDocumentToMarkdown(_doc)) {
+      // 延迟保存，避免频繁写文件
+      Timer(const Duration(seconds: 1), () {
+        FileUtil().saveFile(
+          SPUtil.get<String>(PrefKeys.workingDirectory, ''),
+          note.id.substring(0, note.id.lastIndexOf('/')),
+          note.title,
+          utf8.encode(note.content),
+        );
+      });
     }
   }
 
@@ -514,25 +536,6 @@ class NoteDetailState extends State<NoteDetailPage> {
       ),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () {
-              _clearSearch();
-              _isSearchVisible = false;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                _scrollController.animateTo(
-                  targetPosition,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
-
-                PausableValueNotifier notifier =
-                    _composer.selectionNotifier as PausableValueNotifier;
-                notifier.value = targetSelection;
-              });
-            },
-            tooltip: 'Close search',
-          ),
           Expanded(
             child: TextField(
               controller: _searchController,
@@ -566,12 +569,12 @@ class NoteDetailState extends State<NoteDetailPage> {
           ),
           const SizedBox(width: 8),
           IconButton(
-            icon: const Icon(Icons.navigate_before),
+            icon: const Icon(Icons.keyboard_arrow_up),
             onPressed: _searchResults.isEmpty ? null : _previousSearchResult,
             tooltip: 'Previous match',
           ),
           IconButton(
-            icon: const Icon(Icons.navigate_next),
+            icon: const Icon(Icons.keyboard_arrow_down),
             onPressed: _searchResults.isEmpty ? null : _nextSearchResult,
             tooltip: 'Next match',
           ),
@@ -599,10 +602,10 @@ class NoteDetailState extends State<NoteDetailPage> {
   }
 
   Widget _buildEditor(BuildContext context) {
-    final isLight = Theme.of(context).brightness == Brightness.light;
-
+    final isLight = mainTheme?.brightness == Brightness.light;
     return ColoredBox(
-      color: Theme.of(context).scaffoldBackgroundColor,
+      color: Theme.of(context).canvasColor,
+      // color: Color.fromARGB(255, 48, 48, 48),
       child: SuperEditorDebugVisuals(
         // config: _debugConfig ?? const SuperEditorDebugVisualsConfig(),
         child: KeyedSubtree(
@@ -659,6 +662,13 @@ class NoteDetailState extends State<NoteDetailPage> {
                       addRulesAfter: [
                         if (!isLight) ..._darkModeStyles,
                         taskStyles,
+                        StyleRule(BlockSelector.all, (doc, docNode) {
+                          return {
+                            Styles.backgroundColor: Theme.of(
+                              context,
+                            ).canvasColor,
+                          };
+                        }),
                       ],
                     ),
                     componentBuilders: [
@@ -705,56 +715,140 @@ class NoteDetailState extends State<NoteDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('编辑'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: _toggleSearch,
-            tooltip: 'Search',
+    mainTheme = Theme.of(context); // 为主题赋值，以便在其他地方使用
+    return PopScope<bool>(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, bool? result) {
+        print(
+          "onPopInvokedWithResult called with didPop=$didPop, result=$result",
+        );
+        if (didPop) {
+          return;
+        }
+        final content = serializeDocumentToMarkdown(_doc);
+        if (note.content != content) {
+          note.content = content;
+          widget.saveNote(note);
+          Navigator.pop(context, true);
+          // Future.microtask(() {
+          //   if (mounted) {
+          //     Navigator.pop(context, true);
+          //   }
+          // });
+        } else {
+          Navigator.pop(context, false);
+          // Future.microtask(() {
+          //   Navigator.pop(context, false);
+          // });
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          // backgroundColor: Theme.of(context).canvasColor,
+          // foregroundColor: Theme.of(context).scaffoldBackgroundColor,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back),
+            onPressed: () {
+              final content = serializeDocumentToMarkdown(_doc);
+              if (note.content != content) {
+                note.content = content;
+                widget.saveNote(note);
+                Navigator.pop(context, true);
+              } else {
+                Navigator.pop(context, false);
+              }
+            },
           ),
-        ],
-      ),
-      body: Column(
-        children: [
-          if (_isSearchVisible) _buildSearchBar(),
-          Expanded(
-            child: ValueListenableBuilder(
-              valueListenable: _brightness,
-              builder: (context, brightness, child) {
-                return Theme(
-                  data: ThemeData(brightness: brightness),
-                  child: child!,
-                );
-              },
-              child: Builder(
-                // This builder captures the new theme
-                builder: (themedContext) {
-                  return OverlayPortal(
-                    controller: _textFormatBarOverlayController,
-                    overlayChildBuilder: _buildFloatingToolbar,
-                    child: OverlayPortal(
-                      controller: _imageFormatBarOverlayController,
-                      overlayChildBuilder: _buildImageToolbar,
-                      child: Stack(
-                        children: [
-                          Column(
-                            children: [
-                              Expanded(child: _buildEditor(themedContext)),
-                              if (_isMobile) //
-                                _buildMountedToolbar(),
-                            ],
-                          ),
-                        ],
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _titleController,
+                onEditingComplete: () {
+                  widget.onNoteChanged(note, newTitle: _titleController.text);
+                },
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                decoration: InputDecoration(
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                  isDense: true,
+                ),
+              ),
+              SizedBox(height: 4),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  return ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                    child: FittedBox(
+                      alignment: Alignment.centerLeft,
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '修改时间: ${note.lastModified.toString().substring(0, 16)}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                     ),
                   );
                 },
               ),
-            ),
+            ],
           ),
-        ],
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: _toggleSearch,
+              tooltip: 'Search',
+            ),
+            IconButton(
+              icon: Icon(Icons.save),
+              onPressed: () {
+                note.content = serializeDocumentToMarkdown(_doc);
+                widget.saveNote(note);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('笔记已保存')));
+              },
+              tooltip: '保存',
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            if (_isSearchVisible) _buildSearchBar(),
+            Expanded(
+              child: ValueListenableBuilder(
+                valueListenable: _brightness,
+                builder: (context, brightness, child) {
+                  return Theme(data: mainTheme!, child: child!);
+                },
+                child: Builder(
+                  // This builder captures the new theme
+                  builder: (builderContext) {
+                    return OverlayPortal(
+                      controller: _textFormatBarOverlayController,
+                      overlayChildBuilder: _buildFloatingToolbar,
+                      child: OverlayPortal(
+                        controller: _imageFormatBarOverlayController,
+                        overlayChildBuilder: _buildImageToolbar,
+                        child: Stack(
+                          children: [
+                            Column(
+                              children: [
+                                Expanded(child: _buildEditor(builderContext)),
+                                if (_isMobile) //
+                                  _buildMountedToolbar(),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

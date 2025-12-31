@@ -634,6 +634,7 @@ class GiteeService extends GitService {
       if (existingSha != null && existingSha.isNotEmpty) {
         print('File $path exists, updating existing file.');
         final localSha = hashObject(contentBytes);
+        print('Local SHA: $localSha, Remote SHA: $existingSha');
         if (localSha == existingSha) {
           print('File $path content is identical, skipping upload.');
           return existingFile; // 内容相同，跳过上传
