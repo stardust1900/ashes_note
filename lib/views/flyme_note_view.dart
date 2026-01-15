@@ -4,9 +4,9 @@ import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
-import 'package:ashes_note/views/note_detail_supereditor_view.dart'
-    show NoteDetailPage;
-// import 'package:ashes_note/views/note_detail_view.dart' show NoteDetailPage;
+// import 'package:ashes_note/views/note_detail_supereditor_view.dart'
+//     show NoteDetailPage;
+import 'package:ashes_note/views/note_detail_view.dart' show NoteDetailPage;
 import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
 
