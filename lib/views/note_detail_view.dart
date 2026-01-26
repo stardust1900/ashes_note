@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
@@ -571,6 +572,18 @@ class NoteDetailState extends State<NoteDetailPage> {
     return Markdown(
       data: note.content,
       selectable: true,
+      imageDirectory: SPUtil.get<String>(PrefKeys.workingDirectory, ''),
+      // 添加图片显示相关配置
+      imageBuilder: (uri, title, alt) {
+        final path = uri.toString();
+
+        // 判断是否为网络路径
+        if (path.contains('://') && !path.startsWith('file://')) {
+          return _buildNetworkImage(path);
+        }
+        // 本地路径（相对或绝对）
+        return _buildLocalImage(path);
+      },
       styleSheet: MarkdownStyleSheet(
         p: TextStyle(fontSize: 14, color: Colors.white70, height: 1.6),
         h1: TextStyle(
@@ -611,6 +624,147 @@ class NoteDetailState extends State<NoteDetailPage> {
       ),
       shrinkWrap: true,
     );
+  }
+
+  // 构建网络图片
+  Widget _buildNetworkImage(String path) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final maxWidth = screenWidth * 0.68;
+
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 8),
+      child: Image.network(
+        path,
+        fit: BoxFit.contain,
+        width: maxWidth,
+        errorBuilder: (context, error, stackTrace) =>
+            _buildErrorWidget('图片加载失败', path),
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(
+            height: 200,
+            child: Center(
+              child: CircularProgressIndicator(
+                value: loadingProgress.expectedTotalBytes != null
+                    ? loadingProgress.cumulativeBytesLoaded /
+                          loadingProgress.expectedTotalBytes!
+                    : null,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // 构建本地图片
+  Widget _buildLocalImage(String path) {
+    return FutureBuilder<File>(
+      future: _resolveLocalImagePath(path),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(
+            height: 200,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError || !snapshot.hasData) {
+          return _buildErrorWidget('图片未找到', path);
+        }
+
+        return Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: FutureBuilder<double>(
+            future: _calculateDisplayWidth(snapshot.data!),
+            builder: (context, widthSnapshot) {
+              final displayWidth = widthSnapshot.data ??
+                  MediaQuery.of(context).size.width * 0.68;
+
+              return Image.file(
+                snapshot.data!,
+                fit: BoxFit.contain,
+                width: displayWidth,
+                errorBuilder: (context, error, stackTrace) =>
+                    _buildErrorWidget('图片加载失败', snapshot.data!.path),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // 计算图片显示宽度（异步避免阻塞UI）
+  Future<double> _calculateDisplayWidth(File file) async {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final maxWidth = screenWidth * 0.68;
+
+    try {
+      final bytes = await file.readAsBytes();
+      final decodedImage = await decodeImageFromList(bytes);
+      final imageWidth = decodedImage.width.toDouble();
+      return imageWidth < maxWidth ? imageWidth : maxWidth;
+    } catch (e) {
+      return maxWidth;
+    }
+  }
+
+  // 统一的错误显示组件
+  Widget _buildErrorWidget(String message, String path) {
+    return Container(
+      padding: EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey[850],
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.broken_image, color: Colors.grey[600], size: 48),
+          SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(color: Colors.grey[500], fontSize: 12),
+          ),
+          SizedBox(height: 4),
+          Text(
+            path,
+            style: TextStyle(color: Colors.grey[600], fontSize: 10),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 解析本地图片路径
+  Future<File> _resolveLocalImagePath(String path) async {
+    final workingDir = SPUtil.get<String>(PrefKeys.workingDirectory, '');
+    final noteDir = note.id.substring(0, note.id.lastIndexOf('/'));
+    final basePath = '$workingDir/$noteDir';
+
+    // 移除 file:// 前缀
+    path = path.replaceFirst('file://', '');
+
+    // 绝对路径直接返回
+    if (path.startsWith('/') || (path.length > 2 && path[1] == ':')) {
+      return File(path);
+    }
+
+    // 移除 ./ 前缀
+    if (path.startsWith('./') || path.startsWith('.\\')) {
+      path = path.substring(2);
+    }
+
+    final fullPath = '$basePath/$path';
+    final file = File(fullPath);
+
+    if (!await file.exists()) {
+      throw Exception('File not found: $fullPath');
+    }
+
+    return file;
   }
 }
 
