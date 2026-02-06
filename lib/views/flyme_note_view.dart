@@ -313,12 +313,14 @@ class NotebookHomePageState extends State<NotebookHomePage> {
     );
   }
 
-  void _onSearchResultTap(GlobalSearchResult result) {
+  void _onSearchResultTap(GlobalSearchResult result) async {
     // 找到对应的笔记本
     final targetNotebook = _notebooks.firstWhere(
       (notebook) => notebook.name == result.notebookName,
       orElse: () => _selectedNotebook!,
     );
+
+    final wasInGlobalSearch = _isGlobalSearch;
 
     setState(() {
       _selectedNotebook = targetNotebook;
@@ -326,8 +328,8 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       _searchController.clear();
     });
 
-    // 跳转到笔记详情页
-    Navigator.push(
+    // 跳转到笔记详情页，等待返回值
+    final noteUpdated = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (context) => NoteDetailPage(
@@ -337,6 +339,17 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         ),
       ),
     );
+
+    // 如果笔记已更新，刷新笔记列表
+    if (noteUpdated == true) {
+      // 如果之前是在全局搜索模式下，重新执行搜索
+      if (wasInGlobalSearch && _searchController.text.isNotEmpty) {
+        _performSearch(_searchController.text);
+      } else {
+        // 否则，noteChanged 已经处理了更新
+        setState(() {});
+      }
+    }
   }
 
   @override
@@ -898,7 +911,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
               ),
               trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
               onTap: () async {
-                final result = await Navigator.push(
+                final result = await Navigator.push<bool>(
                   context,
                   MaterialPageRoute(
                     builder: (context) => NoteDetailPage(
@@ -908,7 +921,8 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     ),
                   ),
                 );
-                if (result) {
+                // 如果笔记已更新，刷新笔记列表
+                if (result == true) {
                   setState(() {});
                 }
               },

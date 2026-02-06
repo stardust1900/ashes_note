@@ -5,10 +5,13 @@ import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:flutter/rendering.dart' show RenderProxyBox, RenderEditable;
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
+import 'package:super_editor/super_editor.dart';
+import 'package:ashes_note/views/_toolbar.dart';
 
 // 笔记详情页面（包含查找功能）
 class NoteDetailPage extends StatefulWidget {
@@ -40,7 +43,40 @@ class NoteDetailState extends State<NoteDetailPage> {
   int _totalMatches = 0;
   List<TextSelection> _matches = [];
   final FocusNode _findFocusNode = FocusNode();
-  bool _isEditing = true;
+
+  // 视图模式：edit(普通编辑), preview(预览), superEditor(SuperEditor)
+  String _viewMode = 'edit';
+
+  // SuperEditor 相关变量
+  late MutableDocument _doc;
+  late final MutableDocumentComposer _composer;
+  late final Editor _docEditor;
+  late CommonEditorOperations _docOps;
+  final _docChangeSignal = SignalNotifier();
+  late FocusNode _editorFocusNode;
+  late ScrollController _superEditorScrollController;
+  late final SuperEditorIosControlsController _iosControlsController;
+
+  final _brightness = ValueNotifier<Brightness>(Brightness.light);
+  final _textFormatBarOverlayController = OverlayPortalController();
+  final _textSelectionAnchor = ValueNotifier<Offset?>(null);
+  final _imageFormatBarOverlayController = OverlayPortalController();
+  final _imageSelectionAnchor = ValueNotifier<Offset?>(null);
+  final _overlayController =
+      MagnifierAndToolbarController() //
+        ..screenPadding = const EdgeInsets.all(20.0);
+  final MarkdownInlineUpstreamSyntaxPlugin _markdownPlugin =
+      MarkdownInlineUpstreamSyntaxPlugin();
+
+  // SuperEditor 查找功能变量
+  final TextEditingController _searchController = TextEditingController();
+  late List<DocumentSelection> _searchResults;
+  int _currentSearchIndex = -1;
+  bool _isSearchVisible = false;
+  String _currentSearchTerm = '';
+  final FocusNode _searchFocusNode = FocusNode();
+  double targetPosition = 0.0;
+  DocumentSelection? targetSelection;
 
   // 快捷键支持
   final Map<LogicalKeySet, Intent> _shortcuts = {
@@ -65,6 +101,11 @@ class NoteDetailState extends State<NoteDetailPage> {
 
     // 初始化高亮文本
     _updateHighlightedText();
+
+    // 初始化 SuperEditor
+    _initSuperEditor();
+
+    _searchResults = [];
   }
 
   @override
@@ -76,7 +117,87 @@ class NoteDetailState extends State<NoteDetailPage> {
     _findController.dispose();
     _scrollController.dispose();
     _findFocusNode.dispose();
+    _superEditorScrollController.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    _iosControlsController.dispose();
+    _editorFocusNode.dispose();
+    _composer.dispose();
     super.dispose();
+  }
+
+  // SuperEditor 初始化
+  void _initSuperEditor() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _brightness.value = Theme.of(context).brightness;
+    });
+
+    _doc = deserializeMarkdownToDocument(note.content)
+      ..addListener(_onSuperDocumentChange);
+    _composer = MutableDocumentComposer();
+    _composer.selectionNotifier.addListener(_hideOrShowToolbar);
+    _docEditor = createDefaultDocumentEditor(
+      document: _doc,
+      composer: _composer,
+      isHistoryEnabled: true,
+    );
+    _docOps = CommonEditorOperations(
+      editor: _docEditor,
+      document: _doc,
+      composer: _composer,
+      documentLayoutResolver: () =>
+          _superDocLayoutKey.currentState as DocumentLayout,
+    );
+    _editorFocusNode = FocusNode();
+    _superEditorScrollController = ScrollController()
+      ..addListener(_hideOrShowToolbar);
+    _iosControlsController = SuperEditorIosControlsController();
+  }
+
+  // SuperEditor 文档变化监听
+  void _onSuperDocumentChange(_) {
+    _hideOrShowToolbar();
+    _docChangeSignal.notifyListeners();
+    // 如果在 SuperEditor 中搜索，文档变化后重新搜索
+    if (_isSearchVisible && _currentSearchTerm.isNotEmpty) {
+      _performSuperSearch(_currentSearchTerm);
+    }
+
+    final newContent = serializeDocumentToMarkdown(_doc);
+    if (note.content != newContent) {
+      note.content = newContent;
+      widget.onNoteChanged(note);
+      // 延迟保存到文件，避免频繁写文件
+      Timer(const Duration(seconds: 1), () {
+        _saveContentToFile();
+      });
+    }
+  }
+
+  // 切换视图模式前保存当前内容
+  void _saveBeforeSwitch() {
+    if (_viewMode == 'edit') {
+      // 从普通编辑器保存到文件（不上传到git）
+      note.content = _textController.text;
+      _saveContentToFile();
+      widget.onNoteChanged(note);
+    } else if (_viewMode == 'superEditor') {
+      // 从 SuperEditor 保存到文件（不上传到git）
+      note.content = serializeDocumentToMarkdown(_doc);
+      _saveContentToFile();
+      widget.onNoteChanged(note);
+    }
+    // preview 模式是只读的，不需要保存
+  }
+
+  // 只保存到文件，不上传到git
+  void _saveContentToFile() {
+    FileUtil().saveFile(
+      SPUtil.get<String>(PrefKeys.workingDirectory, ''),
+      note.id.substring(0, note.id.lastIndexOf('/')),
+      note.title,
+      utf8.encode(note.content),
+    );
   }
 
   void _onTextChanged() {
@@ -331,6 +452,371 @@ class NoteDetailState extends State<NoteDetailPage> {
     });
   }
 
+  // ==================== SuperEditor 相关方法 ====================
+
+  // SuperEditor 搜索功能
+  void _performSuperSearch(String searchTerm) {
+    if (searchTerm.isEmpty) {
+      _clearSuperSearch();
+      return;
+    }
+
+    _currentSearchTerm = searchTerm;
+    _searchResults = [];
+
+    // 遍历文档中的所有文本节点
+    final it = _doc.iterator;
+    while (it.moveNext()) {
+      final node = it.current;
+      if (node is TextNode) {
+        final text = node.text.toPlainText();
+        int startIndex = 0;
+
+        while (startIndex < text.length) {
+          final index = text.toLowerCase().indexOf(
+            searchTerm.toLowerCase(),
+            startIndex,
+          );
+          if (index == -1) break;
+
+          // 为此匹配创建选择区域
+          final start = DocumentPosition(
+            nodeId: node.id,
+            nodePosition: TextNodePosition(offset: index),
+          );
+          final end = DocumentPosition(
+            nodeId: node.id,
+            nodePosition: TextNodePosition(offset: index + searchTerm.length),
+          );
+
+          _searchResults.add(DocumentSelection(base: start, extent: end));
+
+          startIndex = index + 1; // 移过此匹配以查找下一个
+        }
+      }
+    }
+
+    if (_searchResults.isNotEmpty) {
+      _currentSearchIndex = 0;
+      _jumpToSuperSearchResult(_currentSearchIndex);
+    } else {
+      _currentSearchIndex = -1;
+    }
+
+    setState(() {});
+  }
+
+  void _jumpToSuperSearchResult(int index) {
+    if (index >= 0 && index < _searchResults.length) {
+      final selection = _searchResults[index];
+      PausableValueNotifier notifier =
+          _composer.selectionNotifier as PausableValueNotifier;
+      notifier.value = selection;
+      targetSelection = selection;
+      // 滚动到找到的文本
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final layout = _superDocLayoutKey.currentState as DocumentLayout;
+        final rect = layout.getRectForSelection(
+          selection.base,
+          selection.extent,
+        );
+        if (rect != null) {
+          targetPosition = rect.top - 100;
+          _superEditorScrollController.animateTo(
+            rect.top - 100, // 在顶部添加一些边距
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+        }
+      });
+    }
+  }
+
+  void _nextSuperSearchResult() {
+    if (_searchResults.isEmpty) return;
+
+    _currentSearchIndex = (_currentSearchIndex + 1) % _searchResults.length;
+    _jumpToSuperSearchResult(_currentSearchIndex);
+    setState(() {});
+  }
+
+  void _previousSuperSearchResult() {
+    if (_searchResults.isEmpty) return;
+
+    _currentSearchIndex = _currentSearchIndex <= 0
+        ? _searchResults.length - 1
+        : _currentSearchIndex - 1;
+    _jumpToSuperSearchResult(_currentSearchIndex);
+    setState(() {});
+  }
+
+  void _clearSuperSearch() {
+    setState(() {
+      _currentSearchTerm = '';
+      _searchResults = [];
+      _currentSearchIndex = -1;
+      _searchController.clear();
+      _composer.clearSelection();
+    });
+  }
+
+  void _toggleSuperSearch() {
+    targetPosition = 0.0;
+    targetSelection = null;
+    _hideEditorToolbar();
+    _hideImageToolbar();
+    setState(() {
+      _isSearchVisible = !_isSearchVisible;
+      if (!_isSearchVisible) {
+        _clearSuperSearch();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _searchFocusNode.requestFocus();
+        });
+      }
+    });
+  }
+
+  // SuperEditor 工具栏相关
+  final _superDocLayoutKey = GlobalKey();
+  final _superViewportKey = GlobalKey();
+  final SelectionLayerLinks _selectionLayerLinks = SelectionLayerLinks();
+
+  DocumentGestureMode get _gestureMode {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return DocumentGestureMode.android;
+      case TargetPlatform.iOS:
+        return DocumentGestureMode.iOS;
+      case TargetPlatform.fuchsia:
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+        return DocumentGestureMode.mouse;
+    }
+  }
+
+  TextInputSource get _inputSource {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+      case TargetPlatform.fuchsia:
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+        return TextInputSource.ime;
+    }
+  }
+
+  Widget _buildFloatingToolbar(BuildContext context) {
+    return EditorToolbar(
+      editorViewportKey: _superViewportKey,
+      anchor: _selectionLayerLinks.expandedSelectionBoundsLink,
+      editorFocusNode: _editorFocusNode,
+      editor: _docEditor,
+      document: _doc,
+      composer: _composer,
+      closeToolbar: _hideEditorToolbar,
+    );
+  }
+
+  void _showImageToolbar() {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+      final docBoundingBox = (_superDocLayoutKey.currentState as DocumentLayout)
+          .getRectForSelection(
+            _composer.selection!.base,
+            _composer.selection!.extent,
+          )!;
+      final renderObject = _superDocLayoutKey.currentContext
+          ?.findRenderObject();
+      RenderBox? docBox;
+      if (renderObject is RenderBox) {
+        docBox = renderObject;
+      } else {
+        return;
+      }
+
+      final overlayBoundingBox = Rect.fromPoints(
+        docBox.localToGlobal(docBoundingBox.topLeft),
+        docBox.localToGlobal(docBoundingBox.bottomRight),
+      );
+
+      _imageSelectionAnchor.value = overlayBoundingBox.center;
+    });
+
+    _imageFormatBarOverlayController.show();
+  }
+
+  void _showEditorToolbar() {
+    _textFormatBarOverlayController.show();
+
+    // Schedule a callback after this frame to locate the selection
+    // bounds on the screen and display the toolbar near the selected
+    // text.
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+      final layout = _superDocLayoutKey.currentState as DocumentLayout;
+      final docBoundingBox = layout.getRectForSelection(
+        _composer.selection!.base,
+        _composer.selection!.extent,
+      )!;
+      final globalOffset = layout.getGlobalOffsetFromDocumentOffset(
+        Offset.zero,
+      );
+      final overlayBoundingBox = docBoundingBox.shift(globalOffset);
+
+      _textSelectionAnchor.value = overlayBoundingBox.topCenter;
+    });
+  }
+
+  void _hideEditorToolbar() {
+    _textSelectionAnchor.value = null;
+    _textFormatBarOverlayController.hide();
+
+    if (FocusManager.instance.primaryFocus != FocusManager.instance.rootScope) {
+      _editorFocusNode.requestFocus();
+    }
+  }
+
+  void _hideImageToolbar() {
+    _imageSelectionAnchor.value = null;
+    _imageFormatBarOverlayController.hide();
+
+    if (FocusManager.instance.primaryFocus != FocusManager.instance.rootScope) {
+      _editorFocusNode.requestFocus();
+    }
+  }
+
+  void _hideOrShowToolbar() {
+    if (_gestureMode != DocumentGestureMode.mouse) {
+      // We only add our own toolbar when using mouse. On mobile, a bar
+      // is rendered for us.
+      return;
+    }
+
+    if (_isSearchVisible) {
+      _hideEditorToolbar();
+      _hideImageToolbar();
+      return;
+    }
+
+    final selection = _composer.selection;
+    if (selection == null) {
+      _hideEditorToolbar();
+      return;
+    }
+    if (selection.base.nodeId != selection.extent.nodeId) {
+      _hideEditorToolbar();
+      _hideImageToolbar();
+      return;
+    }
+    if (selection.isCollapsed) {
+      _hideEditorToolbar();
+      _hideImageToolbar();
+      return;
+    }
+
+    final selectedNode = _doc.getNodeById(selection.extent.nodeId);
+
+    if (selectedNode is ImageNode) {
+      _showImageToolbar();
+      _hideEditorToolbar();
+      return;
+    } else {
+      _hideImageToolbar();
+    }
+
+    if (selectedNode is TextNode) {
+      _showEditorToolbar();
+      _hideImageToolbar();
+      return;
+    } else {
+      _hideEditorToolbar();
+    }
+  }
+
+  void _cut() {
+    _docOps.cut();
+    _overlayController.hideToolbar();
+    _iosControlsController.hideToolbar();
+  }
+
+  void _copy() {
+    _docOps.copy();
+    _overlayController.hideToolbar();
+    _iosControlsController.hideToolbar();
+  }
+
+  void _paste() {
+    _docOps.paste();
+    _overlayController.hideToolbar();
+    _iosControlsController.hideToolbar();
+  }
+
+  void _selectAll() => _docOps.selectAll();
+
+  Widget _buildAndroidFloatingToolbar() {
+    return ListenableBuilder(
+      listenable: _brightness,
+      builder: (context, _) {
+        return Theme(
+          data: ThemeData(brightness: _brightness.value),
+          child: AndroidTextEditingFloatingToolbar(
+            onCutPressed: _cut,
+            onCopyPressed: _copy,
+            onPastePressed: _paste,
+            onSelectAllPressed: _selectAll,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildImageToolbar(BuildContext context) {
+    return ImageFormatToolbar(
+      anchor: _imageSelectionAnchor,
+      composer: _composer,
+      setWidth: (nodeId, width) {
+        final node = _doc.getNodeById(nodeId)!;
+        final currentStyles = SingleColumnLayoutComponentStyles.fromMetadata(
+          node,
+        );
+
+        _docEditor.execute([
+          ChangeSingleColumnLayoutComponentStylesRequest(
+            nodeId: nodeId,
+            styles: SingleColumnLayoutComponentStyles(
+              width: width,
+              padding: currentStyles.padding,
+            ),
+          ),
+        ]);
+      },
+      closeToolbar: _hideImageToolbar,
+    );
+  }
+
+  bool get _isMobile => _gestureMode != DocumentGestureMode.mouse;
+
+  Widget _buildMountedToolbar() {
+    return MultiListenableBuilder(
+      listenables: <Listenable>{_docChangeSignal, _composer.selectionNotifier},
+      builder: (_) {
+        final selection = _composer.selection;
+
+        if (selection == null) {
+          return const SizedBox();
+        }
+
+        return KeyboardEditingToolbar(
+          editor: _docEditor,
+          document: _doc,
+          composer: _composer,
+          commonOps: _docOps,
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
@@ -348,8 +834,14 @@ class NoteDetailState extends State<NoteDetailPage> {
               leading: IconButton(
                 icon: Icon(Icons.arrow_back),
                 onPressed: () {
+                  // 返回前保存当前视图的内容到文件
+                  _saveBeforeSwitch();
+                  // 通知父组件笔记已更新
+                  widget.onNoteChanged(note);
+                  // 上传到git
                   widget.saveNote(note);
-                  Navigator.pop(context);
+                  // 返回并传递 true 表示笔记已更新
+                  Navigator.pop(context, true);
                 },
               ),
               title: Column(
@@ -395,40 +887,72 @@ class NoteDetailState extends State<NoteDetailPage> {
                 ],
               ),
               actions: [
-                // 只在编辑模式下显示查找按钮
-                if (_isEditing)
+                // 查找按钮：普通编辑模式或 SuperEditor 模式
+                if (_viewMode == 'edit' || _viewMode == 'superEditor')
                   IconButton(
                     icon: Icon(Icons.find_in_page),
-                    onPressed: _toggleFindPanel,
+                    onPressed: _viewMode == 'superEditor'
+                        ? _toggleSuperSearch
+                        : _toggleFindPanel,
                     tooltip: '查找 (Ctrl+F)',
                   ),
+                // 普通编辑模式按钮
                 IconButton(
                   icon: Icon(
-                    Icons.edit,
-                    color: _isEditing ? Colors.blue : Colors.grey,
+                    Icons.edit_note,
+                    color: _viewMode == 'edit' ? Colors.blue : Colors.grey,
                   ),
-                  onPressed: () => setState(() {
-                    _isEditing = true;
-                    // 切换到编辑模式时，如果查找面板是打开的，确保高亮更新
-                    if (_findController.text.isNotEmpty) {
-                      _findMatches();
-                    }
-                  }),
-                  tooltip: '编辑',
+                  onPressed: () {
+                    // 切换到普通编辑模式前，先保存当前内容
+                    _saveBeforeSwitch();
+                    setState(() {
+                      _viewMode = 'edit';
+                      // 从 SuperEditor 或 preview 切换到 edit 时，更新 textController
+                      _textController.text = note.content;
+                      if (_findController.text.isNotEmpty) {
+                        _findMatches();
+                      }
+                    });
+                  },
+                  tooltip: '普通编辑',
                 ),
+                // 预览模式按钮
                 IconButton(
                   icon: Icon(
                     Icons.preview,
-                    color: !_isEditing ? Colors.blue : Colors.grey,
+                    color: _viewMode == 'preview' ? Colors.blue : Colors.grey,
                   ),
-                  onPressed: () => setState(() {
-                    _isEditing = false;
-                    // 切换到预览模式时，关闭查找面板
-                    if (_showFindPanel) {
-                      _closeFindPanel();
-                    }
-                  }),
+                  onPressed: () {
+                    // 切换到预览模式前，先保存当前内容
+                    _saveBeforeSwitch();
+                    setState(() {
+                      _viewMode = 'preview';
+                      if (_showFindPanel) {
+                        _closeFindPanel();
+                      }
+                    });
+                  },
                   tooltip: '预览',
+                ),
+                // SuperEditor 模式按钮
+                IconButton(
+                  icon: Icon(
+                    Icons.format_paint,
+                    color: _viewMode == 'superEditor'
+                        ? Colors.blue
+                        : Colors.grey,
+                  ),
+                  onPressed: () {
+                    // 切换到 SuperEditor 模式前，先保存当前内容
+                    _saveBeforeSwitch();
+                    setState(() {
+                      _viewMode = 'superEditor';
+                      if (_showFindPanel) {
+                        _closeFindPanel();
+                      }
+                    });
+                  },
+                  tooltip: 'SuperEditor',
                 ),
                 IconButton(
                   icon: Icon(Icons.save),
@@ -444,16 +968,53 @@ class NoteDetailState extends State<NoteDetailPage> {
             ),
             body: Column(
               children: [
-                // 查找面板只在编辑模式下显示
-                Visibility(
-                  visible: _isEditing && _showFindPanel,
-                  child: _buildFindPanel(),
+                // 查找面板
+                if (_viewMode == 'edit' && _showFindPanel) _buildFindPanel(),
+                if (_viewMode == 'superEditor' && _isSearchVisible)
+                  _buildSuperSearchBar(),
+                Expanded(
+                  child: _viewMode == 'edit'
+                      ? _buildEditor()
+                      : _viewMode == 'preview'
+                      ? _buildPreview()
+                      : _buildSuperEditorView(),
                 ),
-                Expanded(child: _isEditing ? _buildEditor() : _buildPreview()),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  // SuperEditor 视图构建器（包含 Overlay）
+  Widget _buildSuperEditorView() {
+    return ValueListenableBuilder(
+      valueListenable: _brightness,
+      builder: (context, brightness, child) {
+        return Theme(data: Theme.of(context), child: child!);
+      },
+      child: Builder(
+        builder: (builderContext) {
+          return OverlayPortal(
+            controller: _textFormatBarOverlayController,
+            overlayChildBuilder: _buildFloatingToolbar,
+            child: OverlayPortal(
+              controller: _imageFormatBarOverlayController,
+              overlayChildBuilder: _buildImageToolbar,
+              child: Stack(
+                children: [
+                  Column(
+                    children: [
+                      Expanded(child: _buildSuperEditor()),
+                      if (_isMobile) _buildMountedToolbar(),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -515,6 +1076,86 @@ class NoteDetailState extends State<NoteDetailPage> {
   }
 
   final _selectableTextKey = GlobalKey();
+
+  // SuperEditor 搜索栏
+  Widget _buildSuperSearchBar() {
+    return Container(
+      padding: const EdgeInsets.all(8.0),
+      decoration: BoxDecoration(
+        color: Theme.of(context).appBarTheme.backgroundColor,
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              decoration: const InputDecoration(
+                hintText: 'Search...',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              ),
+              onChanged: (value) {
+                if (value.isEmpty) {
+                  _clearSuperSearch();
+                  return;
+                }
+                _performSuperSearch(value);
+              },
+              onSubmitted: (value) {
+                _performSuperSearch(value);
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _searchResults.isEmpty || _currentSearchIndex == -1
+                ? '0/0'
+                : '${_currentSearchIndex + 1}/${_searchResults.length}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_up),
+            onPressed: _searchResults.isEmpty
+                ? null
+                : _previousSuperSearchResult,
+            tooltip: 'Previous match',
+          ),
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_down),
+            onPressed: _searchResults.isEmpty ? null : _nextSuperSearchResult,
+            tooltip: 'Next match',
+          ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () {
+              _clearSuperSearch();
+              _isSearchVisible = false;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _superEditorScrollController.animateTo(
+                  targetPosition,
+                  duration: const Duration(milliseconds: 30),
+                  curve: Curves.easeInOut,
+                );
+                PausableValueNotifier notifier =
+                    _composer.selectionNotifier as PausableValueNotifier;
+                notifier.value = targetSelection;
+              });
+            },
+            tooltip: 'Clear search',
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEditor() {
     return Stack(
       children: [
@@ -567,9 +1208,100 @@ class NoteDetailState extends State<NoteDetailPage> {
     );
   }
 
+  // SuperEditor 构建方法
+  Widget _buildSuperEditor() {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return ColoredBox(
+          color: Theme.of(context).canvasColor,
+          child: SuperEditorDebugVisuals(
+            child: KeyedSubtree(
+              key: _superViewportKey,
+              child: SuperEditorIosControlsScope(
+                controller: _iosControlsController,
+                child: _isSearchVisible
+                    ? SuperReader(
+                        editor: _docEditor,
+                        scrollController: _superEditorScrollController,
+                        documentLayoutKey: _superDocLayoutKey,
+                        stylesheet: defaultStylesheet.copyWith(
+                          addRulesAfter: [if (!isLight) ..._darkModeStyles],
+                        ),
+                        selectionLayerLinks: _selectionLayerLinks,
+                        selectionStyle: isLight
+                            ? defaultSelectionStyle
+                            : SelectionStyles(
+                                selectionColor: Colors.yellow.withValues(
+                                  alpha: 0.5,
+                                ),
+                              ),
+                      )
+                    : SuperEditor(
+                        editor: _docEditor,
+                        focusNode: _editorFocusNode,
+                        scrollController: _superEditorScrollController,
+                        documentLayoutKey: _superDocLayoutKey,
+                        documentOverlayBuilders: [
+                          DefaultCaretOverlayBuilder(
+                            caretStyle: const CaretStyle().copyWith(
+                              color: isLight ? Colors.black : Colors.redAccent,
+                            ),
+                          ),
+                          if (defaultTargetPlatform == TargetPlatform.iOS) ...[
+                            SuperEditorIosHandlesDocumentLayerBuilder(),
+                            SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
+                          ],
+                          if (defaultTargetPlatform == TargetPlatform.android) ...[
+                            SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
+                            SuperEditorAndroidHandlesDocumentLayerBuilder(),
+                          ],
+                        ],
+                        selectionLayerLinks: _selectionLayerLinks,
+                        selectionStyle: isLight
+                            ? defaultSelectionStyle
+                            : SelectionStyles(
+                                selectionColor: Colors.red.withValues(alpha: 0.3),
+                              ),
+                        stylesheet: defaultStylesheet.copyWith(
+                          addRulesAfter: [
+                            if (!isLight) ..._darkModeStyles,
+                            StyleRule(BlockSelector.all, (doc, docNode) {
+                              return {
+                                Styles.backgroundColor: Theme.of(
+                                  context,
+                                ).canvasColor,
+                              };
+                            }),
+                            StyleRule(BlockSelector.all, (doc, docNode) {
+                              return {
+                                Styles.maxWidth: constraints.maxWidth,
+                              };
+                            }),
+                          ],
+                        ),
+                        componentBuilders: defaultComponentBuilders,
+                        gestureMode: _gestureMode,
+                        inputSource: _inputSource,
+                        keyboardActions: _inputSource == TextInputSource.ime
+                            ? defaultImeKeyboardActions
+                            : defaultKeyboardActions,
+                        androidToolbarBuilder: (_) =>
+                            _buildAndroidFloatingToolbar(),
+                        overlayController: _overlayController,
+                        plugins: {_markdownPlugin},
+                      ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildPreview() {
-    // 使用flutter_markdown包实现真正的Markdown预览[1,2,5](@ref)
-    return Markdown(
+    // 使用flutter_markdown包实现真正的Markdown预览
+    return fm.Markdown(
       data: note.content,
       selectable: true,
       imageDirectory: SPUtil.get<String>(PrefKeys.workingDirectory, ''),
@@ -584,7 +1316,7 @@ class NoteDetailState extends State<NoteDetailPage> {
         // 本地路径（相对或绝对）
         return _buildLocalImage(path);
       },
-      styleSheet: MarkdownStyleSheet(
+      styleSheet: fm.MarkdownStyleSheet(
         p: TextStyle(fontSize: 14, color: Colors.white70, height: 1.6),
         h1: TextStyle(
           fontSize: 26,
@@ -678,7 +1410,8 @@ class NoteDetailState extends State<NoteDetailPage> {
           child: FutureBuilder<double>(
             future: _calculateDisplayWidth(snapshot.data!),
             builder: (context, widthSnapshot) {
-              final displayWidth = widthSnapshot.data ??
+              final displayWidth =
+                  widthSnapshot.data ??
                   MediaQuery.of(context).size.width * 0.68;
 
               return Image.file(
@@ -814,3 +1547,53 @@ class FindPreviousAction extends Action<FindPreviousIntent> {
     onFindPrevious();
   }
 }
+
+// SuperEditor 暗色模式样式（与预览模式保持一致）
+final _darkModeStyles = [
+  StyleRule(BlockSelector.all, (doc, docNode) {
+    return {
+      Styles.textStyle: const TextStyle(
+        color: Color(0xFFFFFFFF),
+        fontSize: 14,
+        height: 1.4,
+      ),
+      Styles.padding: const EdgeInsets.all(16),
+    };
+  }),
+  StyleRule(const BlockSelector("header1"), (doc, docNode) {
+    return {
+      Styles.textStyle: const TextStyle(
+        color: Color(0xFFFFFFFF),
+        fontSize: 26,
+        fontWeight: FontWeight.bold,
+      ),
+    };
+  }),
+  StyleRule(const BlockSelector("header2"), (doc, docNode) {
+    return {
+      Styles.textStyle: const TextStyle(
+        color: Color(0xFFFFFFFF),
+        fontSize: 22,
+        fontWeight: FontWeight.bold,
+      ),
+    };
+  }),
+  StyleRule(const BlockSelector("header3"), (doc, docNode) {
+    return {
+      Styles.textStyle: const TextStyle(
+        color: Color(0xFFFFFFFF),
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+      ),
+    };
+  }),
+  StyleRule(const BlockSelector("paragraph"), (doc, docNode) {
+    return {
+      Styles.textStyle: const TextStyle(
+        color: Color(0xFFB3B3B3),
+        fontSize: 14,
+        height: 1.6,
+      ),
+    };
+  }),
+];
