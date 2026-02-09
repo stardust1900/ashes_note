@@ -1,4 +1,5 @@
 //设置页面 显示工作目录，可以修改，有保存按钮
+import 'dart:io';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
@@ -387,17 +388,34 @@ class _SettingsViewState extends State<SettingsView> {
     GitService git = GitFactory.getGitService(_gitPlatform, _token!);
     var (owner, repo) = git.getOwnerRepoFromUrl(_remoteUrl!);
     print('开始同步仓库 $owner/$repo');
+    print('工作目录: $_workingDirectory');
+    print('notes 目录: $_workingDirectory/notes');
     setState(() {
       _isLoading = true;
     });
     ScaffoldMessengerState messengerState = ScaffoldMessenger.of(context);
 
+    // notes 目录作为 Git 仓库根目录
+    final notesDirectory = '$_workingDirectory/notes';
+
     FileUtil()
-        .deleteDirectory(_workingDirectory!, '*')
+        .deleteDirectory(notesDirectory, '*')
         .then((_) {
+          print('删除目录完成，开始 Git pull: $notesDirectory');
           git
-              .pull(owner, repo, _workingDirectory!)
+              .pull(owner, repo, notesDirectory)
               .then((_) {
+                // 打印 notes 目录下的文件
+                final notesDir = Directory(notesDirectory);
+                if (notesDir.existsSync()) {
+                  notesDir.list().listen((entity) {
+                    print('Git pull 完成, notes 目录内容: ${entity.path}');
+                  }, onDone: () {
+                    print('Git pull 完成, notes 目录列出完毕');
+                  });
+                } else {
+                  print('Git pull 完成,但 notes 目录不存在');
+                }
                 messengerState.showSnackBar(
                   const SnackBar(content: Text('仓库初始化完成')),
                 );

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
@@ -41,9 +42,12 @@ class NotebookHomePageState extends State<NotebookHomePage> {
   void initState() {
     super.initState();
     print('NotebookHomePageState initState');
+    print('工作目录: ${SPUtil.get<String>(PrefKeys.workingDirectory, '')}');
 
     workingDirectory = SPUtil.get<String>(PrefKeys.workingDirectory, '');
     String gitPlatform = SPUtil.get<String>(PrefKeys.gitPlatform, '');
+
+    print('notes 目录: $workingDirectory/notes');
 
     if (gitPlatform.isNotEmpty) {
       if (gitPlatform == GitPlatforms.gitee) {
@@ -138,15 +142,23 @@ class NotebookHomePageState extends State<NotebookHomePage> {
     if (workingDirectory.isEmpty) {
       return;
     }
+    // 确保 notes 目录存在
+    final notesDir = Directory('$workingDirectory/notes');
+    if (!await notesDir.exists()) {
+      await notesDir.create(recursive: true);
+      print('_loadNotebookList - 创建 notes 目录: $workingDirectory/notes');
+    }
+    print('_loadNotebookList - 读取笔记本目录: $workingDirectory/notes');
     final List<String> bookList = await FileUtil().listFiles(
-      workingDirectory,
-      '/',
+      '$workingDirectory/notes',
+      '',
       type: 'directory',
     );
+    print('_loadNotebookList - 找到的笔记本: $bookList');
     _notebooks.clear();
     for (var book in bookList) {
       final List<Note> notes = await FileUtil().listNotes(
-        workingDirectory,
+        '$workingDirectory/notes',
         book,
       );
       _notebooks.add(Notebook(name: book, notes: notes, color: Colors.blue));
@@ -197,7 +209,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
               });
               final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
               FileUtil()
-                  .listNotes(workingDirectory, notebookName)
+                  .listNotes('$workingDirectory/notes', notebookName)
                   .then((notes) {
                     print('notes: $notes');
                     for (var note in notes) {
@@ -213,9 +225,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                   .then((_) {
                     print("delete first then");
                     print(
-                      'workingDirectory: $workingDirectory notebookName: $notebookName',
+                      'workingDirectory: $workingDirectory/notes notebookName: $notebookName',
                     );
-                    FileUtil().deleteDirectory(workingDirectory, notebookName);
+                    FileUtil().deleteDirectory('$workingDirectory/notes', notebookName);
                     print("delete second then");
                   });
 
@@ -244,7 +256,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
     final path = noteId.substring(0, noteId.lastIndexOf('/'));
     final filename = noteId.substring(noteId.lastIndexOf('/') + 1);
     String sha = git!.hashObject(utf8.encode(note.content));
-    FileUtil().deleteFile(workingDirectory, path, filename);
+    FileUtil().deleteFile('$workingDirectory/notes', path, filename);
     final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
     git?.deleteFile(owner, repo, noteId, 'Delete note $noteId', sha);
 
@@ -276,14 +288,14 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         updatedNote.title = newTitle;
         FileUtil()
             .saveFile(
-              workingDirectory,
+              '$workingDirectory/notes',
               _selectedNotebook!.name,
               newFileName,
               utf8.encode(updatedNote.content),
             )
             .then((_) {
               FileUtil().deleteFile(
-                workingDirectory,
+                '$workingDirectory/notes',
                 _selectedNotebook!.name,
                 oldTitle,
               );
@@ -425,7 +437,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
 
               // 拉取远程仓库的数据
               git!
-                  .pull(owner, repo, workingDirectory)
+                  .pull(owner, repo, '$workingDirectory/notes')
                   .then((_) {
                     SPUtil.set(
                       PrefKeys.lastPullTime,
@@ -437,7 +449,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                         .push(
                           owner,
                           repo,
-                          workingDirectory,
+                          '$workingDirectory/notes',
                           deleteRemoteMissing: true,
                         )
                         .then((_) {
@@ -956,7 +968,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
             onPressed: () {
               if (_notebookNameController.text.isNotEmpty) {
                 FileUtil().createDirectory(
-                  workingDirectory,
+                  '$workingDirectory/notes',
                   _notebookNameController.text,
                 );
                 setState(() {
@@ -1030,7 +1042,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
 
                 FileUtil()
                     .saveFile(
-                      workingDirectory,
+                      '$workingDirectory/notes',
                       _selectedNotebook!.name,
                       _noteTitleController.text.endsWith('.md')
                           ? _noteTitleController.text
@@ -1039,7 +1051,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     )
                     .then((value) {
                       FileUtil()
-                          .listNotes(workingDirectory, _selectedNotebook!.name)
+                          .listNotes('$workingDirectory/notes', _selectedNotebook!.name)
                           .then((notes) {
                             setState(() {
                               final notebookIndex = _notebooks.indexWhere(

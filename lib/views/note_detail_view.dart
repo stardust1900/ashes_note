@@ -192,8 +192,9 @@ class NoteDetailState extends State<NoteDetailPage> {
 
   // 只保存到文件，不上传到git
   void _saveContentToFile() {
+    final workingDir = SPUtil.get<String>(PrefKeys.workingDirectory, '');
     FileUtil().saveFile(
-      SPUtil.get<String>(PrefKeys.workingDirectory, ''),
+      '$workingDir/notes',
       note.id.substring(0, note.id.lastIndexOf('/')),
       note.title,
       utf8.encode(note.content),
@@ -212,8 +213,9 @@ class NoteDetailState extends State<NoteDetailPage> {
       });
       // 延迟保存，避免频繁写文件
       Timer(const Duration(seconds: 1), () {
+        final workingDir = SPUtil.get<String>(PrefKeys.workingDirectory, '');
         FileUtil().saveFile(
-          SPUtil.get<String>(PrefKeys.workingDirectory, ''),
+          '$workingDir/notes',
           note.id.substring(0, note.id.lastIndexOf('/')),
           note.title,
           utf8.encode(note.content),

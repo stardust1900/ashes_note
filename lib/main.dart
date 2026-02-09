@@ -6,6 +6,7 @@ import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:ashes_note/views/flyme_note_view.dart';
 // import 'package:ashes_note/views/note_view.dart';
 import 'package:ashes_note/views/settings_view.dart';
+import 'package:ashes_note/views/book_library_page.dart';
 import 'package:flutter/material.dart';
 import 'package:sidebarx/sidebarx.dart';
 
@@ -122,16 +123,21 @@ class AshesNoteSidebarX extends StatelessWidget {
           icon: Icons.note,
           label: '笔记',
           onTap: () {
-            // Handle the tap event here
-            print('Notes tapped');
+            _controller.selectIndex(0);
+          },
+        ),
+        SidebarXItem(
+          icon: Icons.library_books,
+          label: '书籍',
+          onTap: () {
+            _controller.selectIndex(1);
           },
         ),
         SidebarXItem(
           icon: Icons.settings,
           label: '设置',
           onTap: () {
-            // Handle the tap event here
-            print('Settings tapped');
+            _controller.selectIndex(2);
           },
         ),
       ],
@@ -153,11 +159,14 @@ class AshesNoteScreens extends StatelessWidget {
         if (controller.selectedIndex == 0) {
           return Padding(
             padding: const EdgeInsets.all(8.0),
-            // child: NoteView(),
-            // child: EditorView(),
             child: NotebookHomePage(),
           );
         } else if (controller.selectedIndex == 1) {
+          return Padding(
+            padding: EdgeInsets.zero,
+            child: const BookLibraryPage(),
+          );
+        } else if (controller.selectedIndex == 2) {
           return Padding(
             padding: const EdgeInsets.all(16.0),
             child: SettingsView(),

@@ -145,6 +145,10 @@ class FileUtilImpl implements FileUtil {
 
     for (var entity in entities) {
       if (entity is io.File) {
+        // 只处理 .md 文件,跳过其他文件(如 .epub, .mobi 等)
+        if (!entity.path.endsWith('.md')) {
+          continue;
+        }
         try {
           final content = await entity.readAsString();
           final lastModified = await entity.lastModified();
