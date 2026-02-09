@@ -35,7 +35,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   List<PageContent> _pages = [];
   int _totalPages = 0;
   Uint8List? _coverImage;
-  ReadingMode _readingMode = ReadingMode.scroll;
+  ReadingMode _readingMode = ReadingMode.page;
   Size? _windowSize;
   final GlobalKey _contentKey = GlobalKey();
 
@@ -417,6 +417,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
         .replaceAll(RegExp('</p>', caseSensitive: false), '\n')
         .replaceAll(RegExp('<div[^>]*>', caseSensitive: false), '\n')
         .replaceAll(RegExp('</div>', caseSensitive: false), '\n')
+        .replaceAll(RegExp('<h[1-6][^>]*>.*?</h[1-6]>', caseSensitive: false, multiLine: true, dotAll: true), '\n')
         .replaceAll(RegExp('<[^>]*>', multiLine: true, dotAll: true), '')
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&lt;', '<')
@@ -651,22 +652,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
               }
               return const SizedBox.shrink();
             }),
-            if (page.title != null && page.chapterIndex >= 0)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 8,
-                  horizontal: 24,
-                ),
-                child: Text(
-                  page.title!,
-                  style: TextStyle(
-                    fontSize: _fontSize * 0.7,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
           ],
         ),
       ),
@@ -679,23 +664,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: _pages.map((page) {
-          Widget? titleWidget;
-          if (page.title != null &&
-              page.pageIndexInChapter == 0 &&
-              page.chapterIndex >= 0) {
-            titleWidget = Padding(
-              padding: const EdgeInsets.only(top: 32, bottom: 16),
-              child: Text(
-                page.title!,
-                style: TextStyle(
-                  fontSize: _fontSize * 1.5,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-            );
-          }
-
           final contentWidgets = page.contentItems.map((item) {
             if (item is TextContent) {
               return Padding(
@@ -870,7 +838,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [if (titleWidget != null) titleWidget, ...contentWidgets],
+            children: [...contentWidgets],
           );
         }).toList(),
       ),
@@ -956,12 +924,30 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              '第 ${_currentPageIndex + 1} 页 / 共 $_totalPages 页',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 14,
-                              ),
+                            Row(
+                              children: [
+                                Text(
+                                  '第 ${_currentPageIndex + 1} 页 / 共 $_totalPages 页',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                if (_pages.isNotEmpty &&
+                                    _pages[_currentPageIndex].title != null &&
+                                    _pages[_currentPageIndex].chapterIndex >= 0)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 16),
+                                    child: Text(
+                                      _pages[_currentPageIndex].title!,
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                             Text(
                               '${((_currentPageIndex + 1) / _totalPages * 100).toStringAsFixed(1)}%',
