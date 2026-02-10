@@ -1162,7 +1162,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             if (item is TextContent) {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
+                child: SelectableText(
                   item.text,
                   style: TextStyle(
                     fontSize: _fontSize,
@@ -1588,7 +1588,112 @@ class _BookReaderPageState extends State<BookReaderPage> {
           },
           child: Stack(
             children: [
+              // 内容层（不包含手势检测）
+              Container(
+                key: _contentKey,
+                width: double.infinity,
+                height: double.infinity,
+                color: Colors.white,
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: _pages.isNotEmpty
+                          ? _buildPageContent(
+                              _pages[_currentPageIndex],
+                              // 预留顶部/底部工具栏高度，保证分页计算一致
+                              constraints.maxHeight - 120,
+                            )
+                          : const Center(child: Text('暂无内容')),
+                    ),
+                    AnimatedOpacity(
+                      opacity: _showControls ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 6,
+                          horizontal: 24,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                // 书签列表
+                                if (_bookmarks.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 12),
+                                    child: Row(
+                                      children: _bookmarks.map((bookmark) {
+                                        return Padding(
+                                          padding: const EdgeInsets.only(right: 4),
+                                          child: InkWell(
+                                            onTap: () => _onBookmarkTap(bookmark),
+                                            child: Icon(
+                                              Icons.bookmark,
+                                              color: bookmark.color,
+                                              size: 20,
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                Text(
+                                  '第 ${_currentPageIndex + 1} 页 / 共 $_totalPages 页',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                if (_isBackgroundProcessing)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 8),
+                                    child: SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.blue,
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                if (_pages.isNotEmpty &&
+                                    _pages[_currentPageIndex].title != null &&
+                                    _pages[_currentPageIndex].chapterIndex >=
+                                        0)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 16),
+                                    child: Text(
+                                      _pages[_currentPageIndex].title!,
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            Text(
+                              '${((_currentPageIndex + 1) / _totalPages * 100).toStringAsFixed(1)}%',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 翻页手势层（放在最上层）
               GestureDetector(
+                behavior: HitTestBehavior.translucent,
                 onTapUp: (details) {
                   final screenWidth = MediaQuery.of(context).size.width;
                   final screenHeight = MediaQuery.of(context).size.height;
@@ -1608,108 +1713,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     });
                   }
                 },
-                child: Container(
-                  key: _contentKey,
-                  width: double.infinity,
-                  height: double.infinity,
-                  color: Colors.white,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: _pages.isNotEmpty
-                            ? _buildPageContent(
-                                _pages[_currentPageIndex],
-                                // 预留顶部/底部工具栏高度，保证分页计算一致
-                                constraints.maxHeight - 120,
-                              )
-                            : const Center(child: Text('暂无内容')),
-                      ),
-                      AnimatedOpacity(
-                        opacity: _showControls ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 200),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 6,
-                            horizontal: 24,
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  // 书签列表
-                                  if (_bookmarks.isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(right: 12),
-                                      child: Row(
-                                        children: _bookmarks.map((bookmark) {
-                                          return Padding(
-                                            padding: const EdgeInsets.only(right: 4),
-                                            child: InkWell(
-                                              onTap: () => _onBookmarkTap(bookmark),
-                                              child: Icon(
-                                                Icons.bookmark,
-                                                color: bookmark.color,
-                                                size: 20,
-                                              ),
-                                            ),
-                                          );
-                                        }).toList(),
-                                      ),
-                                    ),
-                                  Text(
-                                    '第 ${_currentPageIndex + 1} 页 / 共 $_totalPages 页',
-                                    style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  if (_isBackgroundProcessing)
-                                    Padding(
-                                      padding: const EdgeInsets.only(left: 8),
-                                      child: SizedBox(
-                                        width: 12,
-                                        height: 12,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                Colors.blue,
-                                              ),
-                                        ),
-                                      ),
-                                    ),
-                                  if (_pages.isNotEmpty &&
-                                      _pages[_currentPageIndex].title != null &&
-                                      _pages[_currentPageIndex].chapterIndex >=
-                                          0)
-                                    Padding(
-                                      padding: const EdgeInsets.only(left: 16),
-                                      child: Text(
-                                        _pages[_currentPageIndex].title!,
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              Text(
-                                '${((_currentPageIndex + 1) / _totalPages * 100).toStringAsFixed(1)}%',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ),
               if (_showTableOfContents) _buildTableOfContents(),
             ],
