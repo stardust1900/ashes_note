@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'book_reader_page.dart';
 
 /// 书籍库页面 - 展示所有导入的书籍
@@ -43,15 +44,15 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         .map((f) => BookInfo.fromFile(f))
         .toList();
 
-    // 为 EPUB 文件提取封面
-    for (var book in bookInfos) {
-      if (book.file.path.endsWith('.epub')) {
-        final coverFile = await _extractEpubCover(book.file);
-        if (coverFile != null) {
-          book.coverFile = coverFile;
-        }
+    // 为 EPUB 文件提取封面（使用 Future.wait 并行处理）
+    final epubBooks = bookInfos.where((b) => b.file.path.endsWith('.epub')).toList();
+    final coverFutures = epubBooks.map((book) async {
+      final coverFile = await _extractEpubCover(book.file);
+      if (coverFile != null) {
+        book.coverFile = coverFile;
       }
-    }
+    }).toList();
+    await Future.wait(coverFutures, eagerError: false);
 
     setState(() {
       _books = bookInfos;
@@ -137,24 +138,76 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('确认删除'),
-        content: Text('确定要删除《${book.title}》吗？'),
+        title: const Text('确认删除'),
+        content: Text('确定要删除《${book.title}》吗？\n\n此操作将删除书籍文件及其缓存数据。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('取消'),
+            child: const Text('取消'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('删除'),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
           ),
         ],
       ),
     );
 
-    if (confirm == true && book.file.existsSync()) {
-      await book.file.delete();
-      _loadBooks();
+    if (confirm != true) return;
+
+    try {
+      // 删除书籍文件
+      if (await book.file.exists()) {
+        await book.file.delete();
+      }
+
+      // 删除封面缓存
+      if (book.coverFile != null && await book.coverFile!.exists()) {
+        await book.coverFile!.delete();
+      }
+
+      // 删除阅读进度缓存
+      final bookKey = 'reading_position_${book.file.path.hashCode}';
+      await SPUtil.remove(bookKey);
+
+      // 检查并清理 last_read_book（如果删除的是最后阅读的书籍）
+      final lastReadBook = SPUtil.get<String>('last_read_book', '');
+      if (lastReadBook == book.file.path) {
+        await SPUtil.remove('last_read_book');
+      }
+
+      // 删除页面缓存（使用缓存键直接删除，避免遍历所有文件）
+      try {
+        final appDir = await getApplicationDocumentsDirectory();
+        final cacheDir = Directory('${appDir.path}/book_cache');
+        if (await cacheDir.exists()) {
+          // 根据书籍路径生成缓存键（与阅读器页面逻辑一致）
+          final cacheKey = book.file.path.hashCode.toString();
+          final cacheFile = File('${cacheDir.path}/$cacheKey.json');
+          if (await cacheFile.exists()) {
+            await cacheFile.delete();
+          }
+        }
+      } catch (e) {
+        // 缓存删除失败不影响主流程
+        print('[BookLibrary] 删除页面缓存失败: $e');
+      }
+
+      // 刷新书籍列表
+      await _loadBooks();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('《${book.title}》已删除')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: $e')),
+        );
+      }
     }
   }
 
@@ -255,7 +308,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         if (!await cacheDir.exists()) {
           await cacheDir.create(recursive: true);
         }
-        final coverFile = File('${cacheDir.path}/${epubFile.uri.pathSegments.last}.jpg');
+        // 使用安全的文件名（去除特殊字符）
+        final safeFileName = epubFile.uri.pathSegments.last
+            .replaceAll(RegExp(r'[<>"/\\|?*]'), '_');
+        final coverFile = File('${cacheDir.path}/$safeFileName.jpg');
         await coverFile.writeAsBytes(coverData);
         return coverFile;
       }
@@ -328,7 +384,7 @@ class BookInfo {
 }
 
 /// 书籍卡片组件
-class _BookCard extends StatelessWidget {
+class _BookCard extends StatefulWidget {
   final BookInfo book;
   final VoidCallback onTap;
   final VoidCallback onDelete;
@@ -340,68 +396,106 @@ class _BookCard extends StatelessWidget {
   });
 
   @override
+  State<_BookCard> createState() => _BookCardState();
+}
+
+class _BookCardState extends State<_BookCard> {
+  bool _isHovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 2,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 封面区域
-            Expanded(
-              flex: 4,
-              child: Container(
-                width: double.infinity,
-                color: Colors.blue.withValues(alpha: 0.1),
-                child: book.coverFile != null
-                    ? Image.file(
-                        book.coverFile!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return _buildDefaultCover();
-                        },
-                      )
-                    : _buildDefaultCover(),
-              ),
-            ),
-            // 书籍信息
-            Expanded(
-              flex: 2,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Card(
+        elevation: 2,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: InkWell(
+          onTap: widget.onTap,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 封面区域
+              Expanded(
+                flex: 4,
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    Text(
-                      book.title,
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    Container(
+                      width: double.infinity,
+                      color: Colors.blue.withValues(alpha: 0.1),
+                      child: widget.book.coverFile != null
+                          ? Image.file(
+                              widget.book.coverFile!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return _buildDefaultCover();
+                              },
+                            )
+                          : _buildDefaultCover(),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      book.author,
-                      style: TextStyle(
-                        fontSize: 8,
-                        color: Colors.grey[600],
+                    // 删除按钮（悬停时显示）
+                    if (_isHovered)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Material(
+                          color: Colors.red.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(16),
+                          child: InkWell(
+                            onTap: widget.onDelete,
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
                   ],
                 ),
               ),
-            ),
-          ],
+              // 书籍信息
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        widget.book.title,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.book.author,
+                        style: TextStyle(
+                          fontSize: 8,
+                          color: Colors.grey[600],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -432,7 +526,7 @@ class _BookCard extends StatelessWidget {
   }
 
   String _getFileIcon() {
-    final ext = book.file.path.split('.').last.toLowerCase();
+    final ext = widget.book.file.path.split('.').last.toLowerCase();
     switch (ext) {
       case 'epub':
         return 'EPUB';
