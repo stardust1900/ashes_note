@@ -73,6 +73,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
   bool _showFontSizeSlider = false;
   double _tempFontSize = 16;
 
+  // 书签保存相关
+  static const String _bookmarksPrefix = 'bookmarks_';
+
   @override
   void initState() {
     super.initState();
@@ -314,6 +317,61 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
+  /// 生成书签存储键
+  String _getBookmarksKey() {
+    return '$_bookmarksPrefix${widget.bookPath.hashCode}';
+  }
+
+  /// 保存书签到本地
+  Future<void> _saveBookmarks() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _getBookmarksKey();
+      final bookmarksJson = _bookmarks.map((b) => jsonEncode({
+        'chapterIndex': b.chapterIndex,
+        'pageIndex': b.pageIndex,
+        'title': b.title,
+        'timestamp': b.timestamp.millisecondsSinceEpoch,
+        'note': b.note,
+        'colorIndex': b.colorIndex,
+      })).toList();
+      await prefs.setStringList(key, bookmarksJson);
+      print('保存了 ${_bookmarks.length} 个书签');
+    } catch (e) {
+      print('保存书签失败: $e');
+    }
+  }
+
+  /// 从本地加载书签
+  Future<void> _loadBookmarks() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _getBookmarksKey();
+      final bookmarksJson = prefs.getStringList(key);
+      if (bookmarksJson != null && bookmarksJson.isNotEmpty) {
+        _bookmarks.clear();
+        for (var json in bookmarksJson) {
+          try {
+            final data = jsonDecode(json) as Map<String, dynamic>;
+            _bookmarks.add(Bookmark(
+              chapterIndex: data['chapterIndex'] as int,
+              pageIndex: data['pageIndex'] as int,
+              title: data['title'] as String,
+              timestamp: DateTime.fromMillisecondsSinceEpoch(data['timestamp'] as int),
+              note: data['note'] as String?,
+              colorIndex: data['colorIndex'] as int? ?? 0,
+            ));
+          } catch (e) {
+            print('解析书签失败: $e');
+          }
+        }
+        print('加载了 ${_bookmarks.length} 个书签');
+      }
+    } catch (e) {
+      print('加载书签失败: $e');
+    }
+  }
+
   /// 恢复阅读位置
   void _restoreReadingPosition(Map<String, dynamic> position) {
     final savedPageIndex = (position['pageIndex'] as int?) ?? 0;
@@ -406,6 +464,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
       // 加载上次阅读位置
       final savedPosition = await _loadReadingPosition();
+
+      // 加载书签
+      await _loadBookmarks();
 
       // 获取窗口大小用于检查缓存有效性
       if (mounted) {
@@ -1576,6 +1637,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             children: [
                               Row(
                                 children: [
+                                  // 书签列表
+                                  if (_bookmarks.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 12),
+                                      child: Row(
+                                        children: _bookmarks.map((bookmark) {
+                                          return Padding(
+                                            padding: const EdgeInsets.only(right: 4),
+                                            child: InkWell(
+                                              onTap: () => _onBookmarkTap(bookmark),
+                                              child: Icon(
+                                                Icons.bookmark,
+                                                color: bookmark.color,
+                                                size: 20,
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+                                    ),
                                   Text(
                                     '第 ${_currentPageIndex + 1} 页 / 共 $_totalPages 页',
                                     style: TextStyle(
@@ -1687,7 +1768,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
   void _addBookmark() {
     final exists = _bookmarks.any((b) => b.pageIndex == _currentPageIndex);
     if (exists) {
-      _bookmarks.removeWhere((b) => b.pageIndex == _currentPageIndex);
+      setState(() {
+        _bookmarks.removeWhere((b) => b.pageIndex == _currentPageIndex);
+      });
+      _saveBookmarks();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('书签已移除')));
@@ -1703,6 +1787,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           ),
         );
       });
+      _saveBookmarks();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('书签已添加')));
@@ -1919,6 +2004,20 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   bool _isBookmarked() {
     return _bookmarks.any((b) => b.pageIndex == _currentPageIndex);
+  }
+
+  /// 处理书签点击
+  void _onBookmarkTap(Bookmark bookmark) {
+    // 如果当前已经在该书签位置，切换颜色
+    if (_currentPageIndex == bookmark.pageIndex) {
+      setState(() {
+        bookmark.colorIndex = (bookmark.colorIndex + 1) % BookmarkColors.colors.length;
+      });
+      _saveBookmarks(); // 保存颜色更改
+    } else {
+      // 跳转到书签位置
+      _goToPage(bookmark.pageIndex);
+    }
   }
 
   @override
@@ -2345,6 +2444,7 @@ class Bookmark {
   final String title;
   final DateTime timestamp;
   final String? note;
+  int colorIndex; // 0-4 对应5种颜色
 
   Bookmark({
     required this.chapterIndex,
@@ -2352,7 +2452,22 @@ class Bookmark {
     required this.title,
     required this.timestamp,
     this.note,
+    this.colorIndex = 0,
   });
+
+  // 获取书签颜色
+  Color get color => BookmarkColors.colors[colorIndex % BookmarkColors.colors.length];
+}
+
+// 书签颜色配置 - 5种显眼颜色
+class BookmarkColors {
+  static const List<Color> colors = [
+    Color(0xFFFF0000), // 红色
+    Color(0xFFFFA500), // 橙色
+    Color(0xFFFFFF00), // 黄色
+    Color(0xFF00FF00), // 绿色
+    Color(0xFF0000FF), // 蓝色
+  ];
 }
 
 class Highlight {
