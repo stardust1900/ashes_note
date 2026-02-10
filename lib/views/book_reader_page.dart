@@ -68,6 +68,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
   // 缓存相关
   String? _bookCacheKey;
 
+  // 字体大小保存相关
+  static const String _fontSizeKey = 'reader_font_size';
+  bool _showFontSizeSlider = false;
+  double _tempFontSize = 16;
+
   @override
   void initState() {
     super.initState();
@@ -188,7 +193,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
         }
       }
 
-      final pages = pagesJson.map((json) => PageContent.fromJson(json)).toList();
+      final pages = pagesJson
+          .map((json) => PageContent.fromJson(json))
+          .toList();
       print('从缓存加载了 ${pages.length} 页');
       return pages;
     } catch (e) {
@@ -280,6 +287,33 @@ class _BookReaderPageState extends State<BookReaderPage> {
     });
   }
 
+  /// 加载保存的字体大小
+  Future<void> _loadFontSize() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedFontSize = prefs.getDouble(_fontSizeKey);
+      if (savedFontSize != null && savedFontSize >= 12 && savedFontSize <= 32) {
+        setState(() {
+          _fontSize = savedFontSize;
+        });
+        print('加载字体大小: $_fontSize');
+      }
+    } catch (e) {
+      print('加载字体大小失败: $e');
+    }
+  }
+
+  /// 保存字体大小
+  Future<void> _saveFontSize() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_fontSizeKey, _fontSize);
+      print('保存字体大小: $_fontSize');
+    } catch (e) {
+      print('保存字体大小失败: $e');
+    }
+  }
+
   /// 恢复阅读位置
   void _restoreReadingPosition(Map<String, dynamic> position) {
     final savedPageIndex = (position['pageIndex'] as int?) ?? 0;
@@ -351,6 +385,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
         _hasError = false;
         _errorMessage = '';
       });
+
+      // 加载保存的字体大小
+      await _loadFontSize();
 
       // 生成缓存键
       _bookCacheKey = await _generateBookCacheKey();
@@ -1554,9 +1591,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                         height: 12,
                                         child: CircularProgressIndicator(
                                           strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(
-                                            Colors.blue,
-                                          ),
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                Colors.blue,
+                                              ),
                                         ),
                                       ),
                                     ),
@@ -1693,10 +1731,190 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
-  void _toggleFontSize(bool increase) {
+  /// 清除当前书籍的缓存
+  Future<void> _clearBookCache() async {
+    try {
+      if (_bookCacheKey == null) return;
+      final cacheFilePath = await _getCacheFilePath();
+      final cacheFile = File(cacheFilePath);
+      if (await cacheFile.exists()) {
+        await cacheFile.delete();
+        print('字体变化，已清除旧缓存');
+      }
+    } catch (e) {
+      print('清除缓存失败: $e');
+    }
+  }
+
+  /// 重新分页后恢复阅读位置
+  void _restorePositionAfterReflow(
+    int previousPageIndex,
+    int previousChapterIndex,
+  ) {
+    // 首先尝试找到相同章节的页面
+    int targetPageIndex = -1;
+
+    for (int i = 0; i < _pages.length; i++) {
+      if (_pages[i].chapterIndex == previousChapterIndex) {
+        targetPageIndex = i;
+        break;
+      }
+    }
+
+    // 如果找不到相同章节，尝试按百分比定位
+    if (targetPageIndex == -1 && _totalPages > 0) {
+      final progress = previousPageIndex / (_totalPages > 0 ? _totalPages : 1);
+      targetPageIndex = (progress * _pages.length).round().clamp(
+        0,
+        _pages.length - 1,
+      );
+    }
+
+    if (targetPageIndex >= 0 && targetPageIndex < _pages.length) {
+      setState(() {
+        _currentPageIndex = targetPageIndex;
+        _currentChapterIndex = _pages[targetPageIndex].chapterIndex;
+      });
+
+      // 滚动到顶部
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
+      });
+    }
+  }
+
+  /// 应用字体大小变更
+  void _applyFontSizeChange() async {
+    if (_tempFontSize == _fontSize) {
+      setState(() {
+        _showFontSizeSlider = false;
+      });
+      return;
+    }
+
+    // 立即关闭滑动条并显示处理中提示
     setState(() {
-      _fontSize = (increase ? _fontSize + 1 : _fontSize - 1).clamp(12, 32);
+      _showFontSizeSlider = false;
+      _fontSize = _tempFontSize;
+      _isProcessingPages = true;
     });
+
+    // 保存当前位置用于重新分页后恢复
+    final previousPageIndex = _currentPageIndex;
+    final previousChapterIndex = _currentChapterIndex;
+
+    // 保存字体大小设置
+    await _saveFontSize();
+
+    // 清除旧缓存
+    await _clearBookCache();
+
+    // 重新计算分页
+    if (_chapters.isNotEmpty) {
+      await _processPages();
+
+      // 恢复阅读位置
+      if (mounted) {
+        _restorePositionAfterReflow(previousPageIndex, previousChapterIndex);
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isProcessingPages = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('字体大小: ${_fontSize.toInt()}'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  /// 构建字体大小滑动条
+  Widget _buildFontSizeSlider() {
+    return Positioned(
+      top: 80,
+      right: 16,
+      child: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(12),
+        color: Colors.white,
+        child: Container(
+          width: 60,
+          height: 280,
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          child: Column(
+            children: [
+              // 字体大小显示
+              Text(
+                _tempFontSize.toInt().toString(),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // A+ 图标
+              Icon(Icons.text_increase, size: 16, color: Colors.grey[600]),
+              const SizedBox(height: 8),
+              // 垂直滑动条
+              Expanded(
+                child: RotatedBox(
+                  quarterTurns: 3, // 旋转为垂直方向
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      activeTrackColor: Colors.blue,
+                      inactiveTrackColor: Colors.grey[300],
+                      thumbColor: Colors.blue,
+                      overlayColor: Colors.blue.withValues(alpha: 0.2),
+                      trackHeight: 4,
+                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 8),
+                      overlayShape: RoundSliderOverlayShape(overlayRadius: 16),
+                    ),
+                    child: Slider(
+                      value: _tempFontSize,
+                      min: 12,
+                      max: 32,
+                      divisions: 20, // 每1一个刻度
+                      onChanged: (value) {
+                        setState(() {
+                          _tempFontSize = value;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // A- 图标
+              Icon(Icons.text_decrease, size: 16, color: Colors.grey[600]),
+              const SizedBox(height: 8),
+              // 确认按钮
+              InkWell(
+                onTap: _applyFontSizeChange,
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    // 与当前字体一致时蓝色，不一致时灰色
+                    color: _tempFontSize == _fontSize
+                        ? Colors.blue
+                        : Colors.grey[400],
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(Icons.check, color: Colors.white, size: 16),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   bool _isBookmarked() {
@@ -1731,14 +1949,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   tooltip: '书签',
                 ),
                 IconButton(
-                  icon: const Icon(Icons.text_decrease),
-                  onPressed: () => _toggleFontSize(false),
-                  tooltip: '减小字体',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.text_increase),
-                  onPressed: () => _toggleFontSize(true),
-                  tooltip: '增大字体',
+                  icon: const Icon(Icons.format_size),
+                  onPressed: () {
+                    setState(() {
+                      _showFontSizeSlider = !_showFontSizeSlider;
+                      _tempFontSize = _fontSize;
+                    });
+                  },
+                  tooltip: '字体大小',
                 ),
                 IconButton(
                   icon: Icon(
@@ -1853,16 +2071,63 @@ class _BookReaderPageState extends State<BookReaderPage> {
           // 内容已准备就绪
           return Stack(
             children: [
-              Container(
-                width: double.infinity,
-                height: double.infinity,
-                color: Colors.white,
-                child: _readingMode == ReadingMode.scroll
-                    ? _buildScrollMode()
-                    : _buildPageMode(),
+              GestureDetector(
+                onTap: () {
+                  if (_showFontSizeSlider) {
+                    _applyFontSizeChange();
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  color: Colors.white,
+                  child: _readingMode == ReadingMode.scroll
+                      ? _buildScrollMode()
+                      : _buildPageMode(),
+                ),
               ),
               if (_showTableOfContents && _readingMode == ReadingMode.page)
                 _buildTableOfContents(),
+              if (_showFontSizeSlider) _buildFontSizeSlider(),
+              // 处理中提示（字体变化时显示在页面底部）
+              if (_isProcessingPages && _isContentLoaded)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 60,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            '处理中...',
+                            style: TextStyle(color: Colors.white, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
             ],
           );
         },
@@ -1899,12 +2164,17 @@ class _BookReaderPageState extends State<BookReaderPage> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     '目录',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
+                    color: Colors.grey[600],
                     onPressed: () {
                       setState(() {
                         _showTableOfContents = false;
@@ -1995,16 +2265,11 @@ class TextContent extends ContentItem {
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'type': 'text',
-      'text': text,
-    };
+    return {'type': 'text', 'text': text};
   }
 
   factory TextContent.fromJson(Map<String, dynamic> json) {
-    return TextContent(
-      text: json['text'] as String,
-    );
+    return TextContent(text: json['text'] as String);
   }
 }
 
@@ -2015,16 +2280,11 @@ class ImageContent extends ContentItem {
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'type': 'image',
-      'source': source,
-    };
+    return {'type': 'image', 'source': source};
   }
 
   factory ImageContent.fromJson(Map<String, dynamic> json) {
-    return ImageContent(
-      source: json['source'] as String,
-    );
+    return ImageContent(source: json['source'] as String);
   }
 }
 
@@ -2035,16 +2295,11 @@ class CoverContent extends ContentItem {
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'type': 'cover',
-      'imageData': base64Encode(imageData),
-    };
+    return {'type': 'cover', 'imageData': base64Encode(imageData)};
   }
 
   factory CoverContent.fromJson(Map<String, dynamic> json) {
-    return CoverContent(
-      imageData: base64Decode(json['imageData'] as String),
-    );
+    return CoverContent(imageData: base64Decode(json['imageData'] as String));
   }
 }
 
