@@ -221,7 +221,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
 
     final lineHeight = _fontSize * 1.6;
-    final linesPerPage = (availableHeight - 40) ~/ lineHeight;
+    // 减少padding，增加每页可用的行数
+    final linesPerPage = ((availableHeight - 96) ~/ lineHeight).clamp(1, 100);
     final charsPerLine = (availableWidth / (_fontSize * 0.6)).floor().clamp(
       20,
       1000,
@@ -417,7 +418,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
         .replaceAll(RegExp('</p>', caseSensitive: false), '\n')
         .replaceAll(RegExp('<div[^>]*>', caseSensitive: false), '\n')
         .replaceAll(RegExp('</div>', caseSensitive: false), '\n')
-        .replaceAll(RegExp('<h[1-6][^>]*>.*?</h[1-6]>', caseSensitive: false, multiLine: true, dotAll: true), '\n')
+        .replaceAll(
+          RegExp(
+            '<h[1-6][^>]*>.*?</h[1-6]>',
+            caseSensitive: false,
+            multiLine: true,
+            dotAll: true,
+          ),
+          '\n',
+        )
         .replaceAll(RegExp('<[^>]*>', multiLine: true, dotAll: true), '')
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&lt;', '<')
@@ -479,152 +488,55 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   Widget _buildPageContent(PageContent page, double availableHeight) {
     // availableHeight 已剔除顶部/底部控制区的高度，确保页面内容不超高
-    return SingleChildScrollView(
-      // 添加滚动支持
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ...page.contentItems.map((item) {
-              if (item is TextContent) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Text(
-                    item.text,
-                    style: TextStyle(
-                      fontSize: _fontSize,
-                      height: 1.6,
-                      color: Colors.black87,
-                    ),
-                  ),
-                );
-              } else if (item is ImageContent) {
-                return FutureBuilder<Uint8List?>(
-                  future: _getImageData(item.source),
-                  builder: (context, snapshot) {
-                    final maxHeight = availableHeight * 0.5;
+          children: page.contentItems.map((item) {
+          if (item is TextContent) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                item.text,
+                style: TextStyle(
+                  fontSize: _fontSize,
+                  height: 1.5,
+                  color: Colors.black87,
+                ),
+              ),
+            );
+          } else if (item is ImageContent) {
+            return FutureBuilder<Uint8List?>(
+              future: _getImageData(item.source),
+              builder: (context, snapshot) {
+                final maxHeight = availableHeight * 0.5;
 
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Container(
-                        height: maxHeight,
-                        alignment: Alignment.center,
-                        child: const CircularProgressIndicator(),
-                      );
-                    }
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Container(
+                    height: maxHeight,
+                    alignment: Alignment.center,
+                    child: const CircularProgressIndicator(),
+                  );
+                }
 
-                    if (snapshot.hasData && snapshot.data != null) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            return ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: constraints.maxWidth,
-                                maxHeight: maxHeight,
-                              ),
-                              child: material.Image.memory(
-                                snapshot.data!,
-                                fit: BoxFit.contain,
-                                width: double.infinity,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    height: maxHeight,
-                                    color: Colors.grey[200],
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.broken_image,
-                                          size: 48,
-                                          color: Colors.grey[400],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          '图片加载失败',
-                                          style: TextStyle(
-                                            color: Colors.grey[600],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                            );
-                          },
-                        ),
-                      );
-                    } else {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: Container(
-                          height: maxHeight,
-                          color: Colors.grey[200],
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.image_not_supported,
-                                size: 48,
-                                color: Colors.grey[400],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '图片: ${item.source}',
-                                style: TextStyle(color: Colors.grey[600]),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-                  },
-                );
-              } else if (item is CoverContent) {
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _bookTitle,
-                        style: TextStyle(
-                          fontSize: _fontSize * 2,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 32),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: ConstrainedBox(
+                if (snapshot.hasData && snapshot.data != null) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return ConstrainedBox(
                           constraints: BoxConstraints(
-                            maxWidth: (MediaQuery.of(context).size.width * 0.7)
-                                .clamp(200.0, 500.0),
-                            maxHeight: (availableHeight * 0.7).clamp(
-                              300.0,
-                              700.0,
-                            ),
+                            maxWidth: constraints.maxWidth,
+                            maxHeight: maxHeight,
                           ),
                           child: material.Image.memory(
-                            item.imageData,
+                            snapshot.data!,
                             fit: BoxFit.contain,
+                            width: double.infinity,
                             errorBuilder: (context, error, stackTrace) {
-                              final coverWidth =
-                                  (MediaQuery.of(context).size.width * 0.7)
-                                      .clamp(200.0, 500.0);
-                              final coverHeight = (availableHeight * 0.7).clamp(
-                                300.0,
-                                700.0,
-                              );
                               return Container(
-                                width: coverWidth,
-                                height: coverHeight,
+                                height: maxHeight,
                                 color: Colors.grey[200],
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
@@ -636,7 +548,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
-                                      '封面加载失败',
+                                      '图片加载失败',
                                       style: TextStyle(color: Colors.grey[600]),
                                     ),
                                   ],
@@ -644,15 +556,105 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               );
                             },
                           ),
-                        ),
+                        );
+                      },
+                    ),
+                  );
+                } else {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Container(
+                      height: maxHeight,
+                      color: Colors.grey[200],
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.image_not_supported,
+                            size: 48,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '图片: ${item.source}',
+                            style: TextStyle(color: Colors.grey[600]),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                  );
+                }
+              },
+            );
+          } else if (item is CoverContent) {
+            return Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _bookTitle,
+                    style: TextStyle(
+                      fontSize: _fontSize * 2,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                );
-              }
-              return const SizedBox.shrink();
-            }),
-          ],
+                  const SizedBox(height: 32),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: (MediaQuery.of(context).size.width * 0.7)
+                            .clamp(200.0, 500.0),
+                        maxHeight: (availableHeight * 0.7).clamp(300.0, 700.0),
+                      ),
+                      child: material.Image.memory(
+                        item.imageData,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          final coverWidth =
+                              (MediaQuery.of(context).size.width * 0.7).clamp(
+                                200.0,
+                                500.0,
+                              );
+                          final coverHeight = (availableHeight * 0.7).clamp(
+                            300.0,
+                            700.0,
+                          );
+                          return Container(
+                            width: coverWidth,
+                            height: coverHeight,
+                            color: Colors.grey[200],
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.broken_image,
+                                  size: 48,
+                                  color: Colors.grey[400],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '封面加载失败',
+                                  style: TextStyle(color: Colors.grey[600]),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          return const SizedBox.shrink();
+        }).toList(),
         ),
       ),
     );
