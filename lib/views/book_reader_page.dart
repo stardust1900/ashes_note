@@ -76,6 +76,25 @@ class _BookReaderPageState extends State<BookReaderPage> {
   // 书签保存相关
   static const String _bookmarksPrefix = 'bookmarks_';
 
+  // 文本选择和气泡工具栏相关
+  String? _selectedText;
+  bool _showTextToolbar = false;
+  Offset _toolbarPosition = Offset.zero;
+  OverlayEntry? _toolbarOverlay;
+
+  // 高亮笔记相关
+  final List<Highlight> _highlights = [];
+  static const String _highlightsPrefix = 'book_highlights_';
+
+  // 当前选择的文本位置信息
+  int? _selectionStartOffset;
+  int? _selectionEndOffset;
+  int? _selectionChapterIndex;
+  int? _selectionPageIndex;
+  
+  // 当前选中的高亮/划线列表（支持叠加）
+  List<Highlight> _selectedHighlights = [];
+
   @override
   void initState() {
     super.initState();
@@ -90,7 +109,1769 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _textPainterCache?.dispose();
     _noteController.dispose();
     _scrollController.dispose();
+    _hideTextToolbar(); // 清理工具栏
     super.dispose();
+  }
+
+  /// 检查选择区域是否与已有高亮/划线重叠，返回所有匹配的标记
+  List<Highlight> _getHighlightsAtSelection(int chapterIndex, int startOffset, int endOffset) {
+    return _highlights.where((h) {
+      return h.chapterIndex == chapterIndex &&
+             h.startOffset < endOffset && 
+             h.endOffset > startOffset;
+    }).toList();
+  }
+
+  /// 计算页面起始偏移量
+  int _calculatePageStartOffset(PageContent page) {
+    int offset = 0;
+    // 遍历当前章节之前的所有页面
+    for (final p in _pages) {
+      if (p.chapterIndex == page.chapterIndex && p.pageIndexInChapter < page.pageIndexInChapter) {
+        // 累加该页所有文本内容的长度
+        for (final item in p.contentItems) {
+          if (item is TextContent) {
+            offset += item.text.length;
+          }
+        }
+      }
+    }
+    return offset;
+  }
+
+  /// 构建带高亮/划线的文本样式（支持叠加）
+  List<TextSpan> _buildHighlightSpans(String text, int textStartOffset, int chapterIndex) {
+    // 获取当前文本段的所有高亮和划线
+    final textHighlights = _highlights.where((h) {
+      return h.chapterIndex == chapterIndex &&
+             h.endOffset > textStartOffset &&
+             h.startOffset < textStartOffset + text.length;
+    }).toList();
+
+    if (textHighlights.isEmpty) {
+      return [TextSpan(text: text)];
+    }
+
+    // 分离高亮和划线
+    final highlights = textHighlights.where((h) => !h.isUnderline).toList();
+    final underlines = textHighlights.where((h) => h.isUnderline).toList();
+
+    // 收集所有分割点
+    final Set<int> splitPoints = {0, text.length};
+    for (final h in textHighlights) {
+      final start = (h.startOffset - textStartOffset).clamp(0, text.length);
+      final end = (h.endOffset - textStartOffset).clamp(0, text.length);
+      splitPoints.add(start);
+      splitPoints.add(end);
+    }
+    
+    final sortedPoints = splitPoints.toList()..sort();
+    
+    // 构建每个段的样式
+    final spans = <TextSpan>[];
+    for (int i = 0; i < sortedPoints.length - 1; i++) {
+      final segStart = sortedPoints[i];
+      final segEnd = sortedPoints[i + 1];
+      if (segStart >= segEnd) continue;
+      
+      final segText = text.substring(segStart, segEnd);
+      
+      // 检查该段是否有高亮
+      final hasHighlight = highlights.any((h) {
+        final hStart = h.startOffset - textStartOffset;
+        final hEnd = h.endOffset - textStartOffset;
+        return segStart < hEnd && segEnd > hStart;
+      });
+      
+      // 检查该段是否有划线
+      final hasUnderline = underlines.any((h) {
+        final hStart = h.startOffset - textStartOffset;
+        final hEnd = h.endOffset - textStartOffset;
+        return segStart < hEnd && segEnd > hStart;
+      });
+      
+      // 获取高亮颜色（取第一个匹配的高亮）
+      Color? highlightColor;
+      if (hasHighlight) {
+        final matchingHighlight = highlights.firstWhere((h) {
+          final hStart = h.startOffset - textStartOffset;
+          final hEnd = h.endOffset - textStartOffset;
+          return segStart < hEnd && segEnd > hStart;
+        });
+        highlightColor = matchingHighlight.color;
+      }
+      
+      // 构建样式
+      TextStyle? style;
+      if (hasHighlight && hasUnderline) {
+        // 既高亮又划线：红色划线 + 高亮背景
+        style = TextStyle(
+          backgroundColor: highlightColor!.withValues(alpha: 0.4),
+          decoration: TextDecoration.underline,
+          decorationColor: Colors.red,
+          decorationThickness: 2.5,
+        );
+      } else if (hasHighlight) {
+        // 只有高亮
+        style = TextStyle(
+          backgroundColor: highlightColor!.withValues(alpha: 0.4),
+        );
+      } else if (hasUnderline) {
+        // 只有划线：黑色
+        style = TextStyle(
+          decoration: TextDecoration.underline,
+          decorationColor: Colors.black,
+          decorationThickness: 2.5,
+        );
+      }
+      
+      spans.add(TextSpan(
+        text: segText,
+        style: style,
+      ));
+    }
+    
+    return spans;
+  }
+
+  /// 显示文本选择工具栏
+  void _showTextToolbarAt(Offset position, String selectedText, {List<Highlight>? existingHighlights}) {
+    _hideTextToolbar();
+    _selectedText = selectedText;
+    _selectedHighlights = existingHighlights ?? []; // 恢复高亮/划线信息
+    _toolbarPosition = position;
+    _showTextToolbar = true;
+
+    _toolbarOverlay = OverlayEntry(
+      builder: (context) => _buildTextToolbarOverlay(),
+    );
+    Overlay.of(context).insert(_toolbarOverlay!);
+  }
+
+  /// 隐藏文本选择工具栏
+  void _hideTextToolbar() {
+    _toolbarOverlay?.remove();
+    _toolbarOverlay = null;
+    _showTextToolbar = false;
+    _selectedText = null;
+    _selectedHighlights = [];
+  }
+
+  /// 构建气泡式工具栏
+  Widget _buildTextToolbarOverlay() {
+    final screenSize = MediaQuery.of(context).size;
+
+    // 计算工具栏位置（在选中区域上方）
+    double left = _toolbarPosition.dx - 130; // 工具栏宽度约260，居中
+    double top = _toolbarPosition.dy - 50;   // 在选中区域上方
+
+    // 边界检查
+    if (left < 10) left = 10;
+    if (left > screenSize.width - 270) left = screenSize.width - 270;
+    if (top < 50) top = _toolbarPosition.dy + 30; // 如果上方空间不够，显示在下方
+
+    return Stack(
+      children: [
+        // 透明背景，点击隐藏工具栏
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _hideTextToolbar,
+            child: Container(color: Colors.transparent),
+          ),
+        ),
+        // 工具栏
+        Positioned(
+          left: left,
+          top: top,
+          child: Material(
+            elevation: 8,
+            borderRadius: BorderRadius.circular(8),
+            color: const Color(0xFF2D2D2D),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: _selectedHighlights.isNotEmpty
+                    ? _buildExistingHighlightToolbar() // 已高亮/划线文本的工具栏
+                    : _buildNewHighlightToolbar(),     // 新选择的文本工具栏
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建新选择文本的工具栏（未高亮）
+  List<Widget> _buildNewHighlightToolbar() {
+    return [
+      // 三种颜色高亮按钮
+      _buildColorHighlightButton(Colors.yellow, '黄色高亮'),
+      _buildColorHighlightButton(Colors.green, '绿色高亮'),
+      _buildColorHighlightButton(Colors.blue, '蓝色高亮'),
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
+        icon: Icons.format_underline,
+        tooltip: '划线',
+        onTap: () {
+          _onUnderlineSelected();
+          _hideTextToolbar();
+        },
+      ),
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
+        icon: Icons.note_add,
+        tooltip: '添加笔记',
+        onTap: () {
+          _onAddNoteToNewHighlight();
+          _hideTextToolbar();
+        },
+      ),
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
+        icon: Icons.search,
+        tooltip: '搜索',
+        onTap: () {
+          _onSearchSelected();
+          _hideTextToolbar();
+        },
+      ),
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
+        icon: Icons.translate,
+        tooltip: '翻译',
+        onTap: () {
+          _onTranslateSelected();
+          _hideTextToolbar();
+        },
+      ),
+    ];
+  }
+
+  /// 构建已高亮/划线文本的工具栏（支持叠加）
+  List<Widget> _buildExistingHighlightToolbar() {
+    // 分离高亮和划线
+    final highlights = _selectedHighlights.where((h) => !h.isUnderline).toList();
+    final underlines = _selectedHighlights.where((h) => h.isUnderline).toList();
+    final hasHighlight = highlights.isNotEmpty;
+    final hasUnderline = underlines.isNotEmpty;
+    
+    final List<Widget> buttons = [];
+    
+    // 如果有高亮，显示颜色按钮
+    if (hasHighlight) {
+      final currentColor = highlights.first.color;
+      final currentColorValue = currentColor.toARGB32();
+      bool isYellow = currentColorValue == Colors.yellow.toARGB32();
+      bool isGreen = currentColorValue == Colors.green.toARGB32();
+      bool isBlue = currentColorValue == Colors.blue.toARGB32();
+      
+      buttons.addAll([
+        _buildColorHighlightButton(
+          Colors.yellow, 
+          isYellow ? '删除高亮' : '更换为黄色',
+          isCurrentColor: isYellow,
+        ),
+        _buildColorHighlightButton(
+          Colors.green, 
+          isGreen ? '删除高亮' : '更换为绿色',
+          isCurrentColor: isGreen,
+        ),
+        _buildColorHighlightButton(
+          Colors.blue, 
+          isBlue ? '删除高亮' : '更换为蓝色',
+          isCurrentColor: isBlue,
+        ),
+      ]);
+    } else {
+      // 没有高亮，显示添加高亮按钮
+      buttons.addAll([
+        _buildColorHighlightButton(Colors.yellow, '黄色高亮'),
+        _buildColorHighlightButton(Colors.green, '绿色高亮'),
+        _buildColorHighlightButton(Colors.blue, '蓝色高亮'),
+      ]);
+    }
+    
+    buttons.add(_buildToolbarDivider());
+    
+    // 划线按钮：如果有划线显示删除，否则显示添加
+    if (hasUnderline) {
+      buttons.add(
+        _buildToolbarIconButton(
+          icon: Icons.format_underline,
+          tooltip: '删除划线',
+          color: Colors.red,
+          onTap: () {
+            _onDeleteUnderline();
+            _hideTextToolbar();
+          },
+        ),
+      );
+    } else {
+      buttons.add(
+        _buildToolbarIconButton(
+          icon: Icons.format_underline,
+          tooltip: '划线',
+          onTap: () {
+            _onUnderlineSelected();
+            _hideTextToolbar();
+          },
+        ),
+      );
+    }
+    
+    // 获取笔记（合并高亮和划线的笔记）
+    final note = _getMergedNote();
+    
+    buttons.addAll([
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
+        icon: note != null && note.isNotEmpty ? Icons.edit_note : Icons.note_add,
+        tooltip: note != null && note.isNotEmpty ? '编辑笔记' : '添加笔记',
+        onTap: () {
+          _onAddNoteToExistingHighlights();
+          _hideTextToolbar();
+        },
+      ),
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
+        icon: Icons.search,
+        tooltip: '搜索',
+        onTap: () {
+          _onSearchSelected();
+          _hideTextToolbar();
+        },
+      ),
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
+        icon: Icons.translate,
+        tooltip: '翻译',
+        onTap: () {
+          _onTranslateSelected();
+          _hideTextToolbar();
+        },
+      ),
+    ]);
+    
+    return buttons;
+  }
+  
+  /// 获取合并后的笔记
+  String? _getMergedNote() {
+    for (final h in _selectedHighlights) {
+      if (h.note != null && h.note!.isNotEmpty) {
+        return h.note;
+      }
+    }
+    return null;
+  }
+
+  /// 构建颜色高亮按钮
+  /// [isCurrentColor] 如果为true，显示"×"表示点击会删除此高亮
+  Widget _buildColorHighlightButton(Color color, String tooltip, {bool isCurrentColor = false}) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: () {
+          if (isCurrentColor) {
+            // 点击当前颜色按钮，删除高亮
+            _onDeleteHighlight();
+          } else {
+            // 点击其他颜色按钮，更换颜色
+            _onHighlightWithColor(color);
+          }
+          _hideTextToolbar();
+        },
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          width: 28,
+          height: 28,
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.8),
+            borderRadius: BorderRadius.circular(4),
+            border: isCurrentColor
+                ? Border.all(color: Colors.white, width: 2)
+                : Border.all(color: Colors.white.withValues(alpha: 0.3)),
+          ),
+          child: Icon(
+            isCurrentColor ? Icons.close : Icons.highlight,
+            color: isCurrentColor ? Colors.red : Colors.black54,
+            size: 18,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建纯图标工具栏按钮
+  Widget _buildToolbarIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    Color color = Colors.white,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          width: 32,
+          height: 32,
+          alignment: Alignment.center,
+          child: Icon(icon, color: color, size: 20),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolbarDivider() {
+    return Container(
+      width: 1,
+      height: 24,
+      margin: const EdgeInsets.symmetric(horizontal: 3),
+      color: Colors.white.withValues(alpha: 0.2),
+    );
+  }
+
+  /// 处理带颜色的高亮（新增或更换颜色）
+  void _onHighlightWithColor(Color color) async {
+    if (_selectionStartOffset == null ||
+        _selectionEndOffset == null ||
+        _selectionChapterIndex == null) return;
+
+    // 保存到局部变量，避免异步操作后值被清空
+    final selectedText = _selectedText ?? '';
+    final startOffset = _selectionStartOffset!;
+    final endOffset = _selectionEndOffset!;
+    final chapterIndex = _selectionChapterIndex!;
+    final pageIndex = _selectionPageIndex ?? _currentPageIndex;
+
+    // 只移除与该位置重叠的高亮（保留划线），避免同类型重复
+    setState(() {
+      _highlights.removeWhere((h) {
+        return !h.isUnderline && // 只删除高亮
+               h.chapterIndex == chapterIndex &&
+               h.startOffset < endOffset &&
+               h.endOffset > startOffset;
+      });
+    });
+
+    final existingHighlights = _selectedHighlights.where((h) => !h.isUnderline).toList();
+    if (existingHighlights.isNotEmpty) {
+      // 更换已有高亮的颜色 - 保留原有信息，只改颜色
+      final oldHighlight = existingHighlights.first;
+      setState(() {
+        _highlights.add(Highlight(
+          id: oldHighlight.id,
+          chapterIndex: oldHighlight.chapterIndex,
+          pageIndex: oldHighlight.pageIndex,
+          text: oldHighlight.text,
+          color: color,
+          startOffset: oldHighlight.startOffset,
+          endOffset: oldHighlight.endOffset,
+          note: oldHighlight.note,
+          createdAt: oldHighlight.createdAt,
+        ));
+      });
+    } else {
+      // 创建新高亮对象
+      final highlight = Highlight(
+        chapterIndex: chapterIndex,
+        pageIndex: pageIndex,
+        text: selectedText,
+        color: color,
+        startOffset: startOffset,
+        endOffset: endOffset,
+      );
+
+      setState(() {
+        _highlights.add(highlight);
+      });
+    }
+
+    // 保存到持久化存储
+    await _saveHighlights();
+  }
+
+  /// 删除高亮（删除选中的高亮标记）
+  void _onDeleteHighlight() async {
+    final highlights = _selectedHighlights.where((h) => !h.isUnderline).toList();
+    if (highlights.isEmpty) return;
+
+    setState(() {
+      for (final h in highlights) {
+        _highlights.removeWhere((item) => item.id == h.id);
+      }
+    });
+    await _saveHighlights();
+  }
+  
+  /// 删除划线（删除选中的划线标记）
+  void _onDeleteUnderline() async {
+    final underlines = _selectedHighlights.where((h) => h.isUnderline).toList();
+    if (underlines.isEmpty) return;
+
+    setState(() {
+      for (final h in underlines) {
+        _highlights.removeWhere((item) => item.id == h.id);
+      }
+    });
+    await _saveHighlights();
+  }
+
+  /// 保存高亮到本地存储
+  Future<void> _saveHighlights() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bookKey = '${_highlightsPrefix}${widget.bookPath.hashCode}';
+      final highlightsJson = _highlights.map((h) => h.toJson()).toList();
+      await prefs.setString(bookKey, jsonEncode(highlightsJson));
+    } catch (e) {
+      print('保存高亮失败: $e');
+    }
+  }
+
+  /// 从本地存储加载高亮
+  Future<void> _loadHighlights() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bookKey = '${_highlightsPrefix}${widget.bookPath.hashCode}';
+      final highlightsString = prefs.getString(bookKey);
+
+      if (highlightsString != null) {
+        final highlightsList = jsonDecode(highlightsString) as List<dynamic>;
+        setState(() {
+          _highlights.clear();
+          _highlights.addAll(
+            highlightsList.map((json) => Highlight.fromJson(json as Map<String, dynamic>)),
+          );
+        });
+      }
+    } catch (e) {
+      print('加载高亮失败: $e');
+    }
+  }
+
+  /// 删除高亮
+  Future<void> _deleteHighlight(String id) async {
+    setState(() {
+      _highlights.removeWhere((h) => h.id == id);
+    });
+    await _saveHighlights();
+  }
+
+  /// 处理划线
+  void _onUnderlineSelected() async {
+    if (_selectionStartOffset == null ||
+        _selectionEndOffset == null ||
+        _selectionChapterIndex == null) return;
+
+    // 保存到局部变量，避免异步操作后值被清空
+    final selectedText = _selectedText ?? '';
+    final startOffset = _selectionStartOffset!;
+    final endOffset = _selectionEndOffset!;
+    final chapterIndex = _selectionChapterIndex!;
+    final pageIndex = _selectionPageIndex ?? _currentPageIndex;
+
+    // 只移除与该位置重叠的划线（保留高亮），避免同类型重复
+    setState(() {
+      _highlights.removeWhere((h) {
+        return h.isUnderline && // 只删除划线
+               h.chapterIndex == chapterIndex &&
+               h.startOffset < endOffset &&
+               h.endOffset > startOffset;
+      });
+    });
+
+    // 创建划线对象（使用黑色作为默认划线颜色）
+    final underline = Highlight(
+      chapterIndex: chapterIndex,
+      pageIndex: pageIndex,
+      text: selectedText,
+      color: Colors.black,
+      startOffset: startOffset,
+      endOffset: endOffset,
+      isUnderline: true,
+    );
+
+    setState(() {
+      _highlights.add(underline);
+    });
+
+    // 保存到持久化存储
+    await _saveHighlights();
+  }
+
+  /// 为新选择的高亮添加笔记（先高亮再添加笔记）
+  void _onAddNoteToNewHighlight() {
+    if (_selectedText == null ||
+        _selectionStartOffset == null ||
+        _selectionEndOffset == null ||
+        _selectionChapterIndex == null) return;
+
+    // 先使用默认黄色高亮
+    _onHighlightWithColor(Colors.yellow);
+    
+    // 获取刚刚创建的高亮
+    final newHighlight = _highlights.lastWhere(
+      (h) => h.chapterIndex == _selectionChapterIndex &&
+             h.startOffset == _selectionStartOffset &&
+             h.endOffset == _selectionEndOffset,
+      orElse: () => _highlights.last,
+    );
+    
+    _selectedHighlights = [newHighlight];
+    
+    // 显示添加笔记对话框
+    _showAddNoteDialog(newHighlight);
+  }
+
+  /// 为已有高亮/划线添加/编辑笔记（支持叠加）
+  void _onAddNoteToExistingHighlights() {
+    if (_selectedHighlights.isEmpty) return;
+    
+    // 如果有高亮，优先编辑高亮的笔记；否则编辑划线的笔记
+    final targetHighlight = _selectedHighlights.firstWhere(
+      (h) => !h.isUnderline,
+      orElse: () => _selectedHighlights.first,
+    );
+    
+    _showAddNoteDialog(targetHighlight);
+  }
+
+  /// 显示添加/编辑笔记对话框
+  Future<void> _showAddNoteDialog(Highlight highlight) async {
+    final noteController = TextEditingController(text: highlight.note ?? '');
+    final isEditing = highlight.note != null && highlight.note!.isNotEmpty;
+    
+    // 根据高亮颜色计算对比色
+    final bgColor = highlight.color.withValues(alpha: 0.15);
+    final borderColor = highlight.color.withValues(alpha: 0.5);
+    
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: highlight.color.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: highlight.color.withValues(alpha: 0.5), width: 2),
+              ),
+              child: Icon(
+                isEditing ? Icons.edit_note : Icons.note_add,
+                color: Colors.black87,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              isEditing ? '编辑笔记' : '添加笔记',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 引用文本区域
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: borderColor, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: highlight.color.withValues(alpha: 0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.format_quote, size: 14, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          '引用原文',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      highlight.text,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.black87,
+                        height: 1.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              // 笔记输入区域
+              TextField(
+                controller: noteController,
+                maxLines: 5,
+                style: const TextStyle(fontSize: 15, height: 1.5, color: Colors.black87),
+                decoration: InputDecoration(
+                  hintText: '在此输入您的笔记...',
+                  hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
+                  filled: true,
+                  fillColor: Colors.grey[50],
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: highlight.color.withValues(alpha: 0.8), width: 2),
+                  ),
+                  contentPadding: const EdgeInsets.all(16),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.grey[600],
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            ),
+            child: const Text('取消', style: TextStyle(fontSize: 14)),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final noteText = noteController.text.trim();
+              setState(() {
+                highlight.note = noteText.isEmpty ? null : noteText;
+              });
+              await _saveHighlights();
+              Navigator.pop(context);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(isEditing ? '笔记已更新' : '笔记已保存'),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                );
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: highlight.color.withValues(alpha: 0.8),
+              foregroundColor: Colors.black87,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: Text(isEditing ? '更新' : '保存', style: const TextStyle(fontSize: 14)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 显示笔记列表对话框（AppBar按钮调用）
+  void _showNotesListDialog() {
+    _showHighlightListDialog();
+  }
+
+  /// 显示高亮列表对话框
+  void _showHighlightListDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // 按章节分组高亮
+          final groupedHighlights = _groupHighlightsByChapter(_highlights);
+          
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+            contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            actionsPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.note_alt, color: Colors.blue, size: 22),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  '笔记',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                ),
+                const Spacer(),
+                // 统计高亮和划线数量
+                Builder(
+                  builder: (context) {
+                    final underlineCount = _highlights.where((h) => h.isUnderline).length;
+                    final highlightCount = _highlights.length - underlineCount;
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (highlightCount > 0) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.highlight, size: 12, color: Colors.amber[800]),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$highlightCount',
+                                  style: TextStyle(fontSize: 12, color: Colors.amber[800], fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        if (underlineCount > 0) ...[
+                          if (highlightCount > 0) const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.format_underline, size: 12, color: Colors.grey[700]),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$underlineCount',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey[700], fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 450,
+              child: _highlights.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.lightbulb_outline, size: 64, color: Colors.grey[300]),
+                          const SizedBox(height: 16),
+                          Text(
+                            '暂无高亮笔记',
+                            style: TextStyle(color: Colors.grey[500], fontSize: 16),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '长按文本选择内容后点击高亮按钮添加',
+                            style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: groupedHighlights.length,
+                      itemBuilder: (context, index) {
+                        return _buildGroupedHighlightItem(
+                          groupedHighlights[index],
+                          setDialogState,
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.grey[100],
+                  foregroundColor: Colors.black87,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text('关闭', style: TextStyle(fontSize: 14)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 按章节分组高亮，并合并重叠的高亮和划线
+  List<_ChapterGroup> _groupHighlightsByChapter(List<Highlight> highlights) {
+    // 先按章节索引排序
+    final sorted = List<Highlight>.from(highlights)
+      ..sort((a, b) {
+        if (a.chapterIndex != b.chapterIndex) {
+          return a.chapterIndex.compareTo(b.chapterIndex);
+        }
+        return a.startOffset.compareTo(b.startOffset);
+      });
+
+    final groups = <_ChapterGroup>[];
+
+    // 按章节分组
+    final chapterMap = <int, List<Highlight>>{};
+    for (final h in sorted) {
+      chapterMap.putIfAbsent(h.chapterIndex, () => []).add(h);
+    }
+
+    // 对每个章节内的标记进行合并
+    for (final entry in chapterMap.entries) {
+      final chapterHighlights = entry.value;
+      final mergedList = _mergeOverlappingHighlights(chapterHighlights);
+
+      groups.add(_ChapterGroup(
+        chapterIndex: entry.key,
+        chapterTitle: _getChapterTitle(entry.key),
+        mergedHighlights: mergedList,
+      ));
+    }
+
+    // 按章节索引排序
+    groups.sort((a, b) => a.chapterIndex.compareTo(b.chapterIndex));
+    return groups;
+  }
+
+  /// 合并重叠的高亮和划线
+  /// 将位置重叠的标记合并成一条，取最大范围
+  List<_MergedHighlight> _mergeOverlappingHighlights(List<Highlight> highlights) {
+    if (highlights.isEmpty) return [];
+
+    // 按起始位置排序
+    final sorted = List<Highlight>.from(highlights)
+      ..sort((a, b) => a.startOffset.compareTo(b.startOffset));
+
+    final merged = <_MergedHighlight>[];
+
+    for (final h in sorted) {
+      // 查找是否有重叠的已合并标记
+      _MergedHighlight? overlapping;
+      for (final m in merged) {
+        // 检查是否有重叠：一个的结束 > 另一个的开始，且一个的开始 < 另一个的结束
+        if (h.startOffset < m.endOffset && h.endOffset > m.startOffset) {
+          overlapping = m;
+          break;
+        }
+      }
+
+      if (overlapping != null) {
+        // 合并到已有标记中，扩展范围
+        final newStart = overlapping.startOffset < h.startOffset
+            ? overlapping.startOffset
+            : h.startOffset;
+        final newEnd = overlapping.endOffset > h.endOffset
+            ? overlapping.endOffset
+            : h.endOffset;
+
+        // 重新获取合并后的文本
+        final newText = _getTextForRange(
+          h.chapterIndex,
+          newStart,
+          newEnd,
+        );
+
+        // 创建新的合并标记
+        final newHighlights = List<Highlight>.from(overlapping.originalHighlights);
+        final newUnderlines = List<Highlight>.from(overlapping.originalUnderlines);
+
+        if (h.isUnderline) {
+          if (!newUnderlines.any((u) => u.id == h.id)) {
+            newUnderlines.add(h);
+          }
+        } else {
+          if (!newHighlights.any((hl) => hl.id == h.id)) {
+            newHighlights.add(h);
+          }
+        }
+
+        // 优先取高亮的笔记，如果没有则取划线的笔记
+        final newNote = newHighlights.firstWhere(
+          (hl) => hl.note != null && hl.note!.isNotEmpty,
+          orElse: () => newUnderlines.firstWhere(
+            (u) => u.note != null && u.note!.isNotEmpty,
+            orElse: () => newHighlights.isNotEmpty ? newHighlights.first : newUnderlines.first,
+          ),
+        ).note;
+
+        // 移除旧的，添加新的
+        merged.remove(overlapping);
+        merged.add(_MergedHighlight(
+          chapterIndex: h.chapterIndex,
+          pageIndex: h.pageIndex,
+          text: newText,
+          startOffset: newStart,
+          endOffset: newEnd,
+          originalHighlights: newHighlights,
+          originalUnderlines: newUnderlines,
+          createdAt: overlapping.createdAt.isBefore(h.createdAt)
+              ? overlapping.createdAt
+              : h.createdAt,
+          note: newNote,
+        ));
+      } else {
+        // 创建新的合并标记
+        final highlights = h.isUnderline ? <Highlight>[] : [h];
+        final underlines = h.isUnderline ? [h] : <Highlight>[];
+
+        merged.add(_MergedHighlight(
+          chapterIndex: h.chapterIndex,
+          pageIndex: h.pageIndex,
+          text: h.text,
+          startOffset: h.startOffset,
+          endOffset: h.endOffset,
+          originalHighlights: highlights,
+          originalUnderlines: underlines,
+          createdAt: h.createdAt,
+          note: h.note,
+        ));
+      }
+    }
+
+    return merged;
+  }
+
+  /// 根据章节和位置范围获取文本
+  String _getTextForRange(int chapterIndex, int startOffset, int endOffset) {
+    // 从所有页面中查找该范围的文本
+    StringBuffer result = StringBuffer();
+    int currentOffset = 0;
+
+    for (final page in _pages) {
+      if (page.chapterIndex != chapterIndex) continue;
+
+      for (final item in page.contentItems) {
+        if (item is TextContent) {
+          final text = item.text;
+          final textStart = currentOffset;
+          final textEnd = currentOffset + text.length;
+
+          // 检查是否有重叠
+          if (textEnd > startOffset && textStart < endOffset) {
+            final overlapStart = startOffset > textStart ? startOffset - textStart : 0;
+            final overlapEnd = endOffset < textEnd ? endOffset - textStart : text.length;
+
+            if (overlapStart < overlapEnd) {
+              result.write(text.substring(overlapStart, overlapEnd));
+            }
+          }
+
+          currentOffset += text.length;
+        }
+      }
+    }
+
+    return result.toString();
+  }
+
+  /// 获取章节标题
+  String _getChapterTitle(int chapterIndex) {
+    if (chapterIndex >= 0 && chapterIndex < _chapters.length) {
+      return _chapters[chapterIndex].title ?? '第${chapterIndex + 1}章';
+    }
+    return '第${chapterIndex + 1}章';
+  }
+
+  /// 构建分组的高亮项
+  Widget _buildGroupedHighlightItem(
+    _ChapterGroup group,
+    StateSetter setDialogState,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 章节标题
+        Container(
+          margin: const EdgeInsets.only(top: 16, bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.blue.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.withValues(alpha: 0.15)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.bookmark_outline, size: 14, color: Colors.blue[700]),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  group.chapterTitle,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blue[600],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${group.mergedHighlights.length}',
+                  style: TextStyle(fontSize: 11, color: Colors.blue[700], fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 该章节下的所有合并后的高亮
+        ...group.mergedHighlights.map((merged) => _buildMergedHighlightListItem(
+          merged,
+          setDialogState,
+        )),
+      ],
+    );
+  }
+
+  /// 构建合并后的高亮列表项
+  Widget _buildMergedHighlightListItem(
+    _MergedHighlight merged, [
+    StateSetter? setDialogState,
+  ]) {
+    final hasNote = merged.note != null && merged.note!.isNotEmpty;
+    final hasHighlight = merged.hasHighlight;
+    final hasUnderline = merged.hasUnderline;
+    final isCombined = hasHighlight && hasUnderline;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10, left: 4, right: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              Navigator.pop(context);
+              // 跳转到第一个原始标记的位置
+              final firstHighlight = merged.originalHighlights.isNotEmpty
+                  ? merged.originalHighlights.first
+                  : merged.originalUnderlines.first;
+              _jumpToHighlight(firstHighlight);
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 顶部：类型标识 + 日期 + 操作按钮
+                Container(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+                  decoration: BoxDecoration(
+                    color: isCombined
+                        ? merged.highlightColor.withValues(alpha: 0.08)
+                        : hasUnderline
+                            ? Colors.grey.withValues(alpha: 0.05)
+                            : merged.highlightColor.withValues(alpha: 0.08),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: isCombined
+                            ? merged.highlightColor.withValues(alpha: 0.15)
+                            : hasUnderline
+                                ? Colors.grey.withValues(alpha: 0.2)
+                                : merged.highlightColor.withValues(alpha: 0.15),
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      // 类型标识
+                      isCombined
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // 高亮颜色块
+                                Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    color: merged.highlightColor.withValues(alpha: 0.8),
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(color: Colors.white, width: 1.5),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                // 划线图标
+                                Icon(
+                                  Icons.format_underline,
+                                  size: 14,
+                                  color: Colors.red[700],
+                                ),
+                              ],
+                            )
+                          : hasUnderline
+                              ? Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Icon(
+                                    Icons.format_underline,
+                                    size: 14,
+                                    color: Colors.grey[700],
+                                  ),
+                                )
+                              : Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    color: merged.highlightColor.withValues(alpha: 0.8),
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(color: Colors.white, width: 1.5),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: merged.highlightColor.withValues(alpha: 0.4),
+                                        blurRadius: 2,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                      const SizedBox(width: 8),
+                      // 日期
+                      Expanded(
+                        child: Text(
+                          _formatDate(merged.createdAt),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      // 笔记按钮 - 编辑第一个有高亮笔记的标记
+                      InkWell(
+                        onTap: () async {
+                          // 优先编辑高亮的笔记
+                          final target = merged.originalHighlights.isNotEmpty
+                              ? merged.originalHighlights.first
+                              : merged.originalUnderlines.first;
+                          await _showAddNoteDialog(target);
+                          setDialogState?.call(() {});
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: hasNote ? Colors.blue.withValues(alpha: 0.1) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Icon(
+                            hasNote ? Icons.edit_note : Icons.note_add_outlined,
+                            size: 18,
+                            color: hasNote ? Colors.blue[700] : Colors.grey[500],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      // 删除按钮 - 删除所有原始标记
+                      InkWell(
+                        onTap: () async {
+                          // 删除所有原始高亮和划线
+                          for (final h in merged.originalHighlights) {
+                            await _deleteHighlight(h.id);
+                          }
+                          for (final u in merged.originalUnderlines) {
+                            await _deleteHighlight(u.id);
+                          }
+                          if (mounted) {
+                            setState(() {});
+                            setDialogState?.call(() {});
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          child: Icon(Icons.delete_outline, size: 18, color: Colors.red[400]),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // 内容区域
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 合并后的文本 - 使用RichText分段显示，只对实际有划线的部分加下划线
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isCombined
+                              ? merged.highlightColor.withValues(alpha: 0.12)
+                              : hasUnderline
+                                  ? Colors.grey.withValues(alpha: 0.05)
+                                  : merged.highlightColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isCombined
+                                ? merged.highlightColor.withValues(alpha: 0.25)
+                                : hasUnderline
+                                    ? Colors.grey.withValues(alpha: 0.2)
+                                    : merged.highlightColor.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: _buildMergedHighlightTextSpans(merged),
+                      ),
+                      // 笔记内容
+                      if (hasNote) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey[200]!),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.comment_outlined, size: 14, color: Colors.grey[500]),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  merged.note!,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey[700],
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建合并高亮项的文本显示 - 分段渲染，只对实际有划线的部分加下划线
+  Widget _buildMergedHighlightTextSpans(_MergedHighlight merged) {
+    final hasUnderline = merged.hasUnderline;
+    final hasHighlight = merged.hasHighlight;
+    final text = merged.text;
+    final textStartOffset = merged.startOffset;
+
+    // 如果没有划线，直接显示普通文本
+    if (!hasUnderline) {
+      return Text(
+        text,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 14,
+          color: Colors.black87,
+          height: 1.5,
+          fontWeight: FontWeight.w500,
+        ),
+      );
+    }
+
+    // 收集所有分割点（划线的起始/结束位置，相对于合并文本的起始位置）
+    final Set<int> splitPoints = {0, text.length};
+    for (final u in merged.originalUnderlines) {
+      final start = (u.startOffset - textStartOffset).clamp(0, text.length);
+      final end = (u.endOffset - textStartOffset).clamp(0, text.length);
+      if (start < end) {
+        splitPoints.add(start);
+        splitPoints.add(end);
+      }
+    }
+
+    // 如果有高亮，也加入分割点（用于区分叠加区域）
+    for (final h in merged.originalHighlights) {
+      final start = (h.startOffset - textStartOffset).clamp(0, text.length);
+      final end = (h.endOffset - textStartOffset).clamp(0, text.length);
+      if (start < end) {
+        splitPoints.add(start);
+        splitPoints.add(end);
+      }
+    }
+
+    final sortedPoints = splitPoints.toList()..sort();
+
+    // 构建每个段的样式
+    final spans = <TextSpan>[];
+    for (int i = 0; i < sortedPoints.length - 1; i++) {
+      final segStart = sortedPoints[i];
+      final segEnd = sortedPoints[i + 1];
+      if (segStart >= segEnd) continue;
+
+      final segText = text.substring(segStart, segEnd);
+
+      // 检查该段是否有划线
+      final segHasUnderline = merged.originalUnderlines.any((u) {
+        final uStart = u.startOffset - textStartOffset;
+        final uEnd = u.endOffset - textStartOffset;
+        return segStart < uEnd && segEnd > uStart;
+      });
+
+      // 检查该段是否有高亮（用于确定划线颜色）
+      final segHasHighlight = merged.originalHighlights.any((h) {
+        final hStart = h.startOffset - textStartOffset;
+        final hEnd = h.endOffset - textStartOffset;
+        return segStart < hEnd && segEnd > hStart;
+      });
+
+      // 确定划线颜色：叠加时红色，仅划线时黑色
+      final decorationColor = segHasUnderline && segHasHighlight ? Colors.red : Colors.black54;
+
+      spans.add(TextSpan(
+        text: segText,
+        style: TextStyle(
+          fontSize: 14,
+          color: Colors.black87,
+          height: 1.5,
+          fontWeight: FontWeight.w500,
+          decoration: segHasUnderline ? TextDecoration.underline : null,
+          decorationColor: decorationColor,
+          decorationThickness: segHasUnderline ? 2 : null,
+        ),
+      ));
+    }
+
+    return RichText(
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(children: spans),
+    );
+  }
+
+  /// 构建高亮列表项（保留用于兼容）
+  Widget _buildHighlightListItem(
+    Highlight highlight, [
+    StateSetter? setDialogState,
+  ]) {
+    final hasNote = highlight.note != null && highlight.note!.isNotEmpty;
+    final isUnderline = highlight.isUnderline;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10, left: 4, right: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              Navigator.pop(context);
+              _jumpToHighlight(highlight);
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 顶部：高亮颜色条/划线图标 + 日期 + 操作按钮
+                Container(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+                  decoration: BoxDecoration(
+                    color: isUnderline
+                        ? Colors.grey.withValues(alpha: 0.05)
+                        : highlight.color.withValues(alpha: 0.08),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: isUnderline
+                            ? Colors.grey.withValues(alpha: 0.2)
+                            : highlight.color.withValues(alpha: 0.15),
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      // 类型标识：高亮显示颜色块，划线显示下划线图标
+                      isUnderline
+                          ? Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Icon(
+                                Icons.format_underline,
+                                size: 14,
+                                color: Colors.grey[700],
+                              ),
+                            )
+                          : Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: highlight.color.withValues(alpha: 0.8),
+                                borderRadius: BorderRadius.circular(3),
+                                border: Border.all(color: Colors.white, width: 1.5),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: highlight.color.withValues(alpha: 0.4),
+                                    blurRadius: 2,
+                                  ),
+                                ],
+                              ),
+                            ),
+                      const SizedBox(width: 8),
+                      // 日期
+                      Expanded(
+                        child: Text(
+                          _formatDate(highlight.createdAt),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      // 笔记按钮
+                      InkWell(
+                        onTap: () async {
+                          // 不关闭父对话框，直接显示笔记编辑对话框
+                          await _showAddNoteDialog(highlight);
+                          // 笔记保存后刷新对话框状态
+                          setDialogState?.call(() {});
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: hasNote ? Colors.blue.withValues(alpha: 0.1) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Icon(
+                            hasNote ? Icons.edit_note : Icons.note_add_outlined,
+                            size: 18,
+                            color: hasNote ? Colors.blue[700] : Colors.grey[500],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      // 删除按钮
+                      InkWell(
+                        onTap: () async {
+                          await _deleteHighlight(highlight.id);
+                          if (mounted) {
+                            setState(() {});
+                            setDialogState?.call(() {});
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          child: Icon(Icons.delete_outline, size: 18, color: Colors.red[400]),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // 内容区域
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 高亮/划线文本
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isUnderline
+                              ? Colors.grey.withValues(alpha: 0.05)
+                              : highlight.color.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isUnderline
+                                ? Colors.grey.withValues(alpha: 0.2)
+                                : highlight.color.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: Text(
+                          highlight.text,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.black87,
+                            height: 1.5,
+                            fontWeight: FontWeight.w500,
+                            decoration: isUnderline ? TextDecoration.underline : null,
+                            decorationColor: isUnderline ? Colors.black54 : null,
+                            decorationThickness: isUnderline ? 2 : null,
+                          ),
+                        ),
+                      ),
+                      // 笔记内容
+                      if (hasNote) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey[200]!),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.comment_outlined, size: 14, color: Colors.grey[500]),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  highlight.note!,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey[700],
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 格式化日期
+  String _formatDate(DateTime date) {
+    return '${date.month}/${date.day} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 跳转到高亮位置
+  void _jumpToHighlight(Highlight highlight) {
+    // 查找包含该高亮的页面
+    for (int i = 0; i < _pages.length; i++) {
+      final page = _pages[i];
+      if (page.chapterIndex == highlight.chapterIndex) {
+        // 计算该页面的文本范围
+        int pageStartOffset = _calculatePageStartOffset(page);
+        int pageEndOffset = pageStartOffset;
+        for (final item in page.contentItems) {
+          if (item is TextContent) {
+            pageEndOffset += item.text.length;
+          }
+        }
+
+        // 检查高亮是否在该页面范围内
+        if (highlight.startOffset < pageEndOffset && highlight.endOffset > pageStartOffset) {
+          setState(() {
+            _currentPageIndex = i;
+            _currentChapterIndex = page.chapterIndex;
+          });
+          _saveReadingPosition();
+          break;
+        }
+      }
+    }
+  }
+
+  /// 处理搜索
+  void _onSearchSelected() {
+    if (_selectedText == null) return;
+    // TODO: 实现搜索功能
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('搜索: $_selectedText')),
+    );
+  }
+
+  /// 处理翻译
+  void _onTranslateSelected() {
+    if (_selectedText == null) return;
+    // TODO: 实现翻译功能
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('翻译: $_selectedText')),
+    );
   }
 
   /// 生成书籍的唯一标识键
@@ -467,6 +2248,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
       // 加载书签
       await _loadBookmarks();
+
+      // 加载高亮笔记
+      await _loadHighlights();
 
       // 获取窗口大小用于检查缓存有效性
       if (mounted) {
@@ -1153,6 +2937,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   Widget _buildPageContent(PageContent page, double availableHeight) {
     // availableHeight 已剔除顶部/底部控制区的高度，确保页面内容不超高
+    // 计算该页之前所有文本的累积偏移量
+    int cumulativeOffset = _calculatePageStartOffset(page);
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 10, 24, 10),
       child: SingleChildScrollView(
@@ -1160,15 +2947,49 @@ class _BookReaderPageState extends State<BookReaderPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: page.contentItems.map((item) {
             if (item is TextContent) {
+              final textStartOffset = cumulativeOffset;
+              cumulativeOffset += item.text.length;
+
+              // 构建带高亮的文本
+              final highlightedSpans = _buildHighlightSpans(
+                item.text,
+                textStartOffset,
+                page.chapterIndex,
+              );
+
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: SelectableText(
-                  item.text,
+                child: _SelectableTextWithToolbar(
+                  text: item.text,
                   style: TextStyle(
                     fontSize: _fontSize,
                     height: 1.5,
                     color: Colors.black87,
                   ),
+                  textStartOffset: textStartOffset,
+                  chapterIndex: page.chapterIndex,
+                  pageIndex: _currentPageIndex,
+                  spans: highlightedSpans,
+                  onTextSelected: (selectedText, position, startOffset, endOffset) {
+                    _selectionStartOffset = startOffset;
+                    _selectionEndOffset = endOffset;
+                    _selectionChapterIndex = page.chapterIndex;
+                    _selectionPageIndex = _currentPageIndex;
+                    
+                    // 检查是否选中了已有高亮/划线
+                    final existingHighlights = _getHighlightsAtSelection(
+                      page.chapterIndex,
+                      startOffset,
+                      endOffset,
+                    );
+                    
+                    _showTextToolbarAt(position, selectedText, existingHighlights: existingHighlights);
+                  },
+                  onSelectionCleared: () {
+                    if (_showTextToolbar) {
+                      _hideTextToolbar();
+                    }
+                  },
                 ),
               );
             } else if (item is ImageContent) {
@@ -1797,28 +3618,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
-  void _saveNote() {
-    if (_noteController.text.trim().isNotEmpty) {
-      final currentPage = _pages.isNotEmpty ? _pages[_currentPageIndex] : null;
-      setState(() {
-        _bookmarks.add(
-          Bookmark(
-            chapterIndex: _currentChapterIndex,
-            pageIndex: _currentPageIndex,
-            title: currentPage?.title ?? '第 ${_currentPageIndex + 1} 页',
-            timestamp: DateTime.now(),
-            note: _noteController.text.trim(),
-          ),
-        );
-      });
-      _noteController.clear();
-      Navigator.pop(context);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
-    }
-  }
-
   /// 清除当前书籍的缓存
   Future<void> _clearBookCache() async {
     try {
@@ -2073,34 +3872,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   tooltip: '目录',
                 ),
                 IconButton(
-                  icon: const Icon(Icons.edit_note),
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: Text('添加笔记 - 第 ${_currentPageIndex + 1} 页'),
-                        content: TextField(
-                          controller: _noteController,
-                          maxLines: 5,
-                          decoration: const InputDecoration(
-                            hintText: '输入笔记内容...',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('取消'),
-                          ),
-                          TextButton(
-                            onPressed: _saveNote,
-                            child: const Text('保存'),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                  tooltip: '添加笔记',
+                  icon: const Icon(Icons.note_alt),
+                  onPressed: _showNotesListDialog,
+                  tooltip: '笔记',
                 ),
               ],
             )
@@ -2362,16 +4136,20 @@ abstract class ContentItem {
 
 class TextContent extends ContentItem {
   final String text;
+  final int startOffset; // 文本在章节中的起始偏移量
 
-  TextContent({required this.text});
+  TextContent({required this.text, this.startOffset = 0});
 
   @override
   Map<String, dynamic> toJson() {
-    return {'type': 'text', 'text': text};
+    return {'type': 'text', 'text': text, 'startOffset': startOffset};
   }
 
   factory TextContent.fromJson(Map<String, dynamic> json) {
-    return TextContent(text: json['text'] as String);
+    return TextContent(
+      text: json['text'] as String,
+      startOffset: json['startOffset'] as int? ?? 0,
+    );
   }
 }
 
@@ -2473,16 +4251,205 @@ class BookmarkColors {
   ];
 }
 
+/// 高亮笔记数据类
 class Highlight {
-  final int chapterIndex;
-  final int pageIndex;
-  final String text;
-  final Color color;
+  final String id; // 唯一标识
+  final int chapterIndex; // 章节索引
+  final int pageIndex; // 页面索引
+  final String text; // 高亮文本内容
+  final Color color; // 高亮颜色
+  final int startOffset; // 在章节文本中的起始位置
+  final int endOffset; // 在章节文本中的结束位置
+  final DateTime createdAt; // 创建时间
+  String? note; // 用户添加的笔记内容
+  final bool isUnderline; // 是否为划线（false=高亮，true=划线）
 
   Highlight({
+    String? id,
     required this.chapterIndex,
     required this.pageIndex,
     required this.text,
     required this.color,
+    required this.startOffset,
+    required this.endOffset,
+    this.note,
+    DateTime? createdAt,
+    this.isUnderline = false,
+  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+       createdAt = createdAt ?? DateTime.now();
+
+  // 转换为JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'chapterIndex': chapterIndex,
+      'pageIndex': pageIndex,
+      'text': text,
+      'color': color.toARGB32(),
+      'startOffset': startOffset,
+      'endOffset': endOffset,
+      'note': note,
+      'createdAt': createdAt.millisecondsSinceEpoch,
+      'isUnderline': isUnderline,
+    };
+  }
+
+  // 从JSON创建
+  factory Highlight.fromJson(Map<String, dynamic> json) {
+    return Highlight(
+      id: json['id'] as String,
+      chapterIndex: json['chapterIndex'] as int,
+      pageIndex: json['pageIndex'] as int,
+      text: json['text'] as String,
+      color: Color(json['color'] as int),
+      startOffset: json['startOffset'] as int,
+      endOffset: json['endOffset'] as int,
+      note: json['note'] as String?,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int),
+      isUnderline: json['isUnderline'] as bool? ?? false,
+    );
+  }
+}
+
+/// 章节分组辅助类
+class _ChapterGroup {
+  final int chapterIndex;
+  final String chapterTitle;
+  final List<_MergedHighlight> mergedHighlights;
+
+  _ChapterGroup({
+    required this.chapterIndex,
+    required this.chapterTitle,
+    required this.mergedHighlights,
   });
+}
+
+/// 合并后的高亮/划线标记
+/// 将重叠的高亮和划线合并成一条显示
+class _MergedHighlight {
+  final int chapterIndex;
+  final int pageIndex;
+  final String text; // 合并后的文本（取最大范围）
+  final int startOffset; // 合并后的起始位置（最小）
+  final int endOffset; // 合并后的结束位置（最大）
+  final List<Highlight> originalHighlights; // 原始高亮列表
+  final List<Highlight> originalUnderlines; // 原始划线列表
+  final DateTime createdAt; // 最早的创建时间
+  String? note; // 合并后的笔记（优先取高亮的笔记）
+
+  _MergedHighlight({
+    required this.chapterIndex,
+    required this.pageIndex,
+    required this.text,
+    required this.startOffset,
+    required this.endOffset,
+    required this.originalHighlights,
+    required this.originalUnderlines,
+    required this.createdAt,
+    this.note,
+  });
+
+  /// 是否有高亮
+  bool get hasHighlight => originalHighlights.isNotEmpty;
+
+  /// 是否有划线
+  bool get hasUnderline => originalUnderlines.isNotEmpty;
+
+  /// 获取高亮颜色（取第一个高亮的颜色）
+  Color get highlightColor => originalHighlights.isNotEmpty
+      ? originalHighlights.first.color
+      : Colors.yellow;
+}
+
+/// 带工具栏的可选择文本组件
+/// 捕获文本选择时的位置，使工具栏贴近选择区域
+class _SelectableTextWithToolbar extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  final int textStartOffset; // 文本在章节中的起始偏移
+  final int chapterIndex;
+  final int pageIndex;
+  final List<TextSpan> spans; // 带高亮的文本片段
+  final Function(String selectedText, Offset position, int startOffset, int endOffset) onTextSelected;
+  final VoidCallback onSelectionCleared;
+
+  const _SelectableTextWithToolbar({
+    required this.text,
+    required this.style,
+    required this.textStartOffset,
+    required this.chapterIndex,
+    required this.pageIndex,
+    required this.spans,
+    required this.onTextSelected,
+    required this.onSelectionCleared,
+  });
+
+  @override
+  State<_SelectableTextWithToolbar> createState() => _SelectableTextWithToolbarState();
+}
+
+class _SelectableTextWithToolbarState extends State<_SelectableTextWithToolbar> {
+  Offset? _lastTapPosition;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onLongPressStart: (details) {
+        // 记录长按开始位置
+        _lastTapPosition = details.globalPosition;
+      },
+      onLongPressMoveUpdate: (details) {
+        // 更新拖动位置
+        _lastTapPosition = details.globalPosition;
+      },
+      child: SelectableText.rich(
+        TextSpan(
+          children: widget.spans,
+          style: widget.style,
+        ),
+        onSelectionChanged: (selection, cause) {
+          if (selection.isValid && !selection.isCollapsed) {
+            // 用户选择了文本
+            // 获取选中的原始文本
+            final selectedText = widget.text.substring(
+              selection.start.clamp(0, widget.text.length),
+              selection.end.clamp(0, widget.text.length),
+            );
+
+            if (selectedText.isNotEmpty) {
+              // 计算在章节中的实际偏移位置
+              final startOffset = widget.textStartOffset + selection.start;
+              final endOffset = widget.textStartOffset + selection.end;
+
+              // 延迟显示工具栏，等待选择手柄出现
+              Future.delayed(const Duration(milliseconds: 150), () {
+                if (mounted) {
+                  // 使用最后记录的位置或计算位置
+                  final position = _lastTapPosition ?? _calculateCenterPosition();
+                  widget.onTextSelected(selectedText, position, startOffset, endOffset);
+                }
+              });
+            }
+          } else if (selection.isCollapsed) {
+            // 选择被取消
+            widget.onSelectionCleared();
+          }
+        },
+        // 禁用默认上下文菜单，使用自定义工具栏
+        contextMenuBuilder: (context, editableTextState) {
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+  }
+
+  /// 计算屏幕中央位置（作为备选）
+  Offset _calculateCenterPosition() {
+    final screenSize = MediaQuery.of(context).size;
+    return Offset(
+      screenSize.width / 2,
+      screenSize.height * 0.4,
+    );
+  }
 }
