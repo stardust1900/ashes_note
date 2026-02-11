@@ -40,7 +40,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   List<PageContent> _pages = [];
   int _totalPages = 0;
   Uint8List? _coverImage;
-  ReadingMode _readingMode = ReadingMode.page;
   Size? _windowSize;
   final GlobalKey _contentKey = GlobalKey();
 
@@ -2196,7 +2195,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
         'scrollOffset': _scrollController.hasClients
             ? _scrollController.offset
             : 0.0,
-        'readingMode': _readingMode.index,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
 
@@ -2356,38 +2354,16 @@ class _BookReaderPageState extends State<BookReaderPage> {
   void _restoreReadingPosition(Map<String, dynamic> position) {
     final savedPageIndex = (position['pageIndex'] as int?) ?? 0;
     final savedChapterIndex = (position['chapterIndex'] as int?) ?? 0;
-    final savedScrollOffset = (position['scrollOffset'] as double?) ?? 0.0;
-    final savedReadingMode =
-        ReadingMode.values[(position['readingMode'] as int?) ?? 0];
 
     print('恢复阅读位置: 第 $savedPageIndex 页, 章节 $savedChapterIndex');
-
-    // 恢复阅读模式
-    if (_readingMode != savedReadingMode) {
-      setState(() {
-        _readingMode = savedReadingMode;
-      });
-    }
 
     // 延迟恢复位置，确保页面已渲染
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
 
-      if (_readingMode == ReadingMode.page) {
-        // 分页模式：跳转到保存的页码
-        if (savedPageIndex >= 0 && savedPageIndex < _pages.length) {
-          _goToPage(savedPageIndex);
-        }
-      } else {
-        // 滚动模式：恢复滚动位置
-        if (_scrollController.hasClients) {
-          _scrollController.jumpTo(
-            savedScrollOffset.clamp(
-              0.0,
-              _scrollController.position.maxScrollExtent,
-            ),
-          );
-        }
+      // 跳转到保存的页码
+      if (savedPageIndex >= 0 && savedPageIndex < _pages.length) {
+        _goToPage(savedPageIndex);
       }
 
       // 显示恢复提示
@@ -3355,234 +3331,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     );
   }
 
-  Widget _buildScrollContent() {
-    return SingleChildScrollView(
-      // 添加滚动支持
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: _pages.map((page) {
-          final contentWidgets = page.contentItems.map((item) {
-            if (item is TextContent) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  item.text,
-                  style: TextStyle(
-                    fontSize: _fontSize,
-                    height: 1.6,
-                    color: Colors.black87,
-                  ),
-                ),
-              );
-            } else if (item is ImageContent) {
-              return FutureBuilder<Uint8List?>(
-                future: _getImageData(item.source),
-                builder: (context, snapshot) {
-                  final screenSize = MediaQuery.of(context).size;
-                  final maxHeight = screenSize.height * 0.5;
-
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return Container(
-                      height: maxHeight,
-                      alignment: Alignment.center,
-                      child: const CircularProgressIndicator(),
-                    );
-                  }
-
-                  if (snapshot.hasData && snapshot.data != null) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          return ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: constraints.maxWidth,
-                              maxHeight: maxHeight,
-                            ),
-                            child: material.Image.memory(
-                              snapshot.data!,
-                              fit: BoxFit.contain,
-                              width: double.infinity,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  height: maxHeight,
-                                  color: Colors.grey[200],
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.broken_image,
-                                        size: 48,
-                                        color: Colors.grey[400],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        '图片加载失败',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  } else {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: Container(
-                        height: maxHeight,
-                        color: Colors.grey[200],
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.image_not_supported,
-                              size: 48,
-                              color: Colors.grey[400],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '图片: ${item.source}',
-                              style: TextStyle(color: Colors.grey[600]),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
-                },
-              );
-            } else if (item is CoverContent) {
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Column(
-                  children: [
-                    Text(
-                      _bookTitle,
-                      style: TextStyle(
-                        fontSize: _fontSize * 2,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        final screenSize = MediaQuery.of(context).size;
-                        final availableHeight = screenSize.height - 200;
-                        final coverWidth = (screenSize.width * 0.7).clamp(
-                          200.0,
-                          500.0,
-                        );
-                        final coverHeight = (availableHeight * 0.7).clamp(
-                          300.0,
-                          700.0,
-                        );
-
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: coverWidth,
-                              maxHeight: coverHeight,
-                            ),
-                            child: material.Image.memory(
-                              item.imageData,
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  width: coverWidth,
-                                  height: coverHeight,
-                                  color: Colors.grey[200],
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.broken_image,
-                                        size: 48,
-                                        color: Colors.grey[400],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        '封面加载失败',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              );
-            }
-            return const SizedBox.shrink();
-          }).toList();
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [...contentWidgets],
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  void _toggleReadingMode() {
-    setState(() {
-      _readingMode = _readingMode == ReadingMode.scroll
-          ? ReadingMode.page
-          : ReadingMode.scroll;
-    });
-  }
-
-  Widget _buildScrollMode() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return GestureDetector(
-          onTapUp: (details) {
-            final screenHeight = MediaQuery.of(context).size.height;
-            final tapY = details.globalPosition.dy;
-            // 点击中间区域切换控制栏显示
-            if (tapY > screenHeight * 0.2 && tapY < screenHeight * 0.8) {
-              setState(() {
-                _showControls = !_showControls;
-              });
-            }
-          },
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (notification) {
-              // 滚动结束时保存阅读位置
-              if (notification is ScrollEndNotification) {
-                _debounceSaveReadingPosition();
-              }
-              return false;
-            },
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(24.0),
-              child: _buildScrollContent(),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildPageMode() {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -4090,18 +3838,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
               actions: [
                 IconButton(
                   icon: Icon(
-                    _readingMode == ReadingMode.scroll
-                        ? Icons.view_stream
-                        : Icons.view_carousel,
-                    color: Colors.blue,
-                  ),
-                  onPressed: _toggleReadingMode,
-                  tooltip: _readingMode == ReadingMode.scroll
-                      ? '切换到分页模式'
-                      : '切换到滚动模式',
-                ),
-                IconButton(
-                  icon: Icon(
                     _isBookmarked() ? Icons.bookmark : Icons.bookmark_border,
                     color: _isBookmarked() ? Colors.blue : null,
                   ),
@@ -4216,12 +3952,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   width: double.infinity,
                   height: double.infinity,
                   color: Colors.white,
-                  child: _readingMode == ReadingMode.scroll
-                      ? _buildScrollMode()
-                      : _buildPageMode(),
+                  child: _buildPageMode(),
                 ),
               ),
-              if (_showTableOfContents && _readingMode == ReadingMode.page)
+              if (_showTableOfContents)
                 _buildTableOfContents(),
               if (_showFontSizeSlider) _buildFontSizeSlider(),
               // 处理中提示（字体变化时显示在页面底部）
@@ -4475,8 +4209,6 @@ class PageContent {
     );
   }
 }
-
-enum ReadingMode { scroll, page }
 
 class Bookmark {
   final int chapterIndex;
