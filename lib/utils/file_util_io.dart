@@ -100,12 +100,12 @@ class FileUtilImpl implements FileUtil {
 
   @override
   Future<String?> getApplicationDocumentsPath() {
-    if (io.Platform.isIOS || io.Platform.isAndroid) {
+    if (io.Platform.isIOS || io.Platform.isAndroid || io.Platform.isMacOS) {
       return getApplicationDocumentsDirectory().then(
         (d) => '${d.path}/ashesNote',
       );
     }
-    // 调用此方法会打开系统原生的目录选择对话框
+    // Web 或其他平台才需要文件选择器
     return FilePicker.platform.getDirectoryPath();
   }
 

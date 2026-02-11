@@ -141,9 +141,12 @@ class _SettingsViewState extends State<SettingsView> {
                         _workingDirectoryController.text = rootPath!;
                       });
                       if (themeData.platform == TargetPlatform.android ||
-                          themeData.platform == TargetPlatform.iOS) {
+                          themeData.platform == TargetPlatform.iOS ||
+                          themeData.platform == TargetPlatform.macOS) {
                         messageState.showSnackBar(
-                          SnackBar(content: Text('android ios无法选择目录，直接保存即可')),
+                          SnackBar(
+                            content: Text('Android/iOS/macOS无法选择目录，直接保存即可'),
+                          ),
                         );
                       }
                       _saveSettings();
@@ -408,11 +411,14 @@ class _SettingsViewState extends State<SettingsView> {
                 // 打印 notes 目录下的文件
                 final notesDir = Directory(notesDirectory);
                 if (notesDir.existsSync()) {
-                  notesDir.list().listen((entity) {
-                    print('Git pull 完成, notes 目录内容: ${entity.path}');
-                  }, onDone: () {
-                    print('Git pull 完成, notes 目录列出完毕');
-                  });
+                  notesDir.list().listen(
+                    (entity) {
+                      print('Git pull 完成, notes 目录内容: ${entity.path}');
+                    },
+                    onDone: () {
+                      print('Git pull 完成, notes 目录列出完毕');
+                    },
+                  );
                 } else {
                   print('Git pull 完成,但 notes 目录不存在');
                 }
