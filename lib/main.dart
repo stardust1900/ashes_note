@@ -49,7 +49,7 @@ class AshesNoteApp extends StatelessWidget {
                       TextButton(
                         onPressed: () {
                           Navigator.of(context).pop();
-                          _controller.selectIndex(1);
+                          _controller.selectIndex(2);
                         },
                         child: Text('去设置'),
                       ),
