@@ -9,6 +9,7 @@ import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart';
+import '../utils/prefs_util.dart';
 
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
@@ -91,7 +92,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   int? _selectionEndOffset;
   int? _selectionChapterIndex;
   int? _selectionPageIndex;
-  
+
   // 当前选中的高亮/划线列表（支持叠加）
   List<Highlight> _selectedHighlights = [];
 
@@ -114,11 +115,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   /// 检查选择区域是否与已有高亮/划线重叠，返回所有匹配的标记
-  List<Highlight> _getHighlightsAtSelection(int chapterIndex, int startOffset, int endOffset) {
+  List<Highlight> _getHighlightsAtSelection(
+    int chapterIndex,
+    int startOffset,
+    int endOffset,
+  ) {
     return _highlights.where((h) {
       return h.chapterIndex == chapterIndex &&
-             h.startOffset < endOffset && 
-             h.endOffset > startOffset;
+          h.startOffset < endOffset &&
+          h.endOffset > startOffset;
     }).toList();
   }
 
@@ -127,7 +132,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
     int offset = 0;
     // 遍历当前章节之前的所有页面
     for (final p in _pages) {
-      if (p.chapterIndex == page.chapterIndex && p.pageIndexInChapter < page.pageIndexInChapter) {
+      if (p.chapterIndex == page.chapterIndex &&
+          p.pageIndexInChapter < page.pageIndexInChapter) {
         // 累加该页所有文本内容的长度
         for (final item in p.contentItems) {
           if (item is TextContent) {
@@ -140,12 +146,16 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   /// 构建带高亮/划线的文本样式（支持叠加）
-  List<TextSpan> _buildHighlightSpans(String text, int textStartOffset, int chapterIndex) {
+  List<TextSpan> _buildHighlightSpans(
+    String text,
+    int textStartOffset,
+    int chapterIndex,
+  ) {
     // 获取当前文本段的所有高亮和划线
     final textHighlights = _highlights.where((h) {
       return h.chapterIndex == chapterIndex &&
-             h.endOffset > textStartOffset &&
-             h.startOffset < textStartOffset + text.length;
+          h.endOffset > textStartOffset &&
+          h.startOffset < textStartOffset + text.length;
     }).toList();
 
     if (textHighlights.isEmpty) {
@@ -164,32 +174,32 @@ class _BookReaderPageState extends State<BookReaderPage> {
       splitPoints.add(start);
       splitPoints.add(end);
     }
-    
+
     final sortedPoints = splitPoints.toList()..sort();
-    
+
     // 构建每个段的样式
     final spans = <TextSpan>[];
     for (int i = 0; i < sortedPoints.length - 1; i++) {
       final segStart = sortedPoints[i];
       final segEnd = sortedPoints[i + 1];
       if (segStart >= segEnd) continue;
-      
+
       final segText = text.substring(segStart, segEnd);
-      
+
       // 检查该段是否有高亮
       final hasHighlight = highlights.any((h) {
         final hStart = h.startOffset - textStartOffset;
         final hEnd = h.endOffset - textStartOffset;
         return segStart < hEnd && segEnd > hStart;
       });
-      
+
       // 检查该段是否有划线
       final hasUnderline = underlines.any((h) {
         final hStart = h.startOffset - textStartOffset;
         final hEnd = h.endOffset - textStartOffset;
         return segStart < hEnd && segEnd > hStart;
       });
-      
+
       // 获取高亮颜色（取第一个匹配的高亮）
       Color? highlightColor;
       if (hasHighlight) {
@@ -200,7 +210,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
         });
         highlightColor = matchingHighlight.color;
       }
-      
+
       // 构建样式
       TextStyle? style;
       if (hasHighlight && hasUnderline) {
@@ -224,18 +234,19 @@ class _BookReaderPageState extends State<BookReaderPage> {
           decorationThickness: 2.5,
         );
       }
-      
-      spans.add(TextSpan(
-        text: segText,
-        style: style,
-      ));
+
+      spans.add(TextSpan(text: segText, style: style));
     }
-    
+
     return spans;
   }
 
   /// 显示文本选择工具栏
-  void _showTextToolbarAt(Offset position, String selectedText, {List<Highlight>? existingHighlights}) {
+  void _showTextToolbarAt(
+    Offset position,
+    String selectedText, {
+    List<Highlight>? existingHighlights,
+  }) {
     _hideTextToolbar();
     _selectedText = selectedText;
     _selectedHighlights = existingHighlights ?? []; // 恢复高亮/划线信息
@@ -263,7 +274,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
     // 计算工具栏位置（在选中区域上方）
     double left = _toolbarPosition.dx - 130; // 工具栏宽度约260，居中
-    double top = _toolbarPosition.dy - 50;   // 在选中区域上方
+    double top = _toolbarPosition.dy - 50; // 在选中区域上方
 
     // 边界检查
     if (left < 10) left = 10;
@@ -294,7 +305,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: _selectedHighlights.isNotEmpty
                     ? _buildExistingHighlightToolbar() // 已高亮/划线文本的工具栏
-                    : _buildNewHighlightToolbar(),     // 新选择的文本工具栏
+                    : _buildNewHighlightToolbar(), // 新选择的文本工具栏
               ),
             ),
           ),
@@ -352,13 +363,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
   /// 构建已高亮/划线文本的工具栏（支持叠加）
   List<Widget> _buildExistingHighlightToolbar() {
     // 分离高亮和划线
-    final highlights = _selectedHighlights.where((h) => !h.isUnderline).toList();
+    final highlights = _selectedHighlights
+        .where((h) => !h.isUnderline)
+        .toList();
     final underlines = _selectedHighlights.where((h) => h.isUnderline).toList();
     final hasHighlight = highlights.isNotEmpty;
     final hasUnderline = underlines.isNotEmpty;
-    
+
     final List<Widget> buttons = [];
-    
+
     // 如果有高亮，显示颜色按钮
     if (hasHighlight) {
       final currentColor = highlights.first.color;
@@ -366,20 +379,20 @@ class _BookReaderPageState extends State<BookReaderPage> {
       bool isYellow = currentColorValue == Colors.yellow.toARGB32();
       bool isGreen = currentColorValue == Colors.green.toARGB32();
       bool isBlue = currentColorValue == Colors.blue.toARGB32();
-      
+
       buttons.addAll([
         _buildColorHighlightButton(
-          Colors.yellow, 
+          Colors.yellow,
           isYellow ? '删除高亮' : '更换为黄色',
           isCurrentColor: isYellow,
         ),
         _buildColorHighlightButton(
-          Colors.green, 
+          Colors.green,
           isGreen ? '删除高亮' : '更换为绿色',
           isCurrentColor: isGreen,
         ),
         _buildColorHighlightButton(
-          Colors.blue, 
+          Colors.blue,
           isBlue ? '删除高亮' : '更换为蓝色',
           isCurrentColor: isBlue,
         ),
@@ -392,9 +405,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
         _buildColorHighlightButton(Colors.blue, '蓝色高亮'),
       ]);
     }
-    
+
     buttons.add(_buildToolbarDivider());
-    
+
     // 划线按钮：如果有划线显示删除，否则显示添加
     if (hasUnderline) {
       buttons.add(
@@ -420,14 +433,16 @@ class _BookReaderPageState extends State<BookReaderPage> {
         ),
       );
     }
-    
+
     // 获取笔记（合并高亮和划线的笔记）
     final note = _getMergedNote();
-    
+
     buttons.addAll([
       _buildToolbarDivider(),
       _buildToolbarIconButton(
-        icon: note != null && note.isNotEmpty ? Icons.edit_note : Icons.note_add,
+        icon: note != null && note.isNotEmpty
+            ? Icons.edit_note
+            : Icons.note_add,
         tooltip: note != null && note.isNotEmpty ? '编辑笔记' : '添加笔记',
         onTap: () {
           _onAddNoteToExistingHighlights();
@@ -453,10 +468,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
         },
       ),
     ]);
-    
+
     return buttons;
   }
-  
+
   /// 获取合并后的笔记
   String? _getMergedNote() {
     for (final h in _selectedHighlights) {
@@ -469,7 +484,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 构建颜色高亮按钮
   /// [isCurrentColor] 如果为true，显示"×"表示点击会删除此高亮
-  Widget _buildColorHighlightButton(Color color, String tooltip, {bool isCurrentColor = false}) {
+  Widget _buildColorHighlightButton(
+    Color color,
+    String tooltip, {
+    bool isCurrentColor = false,
+  }) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -540,7 +559,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   void _onHighlightWithColor(Color color) async {
     if (_selectionStartOffset == null ||
         _selectionEndOffset == null ||
-        _selectionChapterIndex == null) return;
+        _selectionChapterIndex == null)
+      return;
 
     // 保存到局部变量，避免异步操作后值被清空
     final selectedText = _selectedText ?? '';
@@ -553,28 +573,32 @@ class _BookReaderPageState extends State<BookReaderPage> {
     setState(() {
       _highlights.removeWhere((h) {
         return !h.isUnderline && // 只删除高亮
-               h.chapterIndex == chapterIndex &&
-               h.startOffset < endOffset &&
-               h.endOffset > startOffset;
+            h.chapterIndex == chapterIndex &&
+            h.startOffset < endOffset &&
+            h.endOffset > startOffset;
       });
     });
 
-    final existingHighlights = _selectedHighlights.where((h) => !h.isUnderline).toList();
+    final existingHighlights = _selectedHighlights
+        .where((h) => !h.isUnderline)
+        .toList();
     if (existingHighlights.isNotEmpty) {
       // 更换已有高亮的颜色 - 保留原有信息，只改颜色
       final oldHighlight = existingHighlights.first;
       setState(() {
-        _highlights.add(Highlight(
-          id: oldHighlight.id,
-          chapterIndex: oldHighlight.chapterIndex,
-          pageIndex: oldHighlight.pageIndex,
-          text: oldHighlight.text,
-          color: color,
-          startOffset: oldHighlight.startOffset,
-          endOffset: oldHighlight.endOffset,
-          note: oldHighlight.note,
-          createdAt: oldHighlight.createdAt,
-        ));
+        _highlights.add(
+          Highlight(
+            id: oldHighlight.id,
+            chapterIndex: oldHighlight.chapterIndex,
+            pageIndex: oldHighlight.pageIndex,
+            text: oldHighlight.text,
+            color: color,
+            startOffset: oldHighlight.startOffset,
+            endOffset: oldHighlight.endOffset,
+            note: oldHighlight.note,
+            createdAt: oldHighlight.createdAt,
+          ),
+        );
       });
     } else {
       // 创建新高亮对象
@@ -598,7 +622,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 删除高亮（删除选中的高亮标记）
   void _onDeleteHighlight() async {
-    final highlights = _selectedHighlights.where((h) => !h.isUnderline).toList();
+    final highlights = _selectedHighlights
+        .where((h) => !h.isUnderline)
+        .toList();
     if (highlights.isEmpty) return;
 
     setState(() {
@@ -608,7 +634,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     });
     await _saveHighlights();
   }
-  
+
   /// 删除划线（删除选中的划线标记）
   void _onDeleteUnderline() async {
     final underlines = _selectedHighlights.where((h) => h.isUnderline).toList();
@@ -646,7 +672,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
         setState(() {
           _highlights.clear();
           _highlights.addAll(
-            highlightsList.map((json) => Highlight.fromJson(json as Map<String, dynamic>)),
+            highlightsList.map(
+              (json) => Highlight.fromJson(json as Map<String, dynamic>),
+            ),
           );
         });
       }
@@ -667,7 +695,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   void _onUnderlineSelected() async {
     if (_selectionStartOffset == null ||
         _selectionEndOffset == null ||
-        _selectionChapterIndex == null) return;
+        _selectionChapterIndex == null)
+      return;
 
     // 保存到局部变量，避免异步操作后值被清空
     final selectedText = _selectedText ?? '';
@@ -680,9 +709,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
     setState(() {
       _highlights.removeWhere((h) {
         return h.isUnderline && // 只删除划线
-               h.chapterIndex == chapterIndex &&
-               h.startOffset < endOffset &&
-               h.endOffset > startOffset;
+            h.chapterIndex == chapterIndex &&
+            h.startOffset < endOffset &&
+            h.endOffset > startOffset;
       });
     });
 
@@ -710,21 +739,23 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (_selectedText == null ||
         _selectionStartOffset == null ||
         _selectionEndOffset == null ||
-        _selectionChapterIndex == null) return;
+        _selectionChapterIndex == null)
+      return;
 
     // 先使用默认黄色高亮
     _onHighlightWithColor(Colors.yellow);
-    
+
     // 获取刚刚创建的高亮
     final newHighlight = _highlights.lastWhere(
-      (h) => h.chapterIndex == _selectionChapterIndex &&
-             h.startOffset == _selectionStartOffset &&
-             h.endOffset == _selectionEndOffset,
+      (h) =>
+          h.chapterIndex == _selectionChapterIndex &&
+          h.startOffset == _selectionStartOffset &&
+          h.endOffset == _selectionEndOffset,
       orElse: () => _highlights.last,
     );
-    
+
     _selectedHighlights = [newHighlight];
-    
+
     // 显示添加笔记对话框
     _showAddNoteDialog(newHighlight);
   }
@@ -732,13 +763,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
   /// 为已有高亮/划线添加/编辑笔记（支持叠加）
   void _onAddNoteToExistingHighlights() {
     if (_selectedHighlights.isEmpty) return;
-    
+
     // 如果有高亮，优先编辑高亮的笔记；否则编辑划线的笔记
     final targetHighlight = _selectedHighlights.firstWhere(
       (h) => !h.isUnderline,
       orElse: () => _selectedHighlights.first,
     );
-    
+
     _showAddNoteDialog(targetHighlight);
   }
 
@@ -746,11 +777,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
   Future<void> _showAddNoteDialog(Highlight highlight) async {
     final noteController = TextEditingController(text: highlight.note ?? '');
     final isEditing = highlight.note != null && highlight.note!.isNotEmpty;
-    
+
     // 根据高亮颜色计算对比色
     final bgColor = highlight.color.withValues(alpha: 0.15);
     final borderColor = highlight.color.withValues(alpha: 0.5);
-    
+
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -763,7 +794,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
               decoration: BoxDecoration(
                 color: highlight.color.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: highlight.color.withValues(alpha: 0.5), width: 2),
+                border: Border.all(
+                  color: highlight.color.withValues(alpha: 0.5),
+                  width: 2,
+                ),
               ),
               child: Icon(
                 isEditing ? Icons.edit_note : Icons.note_add,
@@ -805,7 +839,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.format_quote, size: 14, color: Colors.grey[600]),
+                        Icon(
+                          Icons.format_quote,
+                          size: 14,
+                          color: Colors.grey[600],
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           '引用原文',
@@ -837,7 +875,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
               TextField(
                 controller: noteController,
                 maxLines: 5,
-                style: const TextStyle(fontSize: 15, height: 1.5, color: Colors.black87),
+                style: const TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  color: Colors.black87,
+                ),
                 decoration: InputDecoration(
                   hintText: '在此输入您的笔记...',
                   hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
@@ -853,7 +895,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: highlight.color.withValues(alpha: 0.8), width: 2),
+                    borderSide: BorderSide(
+                      color: highlight.color.withValues(alpha: 0.8),
+                      width: 2,
+                    ),
                   ),
                   contentPadding: const EdgeInsets.all(16),
                 ),
@@ -883,7 +928,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   SnackBar(
                     content: Text(isEditing ? '笔记已更新' : '笔记已保存'),
                     behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 );
               }
@@ -892,9 +939,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
               backgroundColor: highlight.color.withValues(alpha: 0.8),
               foregroundColor: Colors.black87,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: Text(isEditing ? '更新' : '保存', style: const TextStyle(fontSize: 14)),
+            child: Text(
+              isEditing ? '更新' : '保存',
+              style: const TextStyle(fontSize: 14),
+            ),
           ),
         ],
       ),
@@ -914,9 +966,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
         builder: (context, setDialogState) {
           // 按章节分组高亮
           final groupedHighlights = _groupHighlightsByChapter(_highlights);
-          
+
           return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
             titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
             contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
             actionsPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
@@ -928,7 +982,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     color: Colors.blue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.note_alt, color: Colors.blue, size: 22),
+                  child: const Icon(
+                    Icons.note_alt,
+                    color: Colors.blue,
+                    size: 22,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 const Text(
@@ -939,14 +997,19 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 // 统计高亮和划线数量
                 Builder(
                   builder: (context) {
-                    final underlineCount = _highlights.where((h) => h.isUnderline).length;
+                    final underlineCount = _highlights
+                        .where((h) => h.isUnderline)
+                        .length;
                     final highlightCount = _highlights.length - underlineCount;
                     return Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (highlightCount > 0) ...[
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.amber.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(10),
@@ -954,11 +1017,19 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.highlight, size: 12, color: Colors.amber[800]),
+                                Icon(
+                                  Icons.highlight,
+                                  size: 12,
+                                  color: Colors.amber[800],
+                                ),
                                 const SizedBox(width: 4),
                                 Text(
                                   '$highlightCount',
-                                  style: TextStyle(fontSize: 12, color: Colors.amber[800], fontWeight: FontWeight.w600),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.amber[800],
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ],
                             ),
@@ -967,7 +1038,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         if (underlineCount > 0) ...[
                           if (highlightCount > 0) const SizedBox(width: 6),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.grey.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(10),
@@ -975,11 +1049,19 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.format_underline, size: 12, color: Colors.grey[700]),
+                                Icon(
+                                  Icons.format_underline,
+                                  size: 12,
+                                  color: Colors.grey[700],
+                                ),
                                 const SizedBox(width: 4),
                                 Text(
                                   '$underlineCount',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey[700], fontWeight: FontWeight.w600),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[700],
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ],
                             ),
@@ -999,16 +1081,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.lightbulb_outline, size: 64, color: Colors.grey[300]),
+                          Icon(
+                            Icons.lightbulb_outline,
+                            size: 64,
+                            color: Colors.grey[300],
+                          ),
                           const SizedBox(height: 16),
                           Text(
                             '暂无高亮笔记',
-                            style: TextStyle(color: Colors.grey[500], fontSize: 16),
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 16,
+                            ),
                           ),
                           const SizedBox(height: 4),
                           Text(
                             '长按文本选择内容后点击高亮按钮添加',
-                            style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                            style: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
@@ -1025,13 +1117,37 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     ),
             ),
             actions: [
+              // 导出按钮
+              if (_highlights.isNotEmpty)
+                FilledButton.icon(
+                  onPressed: () => exportNotesToMarkdown(),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.green.withValues(alpha: 0.1),
+                    foregroundColor: Colors.green[700],
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  icon: const Icon(Icons.download, size: 18),
+                  label: const Text('导出', style: TextStyle(fontSize: 14)),
+                ),
+              const SizedBox(width: 8),
               FilledButton(
                 onPressed: () => Navigator.pop(context),
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.grey[100],
                   foregroundColor: Colors.black87,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
                 child: const Text('关闭', style: TextStyle(fontSize: 14)),
               ),
@@ -1066,11 +1182,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
       final chapterHighlights = entry.value;
       final mergedList = _mergeOverlappingHighlights(chapterHighlights);
 
-      groups.add(_ChapterGroup(
-        chapterIndex: entry.key,
-        chapterTitle: _getChapterTitle(entry.key),
-        mergedHighlights: mergedList,
-      ));
+      groups.add(
+        _ChapterGroup(
+          chapterIndex: entry.key,
+          chapterTitle: _getChapterTitle(entry.key),
+          mergedHighlights: mergedList,
+        ),
+      );
     }
 
     // 按章节索引排序
@@ -1080,7 +1198,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 合并重叠的高亮和划线
   /// 将位置重叠的标记合并成一条，取最大范围
-  List<_MergedHighlight> _mergeOverlappingHighlights(List<Highlight> highlights) {
+  List<_MergedHighlight> _mergeOverlappingHighlights(
+    List<Highlight> highlights,
+  ) {
     if (highlights.isEmpty) return [];
 
     // 按起始位置排序
@@ -1110,15 +1230,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
             : h.endOffset;
 
         // 重新获取合并后的文本
-        final newText = _getTextForRange(
-          h.chapterIndex,
-          newStart,
-          newEnd,
-        );
+        final newText = _getTextForRange(h.chapterIndex, newStart, newEnd);
 
         // 创建新的合并标记
-        final newHighlights = List<Highlight>.from(overlapping.originalHighlights);
-        final newUnderlines = List<Highlight>.from(overlapping.originalUnderlines);
+        final newHighlights = List<Highlight>.from(
+          overlapping.originalHighlights,
+        );
+        final newUnderlines = List<Highlight>.from(
+          overlapping.originalUnderlines,
+        );
 
         if (h.isUnderline) {
           if (!newUnderlines.any((u) => u.id == h.id)) {
@@ -1131,45 +1251,53 @@ class _BookReaderPageState extends State<BookReaderPage> {
         }
 
         // 优先取高亮的笔记，如果没有则取划线的笔记
-        final newNote = newHighlights.firstWhere(
-          (hl) => hl.note != null && hl.note!.isNotEmpty,
-          orElse: () => newUnderlines.firstWhere(
-            (u) => u.note != null && u.note!.isNotEmpty,
-            orElse: () => newHighlights.isNotEmpty ? newHighlights.first : newUnderlines.first,
-          ),
-        ).note;
+        final newNote = newHighlights
+            .firstWhere(
+              (hl) => hl.note != null && hl.note!.isNotEmpty,
+              orElse: () => newUnderlines.firstWhere(
+                (u) => u.note != null && u.note!.isNotEmpty,
+                orElse: () => newHighlights.isNotEmpty
+                    ? newHighlights.first
+                    : newUnderlines.first,
+              ),
+            )
+            .note;
 
         // 移除旧的，添加新的
         merged.remove(overlapping);
-        merged.add(_MergedHighlight(
-          chapterIndex: h.chapterIndex,
-          pageIndex: h.pageIndex,
-          text: newText,
-          startOffset: newStart,
-          endOffset: newEnd,
-          originalHighlights: newHighlights,
-          originalUnderlines: newUnderlines,
-          createdAt: overlapping.createdAt.isBefore(h.createdAt)
-              ? overlapping.createdAt
-              : h.createdAt,
-          note: newNote,
-        ));
+        merged.add(
+          _MergedHighlight(
+            chapterIndex: h.chapterIndex,
+            pageIndex: h.pageIndex,
+            text: newText,
+            startOffset: newStart,
+            endOffset: newEnd,
+            originalHighlights: newHighlights,
+            originalUnderlines: newUnderlines,
+            createdAt: overlapping.createdAt.isBefore(h.createdAt)
+                ? overlapping.createdAt
+                : h.createdAt,
+            note: newNote,
+          ),
+        );
       } else {
         // 创建新的合并标记
         final highlights = h.isUnderline ? <Highlight>[] : [h];
         final underlines = h.isUnderline ? [h] : <Highlight>[];
 
-        merged.add(_MergedHighlight(
-          chapterIndex: h.chapterIndex,
-          pageIndex: h.pageIndex,
-          text: h.text,
-          startOffset: h.startOffset,
-          endOffset: h.endOffset,
-          originalHighlights: highlights,
-          originalUnderlines: underlines,
-          createdAt: h.createdAt,
-          note: h.note,
-        ));
+        merged.add(
+          _MergedHighlight(
+            chapterIndex: h.chapterIndex,
+            pageIndex: h.pageIndex,
+            text: h.text,
+            startOffset: h.startOffset,
+            endOffset: h.endOffset,
+            originalHighlights: highlights,
+            originalUnderlines: underlines,
+            createdAt: h.createdAt,
+            note: h.note,
+          ),
+        );
       }
     }
 
@@ -1193,8 +1321,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
           // 检查是否有重叠
           if (textEnd > startOffset && textStart < endOffset) {
-            final overlapStart = startOffset > textStart ? startOffset - textStart : 0;
-            final overlapEnd = endOffset < textEnd ? endOffset - textStart : text.length;
+            final overlapStart = startOffset > textStart
+                ? startOffset - textStart
+                : 0;
+            final overlapEnd = endOffset < textEnd
+                ? endOffset - textStart
+                : text.length;
 
             if (overlapStart < overlapEnd) {
               result.write(text.substring(overlapStart, overlapEnd));
@@ -1260,17 +1392,20 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 ),
                 child: Text(
                   '${group.mergedHighlights.length}',
-                  style: TextStyle(fontSize: 11, color: Colors.blue[700], fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.blue[700],
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ],
           ),
         ),
         // 该章节下的所有合并后的高亮
-        ...group.mergedHighlights.map((merged) => _buildMergedHighlightListItem(
-          merged,
-          setDialogState,
-        )),
+        ...group.mergedHighlights.map(
+          (merged) => _buildMergedHighlightListItem(merged, setDialogState),
+        ),
       ],
     );
   }
@@ -1322,15 +1457,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     color: isCombined
                         ? merged.highlightColor.withValues(alpha: 0.08)
                         : hasUnderline
-                            ? Colors.grey.withValues(alpha: 0.05)
-                            : merged.highlightColor.withValues(alpha: 0.08),
+                        ? Colors.grey.withValues(alpha: 0.05)
+                        : merged.highlightColor.withValues(alpha: 0.08),
                     border: Border(
                       bottom: BorderSide(
                         color: isCombined
                             ? merged.highlightColor.withValues(alpha: 0.15)
                             : hasUnderline
-                                ? Colors.grey.withValues(alpha: 0.2)
-                                : merged.highlightColor.withValues(alpha: 0.15),
+                            ? Colors.grey.withValues(alpha: 0.2)
+                            : merged.highlightColor.withValues(alpha: 0.15),
                       ),
                     ),
                   ),
@@ -1346,9 +1481,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                   width: 12,
                                   height: 12,
                                   decoration: BoxDecoration(
-                                    color: merged.highlightColor.withValues(alpha: 0.8),
+                                    color: merged.highlightColor.withValues(
+                                      alpha: 0.8,
+                                    ),
                                     borderRadius: BorderRadius.circular(3),
-                                    border: Border.all(color: Colors.white, width: 1.5),
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 1.5,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
@@ -1361,33 +1501,40 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               ],
                             )
                           : hasUnderline
-                              ? Container(
-                                  padding: const EdgeInsets.all(3),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Icon(
-                                    Icons.format_underline,
-                                    size: 14,
-                                    color: Colors.grey[700],
-                                  ),
-                                )
-                              : Container(
-                                  width: 12,
-                                  height: 12,
-                                  decoration: BoxDecoration(
-                                    color: merged.highlightColor.withValues(alpha: 0.8),
-                                    borderRadius: BorderRadius.circular(3),
-                                    border: Border.all(color: Colors.white, width: 1.5),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: merged.highlightColor.withValues(alpha: 0.4),
-                                        blurRadius: 2,
-                                      ),
-                                    ],
-                                  ),
+                          ? Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Icon(
+                                Icons.format_underline,
+                                size: 14,
+                                color: Colors.grey[700],
+                              ),
+                            )
+                          : Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: merged.highlightColor.withValues(
+                                  alpha: 0.8,
                                 ),
+                                borderRadius: BorderRadius.circular(3),
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: merged.highlightColor.withValues(
+                                      alpha: 0.4,
+                                    ),
+                                    blurRadius: 2,
+                                  ),
+                                ],
+                              ),
+                            ),
                       const SizedBox(width: 8),
                       // 日期
                       Expanded(
@@ -1414,13 +1561,17 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         child: Container(
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: hasNote ? Colors.blue.withValues(alpha: 0.1) : Colors.transparent,
+                            color: hasNote
+                                ? Colors.blue.withValues(alpha: 0.1)
+                                : Colors.transparent,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Icon(
                             hasNote ? Icons.edit_note : Icons.note_add_outlined,
                             size: 18,
-                            color: hasNote ? Colors.blue[700] : Colors.grey[500],
+                            color: hasNote
+                                ? Colors.blue[700]
+                                : Colors.grey[500],
                           ),
                         ),
                       ),
@@ -1443,7 +1594,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         borderRadius: BorderRadius.circular(6),
                         child: Container(
                           padding: const EdgeInsets.all(6),
-                          child: Icon(Icons.delete_outline, size: 18, color: Colors.red[400]),
+                          child: Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: Colors.red[400],
+                          ),
                         ),
                       ),
                     ],
@@ -1458,20 +1613,23 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       // 合并后的文本 - 使用RichText分段显示，只对实际有划线的部分加下划线
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: isCombined
                               ? merged.highlightColor.withValues(alpha: 0.12)
                               : hasUnderline
-                                  ? Colors.grey.withValues(alpha: 0.05)
-                                  : merged.highlightColor.withValues(alpha: 0.12),
+                              ? Colors.grey.withValues(alpha: 0.05)
+                              : merged.highlightColor.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: isCombined
                                 ? merged.highlightColor.withValues(alpha: 0.25)
                                 : hasUnderline
-                                    ? Colors.grey.withValues(alpha: 0.2)
-                                    : merged.highlightColor.withValues(alpha: 0.25),
+                                ? Colors.grey.withValues(alpha: 0.2)
+                                : merged.highlightColor.withValues(alpha: 0.25),
                           ),
                         ),
                         child: _buildMergedHighlightTextSpans(merged),
@@ -1490,7 +1648,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.comment_outlined, size: 14, color: Colors.grey[500]),
+                              Icon(
+                                Icons.comment_outlined,
+                                size: 14,
+                                color: Colors.grey[500],
+                              ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
@@ -1588,20 +1750,24 @@ class _BookReaderPageState extends State<BookReaderPage> {
       });
 
       // 确定划线颜色：叠加时红色，仅划线时黑色
-      final decorationColor = segHasUnderline && segHasHighlight ? Colors.red : Colors.black54;
+      final decorationColor = segHasUnderline && segHasHighlight
+          ? Colors.red
+          : Colors.black54;
 
-      spans.add(TextSpan(
-        text: segText,
-        style: TextStyle(
-          fontSize: 14,
-          color: Colors.black87,
-          height: 1.5,
-          fontWeight: FontWeight.w500,
-          decoration: segHasUnderline ? TextDecoration.underline : null,
-          decorationColor: decorationColor,
-          decorationThickness: segHasUnderline ? 2 : null,
+      spans.add(
+        TextSpan(
+          text: segText,
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.black87,
+            height: 1.5,
+            fontWeight: FontWeight.w500,
+            decoration: segHasUnderline ? TextDecoration.underline : null,
+            decorationColor: decorationColor,
+            decorationThickness: segHasUnderline ? 2 : null,
+          ),
         ),
-      ));
+      );
     }
 
     return RichText(
@@ -1682,10 +1848,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               decoration: BoxDecoration(
                                 color: highlight.color.withValues(alpha: 0.8),
                                 borderRadius: BorderRadius.circular(3),
-                                border: Border.all(color: Colors.white, width: 1.5),
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: highlight.color.withValues(alpha: 0.4),
+                                    color: highlight.color.withValues(
+                                      alpha: 0.4,
+                                    ),
                                     blurRadius: 2,
                                   ),
                                 ],
@@ -1715,13 +1886,17 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         child: Container(
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: hasNote ? Colors.blue.withValues(alpha: 0.1) : Colors.transparent,
+                            color: hasNote
+                                ? Colors.blue.withValues(alpha: 0.1)
+                                : Colors.transparent,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Icon(
                             hasNote ? Icons.edit_note : Icons.note_add_outlined,
                             size: 18,
-                            color: hasNote ? Colors.blue[700] : Colors.grey[500],
+                            color: hasNote
+                                ? Colors.blue[700]
+                                : Colors.grey[500],
                           ),
                         ),
                       ),
@@ -1738,7 +1913,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         borderRadius: BorderRadius.circular(6),
                         child: Container(
                           padding: const EdgeInsets.all(6),
-                          child: Icon(Icons.delete_outline, size: 18, color: Colors.red[400]),
+                          child: Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: Colors.red[400],
+                          ),
                         ),
                       ),
                     ],
@@ -1753,7 +1932,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       // 高亮/划线文本
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: isUnderline
                               ? Colors.grey.withValues(alpha: 0.05)
@@ -1774,8 +1956,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             color: Colors.black87,
                             height: 1.5,
                             fontWeight: FontWeight.w500,
-                            decoration: isUnderline ? TextDecoration.underline : null,
-                            decorationColor: isUnderline ? Colors.black54 : null,
+                            decoration: isUnderline
+                                ? TextDecoration.underline
+                                : null,
+                            decorationColor: isUnderline
+                                ? Colors.black54
+                                : null,
                             decorationThickness: isUnderline ? 2 : null,
                           ),
                         ),
@@ -1794,7 +1980,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.comment_outlined, size: 14, color: Colors.grey[500]),
+                              Icon(
+                                Icons.comment_outlined,
+                                size: 14,
+                                color: Colors.grey[500],
+                              ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
@@ -1844,7 +2034,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
         }
 
         // 检查高亮是否在该页面范围内
-        if (highlight.startOffset < pageEndOffset && highlight.endOffset > pageStartOffset) {
+        if (highlight.startOffset < pageEndOffset &&
+            highlight.endOffset > pageStartOffset) {
           setState(() {
             _currentPageIndex = i;
             _currentChapterIndex = page.chapterIndex;
@@ -1860,18 +2051,18 @@ class _BookReaderPageState extends State<BookReaderPage> {
   void _onSearchSelected() {
     if (_selectedText == null) return;
     // TODO: 实现搜索功能
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('搜索: $_selectedText')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('搜索: $_selectedText')));
   }
 
   /// 处理翻译
   void _onTranslateSelected() {
     if (_selectedText == null) return;
     // TODO: 实现翻译功能
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('翻译: $_selectedText')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('翻译: $_selectedText')));
   }
 
   /// 生成书籍的唯一标识键
@@ -2108,14 +2299,18 @@ class _BookReaderPageState extends State<BookReaderPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final key = _getBookmarksKey();
-      final bookmarksJson = _bookmarks.map((b) => jsonEncode({
-        'chapterIndex': b.chapterIndex,
-        'pageIndex': b.pageIndex,
-        'title': b.title,
-        'timestamp': b.timestamp.millisecondsSinceEpoch,
-        'note': b.note,
-        'colorIndex': b.colorIndex,
-      })).toList();
+      final bookmarksJson = _bookmarks
+          .map(
+            (b) => jsonEncode({
+              'chapterIndex': b.chapterIndex,
+              'pageIndex': b.pageIndex,
+              'title': b.title,
+              'timestamp': b.timestamp.millisecondsSinceEpoch,
+              'note': b.note,
+              'colorIndex': b.colorIndex,
+            }),
+          )
+          .toList();
       await prefs.setStringList(key, bookmarksJson);
       print('保存了 ${_bookmarks.length} 个书签');
     } catch (e) {
@@ -2134,14 +2329,18 @@ class _BookReaderPageState extends State<BookReaderPage> {
         for (var json in bookmarksJson) {
           try {
             final data = jsonDecode(json) as Map<String, dynamic>;
-            _bookmarks.add(Bookmark(
-              chapterIndex: data['chapterIndex'] as int,
-              pageIndex: data['pageIndex'] as int,
-              title: data['title'] as String,
-              timestamp: DateTime.fromMillisecondsSinceEpoch(data['timestamp'] as int),
-              note: data['note'] as String?,
-              colorIndex: data['colorIndex'] as int? ?? 0,
-            ));
+            _bookmarks.add(
+              Bookmark(
+                chapterIndex: data['chapterIndex'] as int,
+                pageIndex: data['pageIndex'] as int,
+                title: data['title'] as String,
+                timestamp: DateTime.fromMillisecondsSinceEpoch(
+                  data['timestamp'] as int,
+                ),
+                note: data['note'] as String?,
+                colorIndex: data['colorIndex'] as int? ?? 0,
+              ),
+            );
           } catch (e) {
             print('解析书签失败: $e');
           }
@@ -2970,21 +3169,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   chapterIndex: page.chapterIndex,
                   pageIndex: _currentPageIndex,
                   spans: highlightedSpans,
-                  onTextSelected: (selectedText, position, startOffset, endOffset) {
-                    _selectionStartOffset = startOffset;
-                    _selectionEndOffset = endOffset;
-                    _selectionChapterIndex = page.chapterIndex;
-                    _selectionPageIndex = _currentPageIndex;
-                    
-                    // 检查是否选中了已有高亮/划线
-                    final existingHighlights = _getHighlightsAtSelection(
-                      page.chapterIndex,
-                      startOffset,
-                      endOffset,
-                    );
-                    
-                    _showTextToolbarAt(position, selectedText, existingHighlights: existingHighlights);
-                  },
+                  onTextSelected:
+                      (selectedText, position, startOffset, endOffset) {
+                        _selectionStartOffset = startOffset;
+                        _selectionEndOffset = endOffset;
+                        _selectionChapterIndex = page.chapterIndex;
+                        _selectionPageIndex = _currentPageIndex;
+
+                        // 检查是否选中了已有高亮/划线
+                        final existingHighlights = _getHighlightsAtSelection(
+                          page.chapterIndex,
+                          startOffset,
+                          endOffset,
+                        );
+
+                        _showTextToolbarAt(
+                          position,
+                          selectedText,
+                          existingHighlights: existingHighlights,
+                        );
+                      },
                   onSelectionCleared: () {
                     if (_showTextToolbar) {
                       _hideTextToolbar();
@@ -3446,9 +3650,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                     child: Row(
                                       children: _bookmarks.map((bookmark) {
                                         return Padding(
-                                          padding: const EdgeInsets.only(right: 4),
+                                          padding: const EdgeInsets.only(
+                                            right: 4,
+                                          ),
                                           child: InkWell(
-                                            onTap: () => _onBookmarkTap(bookmark),
+                                            onTap: () =>
+                                                _onBookmarkTap(bookmark),
                                             child: Icon(
                                               Icons.bookmark,
                                               color: bookmark.color,
@@ -3483,8 +3690,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                   ),
                                 if (_pages.isNotEmpty &&
                                     _pages[_currentPageIndex].title != null &&
-                                    _pages[_currentPageIndex].chapterIndex >=
-                                        0)
+                                    _pages[_currentPageIndex].chapterIndex >= 0)
                                   Padding(
                                     padding: const EdgeInsets.only(left: 16),
                                     child: Text(
@@ -3813,7 +4019,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
     // 如果当前已经在该书签位置，切换颜色
     if (_currentPageIndex == bookmark.pageIndex) {
       setState(() {
-        bookmark.colorIndex = (bookmark.colorIndex + 1) % BookmarkColors.colors.length;
+        bookmark.colorIndex =
+            (bookmark.colorIndex + 1) % BookmarkColors.colors.length;
       });
       _saveBookmarks(); // 保存颜色更改
     } else {
@@ -4237,7 +4444,8 @@ class Bookmark {
   });
 
   // 获取书签颜色
-  Color get color => BookmarkColors.colors[colorIndex % BookmarkColors.colors.length];
+  Color get color =>
+      BookmarkColors.colors[colorIndex % BookmarkColors.colors.length];
 }
 
 // 书签颜色配置 - 5种显眼颜色
@@ -4361,6 +4569,244 @@ class _MergedHighlight {
       : Colors.yellow;
 }
 
+/// 导出笔记为 Markdown 格式（在 _BookReaderPageState 类中调用）
+/// 这些方法需要在 _BookReaderPageState 类内部定义
+/// 以下是在类末尾添加的辅助方法
+
+extension _BookReaderPageExport on _BookReaderPageState {
+  /// 导出笔记为 Markdown 格式
+  Future<void> exportNotesToMarkdown() async {
+    // 获取默认文件名
+    final defaultFileName = '$_bookTitle读书笔记';
+
+    // 弹出文件名编辑对话框
+    final fileName = await showExportFileNameDialog(defaultFileName);
+    if (fileName == null || fileName.isEmpty) return;
+
+    try {
+      // 生成 Markdown 内容
+      final markdownContent = generateNotesMarkdown();
+
+      // 获取读书笔记目录路径（使用笔记功能的目录：workingDirectory/notes/读书笔记）
+      final workingDirectory = SPUtil.get<String>('workingDirectory', '');
+      if (workingDirectory.isEmpty) {
+        throw Exception('未设置工作目录，请先在设置中配置工作目录');
+      }
+      final notesDir = Directory('$workingDirectory/notes/读书笔记');
+
+      // 创建目录（如果不存在）
+      if (!await notesDir.exists()) {
+        await notesDir.create(recursive: true);
+      }
+
+      // 保存文件
+      final filePath = '${notesDir.path}${Platform.pathSeparator}$fileName';
+      final file = File(filePath);
+      await file.writeAsString(markdownContent, encoding: utf8);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('笔记已导出到: $filePath'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导出失败: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /// 显示导出文件名编辑对话框
+  Future<String?> showExportFileNameDialog(String defaultName) async {
+    final controller = TextEditingController(text: defaultName);
+
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.download, color: Colors.green),
+            SizedBox(width: 12),
+            Text('导出笔记', style: TextStyle(fontSize: 18)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '请输入导出文件名：',
+              style: TextStyle(fontSize: 14, color: Colors.black87),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: '文件名',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                suffixText: '.md',
+              ),
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '将保存到笔记目录下',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              String fileName = controller.text.trim();
+              // 如果用户没有输入.md后缀，自动添加
+              if (!fileName.toLowerCase().endsWith('.md')) {
+                fileName = '$fileName.md';
+              }
+              Navigator.pop(context, fileName);
+            },
+            style: FilledButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('导出'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 生成笔记的 Markdown 内容
+  String generateNotesMarkdown() {
+    final buffer = StringBuffer();
+
+    // 文档标题
+    buffer.writeln('# ${_bookTitle.isEmpty ? '读书笔记' : _bookTitle}');
+    buffer.writeln();
+    buffer.writeln('---');
+    buffer.writeln();
+
+    // 按章节分组
+    final groupedHighlights = _groupHighlightsByChapter(_highlights);
+
+    for (final group in groupedHighlights) {
+      // 章节标题
+      buffer.writeln('## ${group.chapterTitle}');
+      buffer.writeln();
+
+      // 该章节的笔记
+      for (final merged in group.mergedHighlights) {
+        // 原文内容使用引用格式（处理换行，每行都加>）
+        final quotedText = formatQuotedText(merged);
+        final lines = quotedText.split('\n');
+        for (final line in lines) {
+          buffer.writeln('> $line');
+        }
+        buffer.writeln();
+
+        // 用户笔记（如果有）
+        if (merged.note != null && merged.note!.isNotEmpty) {
+          buffer.writeln(merged.note);
+          buffer.writeln();
+        }
+
+        // 分隔线
+        buffer.writeln('---');
+        buffer.writeln();
+      }
+    }
+
+    return buffer.toString();
+  }
+
+  /// 格式化引用文本
+  /// 既有高亮又有划线的部分使用强调格式（**文本**）
+  String formatQuotedText(_MergedHighlight merged) {
+    final text = merged.text;
+    final hasHighlight = merged.hasHighlight;
+    final hasUnderline = merged.hasUnderline;
+
+    // 如果没有划线或没有高亮，直接返回原文
+    if (!hasHighlight || !hasUnderline) {
+      return text;
+    }
+
+    // 既有高亮又有划线，需要标记重叠部分
+    final textStartOffset = merged.startOffset;
+    final highlights = merged.originalHighlights;
+    final underlines = merged.originalUnderlines;
+
+    // 收集所有分割点
+    final Set<int> splitPoints = {0, text.length};
+    for (final h in highlights) {
+      final start = (h.startOffset - textStartOffset).clamp(0, text.length);
+      final end = (h.endOffset - textStartOffset).clamp(0, text.length);
+      if (start < end) {
+        splitPoints.add(start);
+        splitPoints.add(end);
+      }
+    }
+    for (final u in underlines) {
+      final start = (u.startOffset - textStartOffset).clamp(0, text.length);
+      final end = (u.endOffset - textStartOffset).clamp(0, text.length);
+      if (start < end) {
+        splitPoints.add(start);
+        splitPoints.add(end);
+      }
+    }
+
+    final sortedPoints = splitPoints.toList()..sort();
+
+    // 构建结果
+    final segments = <String>[];
+    for (int i = 0; i < sortedPoints.length - 1; i++) {
+      final segStart = sortedPoints[i];
+      final segEnd = sortedPoints[i + 1];
+      if (segStart >= segEnd) continue;
+
+      final segText = text.substring(segStart, segEnd);
+
+      // 检查该段是否有高亮
+      final segHasHighlight = highlights.any((h) {
+        final hStart = h.startOffset - textStartOffset;
+        final hEnd = h.endOffset - textStartOffset;
+        return segStart < hEnd && segEnd > hStart;
+      });
+
+      // 检查该段是否有划线
+      final segHasUnderline = underlines.any((u) {
+        final uStart = u.startOffset - textStartOffset;
+        final uEnd = u.endOffset - textStartOffset;
+        return segStart < uEnd && segEnd > uStart;
+      });
+
+      // 既有高亮又有划线的部分使用强调格式
+      if (segHasHighlight && segHasUnderline) {
+        segments.add('**$segText**');
+      } else {
+        segments.add(segText);
+      }
+    }
+
+    return segments.join();
+  }
+}
+
 /// 带工具栏的可选择文本组件
 /// 捕获文本选择时的位置，使工具栏贴近选择区域
 class _SelectableTextWithToolbar extends StatefulWidget {
@@ -4370,7 +4816,13 @@ class _SelectableTextWithToolbar extends StatefulWidget {
   final int chapterIndex;
   final int pageIndex;
   final List<TextSpan> spans; // 带高亮的文本片段
-  final Function(String selectedText, Offset position, int startOffset, int endOffset) onTextSelected;
+  final Function(
+    String selectedText,
+    Offset position,
+    int startOffset,
+    int endOffset,
+  )
+  onTextSelected;
   final VoidCallback onSelectionCleared;
 
   const _SelectableTextWithToolbar({
@@ -4385,10 +4837,12 @@ class _SelectableTextWithToolbar extends StatefulWidget {
   });
 
   @override
-  State<_SelectableTextWithToolbar> createState() => _SelectableTextWithToolbarState();
+  State<_SelectableTextWithToolbar> createState() =>
+      _SelectableTextWithToolbarState();
 }
 
-class _SelectableTextWithToolbarState extends State<_SelectableTextWithToolbar> {
+class _SelectableTextWithToolbarState
+    extends State<_SelectableTextWithToolbar> {
   Offset? _lastTapPosition;
 
   @override
@@ -4404,10 +4858,7 @@ class _SelectableTextWithToolbarState extends State<_SelectableTextWithToolbar> 
         _lastTapPosition = details.globalPosition;
       },
       child: SelectableText.rich(
-        TextSpan(
-          children: widget.spans,
-          style: widget.style,
-        ),
+        TextSpan(children: widget.spans, style: widget.style),
         onSelectionChanged: (selection, cause) {
           if (selection.isValid && !selection.isCollapsed) {
             // 用户选择了文本
@@ -4426,8 +4877,14 @@ class _SelectableTextWithToolbarState extends State<_SelectableTextWithToolbar> 
               Future.delayed(const Duration(milliseconds: 150), () {
                 if (mounted) {
                   // 使用最后记录的位置或计算位置
-                  final position = _lastTapPosition ?? _calculateCenterPosition();
-                  widget.onTextSelected(selectedText, position, startOffset, endOffset);
+                  final position =
+                      _lastTapPosition ?? _calculateCenterPosition();
+                  widget.onTextSelected(
+                    selectedText,
+                    position,
+                    startOffset,
+                    endOffset,
+                  );
                 }
               });
             }
@@ -4447,9 +4904,6 @@ class _SelectableTextWithToolbarState extends State<_SelectableTextWithToolbar> 
   /// 计算屏幕中央位置（作为备选）
   Offset _calculateCenterPosition() {
     final screenSize = MediaQuery.of(context).size;
-    return Offset(
-      screenSize.width / 2,
-      screenSize.height * 0.4,
-    );
+    return Offset(screenSize.width / 2, screenSize.height * 0.4);
   }
 }

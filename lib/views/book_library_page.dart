@@ -134,6 +134,106 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     }
   }
 
+  Future<void> _renameBook(BookInfo book, String newTitle) async {
+    if (newTitle.isEmpty || newTitle == book.title) return;
+
+    try {
+      final oldFile = book.file;
+      final oldCoverFile = book.coverFile;
+      final oldTitle = book.title;
+      
+      // 获取文件扩展名
+      final ext = oldFile.path.split('.').last;
+      final dir = oldFile.parent.path;
+      
+      // 生成新文件名（去除特殊字符）
+      final safeNewTitle = newTitle.replaceAll(RegExp(r'[<>"/\\|?*]'), '_');
+      final newFileName = '$safeNewTitle.$ext';
+      final newFilePath = '$dir${Platform.pathSeparator}$newFileName';
+      
+      // 检查新文件名是否已存在
+      final newFile = File(newFilePath);
+      if (await newFile.exists()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('该名称的书籍已存在')),
+          );
+        }
+        return;
+      }
+      
+      // 重命名书籍文件
+      await oldFile.rename(newFilePath);
+      
+      // 更新书籍列表中的信息
+      setState(() {
+        book.title = newTitle;
+        book.file = newFile;
+      });
+
+      // 迁移阅读进度（使用新的文件路径哈希）
+      final oldBookKey = 'reading_position_${oldFile.path.hashCode}';
+      final newBookKey = 'reading_position_${newFile.path.hashCode}';
+      final position = SPUtil.get<String>(oldBookKey, '');
+      if (position.isNotEmpty) {
+        await SPUtil.set<String>(newBookKey, position);
+        await SPUtil.remove(oldBookKey);
+      }
+
+      // 检查并更新 last_read_book
+      final lastReadBook = SPUtil.get<String>('last_read_book', '');
+      if (lastReadBook == oldFile.path) {
+        await SPUtil.set<String>('last_read_book', newFile.path);
+      }
+
+      // 迁移页面缓存
+      try {
+        final appDir = await getApplicationDocumentsDirectory();
+        final cacheDir = Directory('${appDir.path}/book_cache');
+        if (await cacheDir.exists()) {
+          final oldCacheKey = oldFile.path.hashCode.toString();
+          final newCacheKey = newFile.path.hashCode.toString();
+          final oldCacheFile = File('${cacheDir.path}/$oldCacheKey.json');
+          final newCacheFile = File('${cacheDir.path}/$newCacheKey.json');
+          if (await oldCacheFile.exists()) {
+            await oldCacheFile.rename(newCacheFile.path);
+          }
+        }
+      } catch (e) {
+        // 缓存迁移失败不影响主流程
+        print('[BookLibrary] 迁移页面缓存失败: $e');
+      }
+
+      // 重命名封面文件（如果存在且是独立文件）
+      if (oldCoverFile != null && await oldCoverFile.exists()) {
+        final coverDir = oldCoverFile.parent.path;
+        final coverExt = oldCoverFile.path.split('.').last;
+        final newCoverFileName = '$safeNewTitle.$coverExt';
+        final newCoverPath = '$coverDir${Platform.pathSeparator}$newCoverFileName';
+        
+        // 只有当旧封面文件名包含旧标题时才重命名
+        if (oldCoverFile.path.contains(oldTitle)) {
+          await oldCoverFile.rename(newCoverPath);
+          setState(() {
+            book.coverFile = File(newCoverPath);
+          });
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已重命名为《$newTitle》')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('重命名失败: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _deleteBook(BookInfo book) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -224,7 +324,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           ),
         ],
       ),
-      body: _books.isEmpty
+            body: _books.isEmpty
           ? _buildEmptyState()
           : GridView.builder(
               padding: const EdgeInsets.all(8),
@@ -240,6 +340,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
                   book: _books[index],
                   onTap: () => _openBook(_books[index]),
                   onDelete: () => _deleteBook(_books[index]),
+                  onRename: (newTitle) => _renameBook(_books[index], newTitle),
                 );
               },
             ),
@@ -334,8 +435,8 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
 /// 书籍信息模型
 class BookInfo {
-  final File file;
-  final String title;
+  File file;
+  String title;
   final String author;
   File? coverFile;
 
@@ -388,11 +489,13 @@ class _BookCard extends StatefulWidget {
   final BookInfo book;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+  final Function(String newTitle) onRename;
 
   const _BookCard({
     required this.book,
     required this.onTap,
     required this.onDelete,
+    required this.onRename,
   });
 
   @override
@@ -437,26 +540,50 @@ class _BookCardState extends State<_BookCard> {
                             )
                           : _buildDefaultCover(),
                     ),
-                    // 删除按钮（悬停时显示）
+                    // 编辑和删除按钮（悬停时显示）
                     if (_isHovered)
                       Positioned(
                         top: 4,
                         right: 4,
-                        child: Material(
-                          color: Colors.red.withValues(alpha: 0.9),
-                          borderRadius: BorderRadius.circular(16),
-                          child: InkWell(
-                            onTap: widget.onDelete,
-                            borderRadius: BorderRadius.circular(16),
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              child: const Icon(
-                                Icons.delete,
-                                color: Colors.white,
-                                size: 16,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // 编辑按钮
+                            Material(
+                              color: Colors.blue.withValues(alpha: 0.9),
+                              borderRadius: BorderRadius.circular(16),
+                              child: InkWell(
+                                onTap: () => _showRenameDialog(context),
+                                borderRadius: BorderRadius.circular(16),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  child: const Icon(
+                                    Icons.edit,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
+                            const SizedBox(width: 4),
+                            // 删除按钮
+                            Material(
+                              color: Colors.red.withValues(alpha: 0.9),
+                              borderRadius: BorderRadius.circular(16),
+                              child: InkWell(
+                                onTap: widget.onDelete,
+                                borderRadius: BorderRadius.circular(16),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  child: const Icon(
+                                    Icons.delete,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                   ],
@@ -541,5 +668,66 @@ class _BookCardState extends State<_BookCard> {
       default:
         return ext.toUpperCase();
     }
+  }
+
+  /// 显示重命名对话框
+  void _showRenameDialog(BuildContext context) {
+    final controller = TextEditingController(text: widget.book.title);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.edit, color: Colors.blue),
+            SizedBox(width: 12),
+            Text('修改书名', style: TextStyle(fontSize: 18)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '请输入新的书名：',
+              style: TextStyle(fontSize: 14, color: Colors.black87),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: '书名',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              style: const TextStyle(fontSize: 14),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final newTitle = controller.text.trim();
+              Navigator.pop(context);
+              if (newTitle.isNotEmpty) {
+                widget.onRename(newTitle);
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.blue,
+            ),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
   }
 }
