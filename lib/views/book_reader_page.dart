@@ -936,8 +936,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
               }
             },
             style: FilledButton.styleFrom(
-              backgroundColor: highlight.color.withValues(alpha: 0.8),
-              foregroundColor: Colors.black87,
+              backgroundColor: highlight.color,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -945,7 +945,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             ),
             child: Text(
               isEditing ? '更新' : '保存',
-              style: const TextStyle(fontSize: 14),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -1122,8 +1122,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 FilledButton.icon(
                   onPressed: () => exportNotesToMarkdown(),
                   style: FilledButton.styleFrom(
-                    backgroundColor: Colors.green.withValues(alpha: 0.1),
-                    foregroundColor: Colors.green[700],
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 12,
@@ -1133,7 +1133,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     ),
                   ),
                   icon: const Icon(Icons.download, size: 18),
-                  label: const Text('导出', style: TextStyle(fontSize: 14)),
+                  label: const Text('导出', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                 ),
               const SizedBox(width: 8),
               FilledButton(
@@ -3630,95 +3630,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             )
                           : const Center(child: Text('暂无内容')),
                     ),
-                    AnimatedOpacity(
-                      opacity: _showControls ? 1.0 : 0.0,
-                      duration: const Duration(milliseconds: 200),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 6,
-                          horizontal: 24,
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                // 书签列表
-                                if (_bookmarks.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 12),
-                                    child: Row(
-                                      children: _bookmarks.map((bookmark) {
-                                        return Padding(
-                                          padding: const EdgeInsets.only(
-                                            right: 4,
-                                          ),
-                                          child: InkWell(
-                                            onTap: () =>
-                                                _onBookmarkTap(bookmark),
-                                            child: Icon(
-                                              Icons.bookmark,
-                                              color: bookmark.color,
-                                              size: 20,
-                                            ),
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ),
-                                  ),
-                                Text(
-                                  '第 ${_currentPageIndex + 1} 页 / 共 $_totalPages 页',
-                                  style: TextStyle(
-                                    color: Colors.grey[600],
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                if (_isBackgroundProcessing)
-                                  Padding(
-                                    padding: const EdgeInsets.only(left: 8),
-                                    child: SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                              Colors.blue,
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                if (_pages.isNotEmpty &&
-                                    _pages[_currentPageIndex].title != null &&
-                                    _pages[_currentPageIndex].chapterIndex >= 0)
-                                  Padding(
-                                    padding: const EdgeInsets.only(left: 16),
-                                    child: Text(
-                                      _pages[_currentPageIndex].title!,
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            Text(
-                              '${((_currentPageIndex + 1) / _totalPages * 100).toStringAsFixed(1)}%',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    // 底部占位区域（控制栏会覆盖在这里）
+                    const SizedBox(height: 50),
                   ],
                 ),
               ),
-              // 翻页手势层（放在最上层）
+              // 翻页手势层（放在内容层之上，但控制栏之下）
               GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTapUp: (details) {
@@ -3740,6 +3657,98 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     });
                   }
                 },
+              ),
+              // 底部控制栏（放在最上层，可以响应点击事件）
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: AnimatedOpacity(
+                  opacity: _showControls ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 6,
+                      horizontal: 24,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            // 书签列表
+                            if (_bookmarks.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: Row(
+                                  children: _bookmarks.map((bookmark) {
+                                    return Padding(
+                                      padding: const EdgeInsets.only(
+                                        right: 4,
+                                      ),
+                                      child: InkWell(
+                                        onTap: () =>
+                                            _onBookmarkTap(bookmark),
+                                        child: Icon(
+                                          Icons.bookmark,
+                                          color: bookmark.color,
+                                          size: 20,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            Text(
+                              '第 ${_currentPageIndex + 1} 页 / 共 $_totalPages 页',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 14,
+                              ),
+                            ),
+                            if (_isBackgroundProcessing)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor:
+                                        AlwaysStoppedAnimation<Color>(
+                                          Colors.blue,
+                                        ),
+                                  ),
+                                ),
+                              ),
+                            if (_pages.isNotEmpty &&
+                                _pages[_currentPageIndex].title != null &&
+                                _pages[_currentPageIndex].chapterIndex >= 0)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 16),
+                                child: Text(
+                                  _pages[_currentPageIndex].title!,
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        Text(
+                          '${((_currentPageIndex + 1) / _totalPages * 100).toStringAsFixed(1)}%',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
               if (_showTableOfContents) _buildTableOfContents(),
             ],
@@ -3953,8 +3962,27 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 ),
               ),
               const SizedBox(height: 8),
-              // A+ 图标
-              Icon(Icons.text_increase, size: 16, color: Colors.grey[600]),
+              // A+ 图标（点击增加字体）
+              InkWell(
+                onTap: () {
+                  setState(() {
+                    _tempFontSize = (_tempFontSize + 1).clamp(12.0, 32.0);
+                  });
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.text_increase,
+                    size: 18,
+                    color: _tempFontSize < 32 ? Colors.blue : Colors.grey[400],
+                  ),
+                ),
+              ),
               const SizedBox(height: 8),
               // 垂直滑动条
               Expanded(
@@ -3985,8 +4013,27 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 ),
               ),
               const SizedBox(height: 8),
-              // A- 图标
-              Icon(Icons.text_decrease, size: 16, color: Colors.grey[600]),
+              // A- 图标（点击减小字体）
+              InkWell(
+                onTap: () {
+                  setState(() {
+                    _tempFontSize = (_tempFontSize - 1).clamp(12.0, 32.0);
+                  });
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.text_decrease,
+                    size: 18,
+                    color: _tempFontSize > 12 ? Colors.blue : Colors.grey[400],
+                  ),
+                ),
+              ),
               const SizedBox(height: 8),
               // 确认按钮
               InkWell(
@@ -4019,8 +4066,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
     // 如果当前已经在该书签位置，切换颜色
     if (_currentPageIndex == bookmark.pageIndex) {
       setState(() {
-        bookmark.colorIndex =
-            (bookmark.colorIndex + 1) % BookmarkColors.colors.length;
+        // 通过 pageIndex 查找 _bookmarks 列表中的实际对象并修改
+        final actualBookmark = _bookmarks.firstWhere(
+          (b) => b.pageIndex == bookmark.pageIndex,
+          orElse: () => bookmark,
+        );
+        actualBookmark.colorIndex =
+            (actualBookmark.colorIndex + 1) % BookmarkColors.colors.length;
       });
       _saveBookmarks(); // 保存颜色更改
     } else {
