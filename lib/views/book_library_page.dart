@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
+import 'package:ashes_note/services/book_reader/book_reader_services.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -202,6 +203,18 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       } catch (e) {
         // 缓存迁移失败不影响主流程
         print('[BookLibrary] 迁移页面缓存失败: $e');
+      }
+
+      // 迁移高亮和笔记数据（使用新的存储服务）
+      try {
+        await BookStorageService().migrateBookData(
+          oldFile.path,
+          newFile.path,
+        );
+        print('[BookLibrary] 书籍数据已迁移');
+      } catch (e) {
+        // 数据迁移失败不影响主流程
+        print('[BookLibrary] 迁移书籍数据失败: $e');
       }
 
       // 重命名封面文件（如果存在且是独立文件）
