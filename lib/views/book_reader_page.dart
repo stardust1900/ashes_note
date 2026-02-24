@@ -1407,7 +1407,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
         // 如果无法从页面获取文本，使用已有文本拼接
         if (newText.isEmpty) {
           // 找出所有有文本的原始高亮/划线
-          final allWithText = [...overlapping.originalHighlights, ...overlapping.originalUnderlines];
+          final allWithText = [
+            ...overlapping.originalHighlights,
+            ...overlapping.originalUnderlines,
+          ];
           if (h.isUnderline) {
             allWithText.add(h);
           } else {
@@ -1415,8 +1418,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
           }
 
           // 收集所有文本内容（按偏移量排序）
-          final sortedByText = allWithText.where((hl) => hl.text.isNotEmpty).toList()
-            ..sort((a, b) => a.startOffset.compareTo(b.startOffset));
+          final sortedByText =
+              allWithText.where((hl) => hl.text.isNotEmpty).toList()
+                ..sort((a, b) => a.startOffset.compareTo(b.startOffset));
 
           // 拼接文本（简单拼接，避免重复）
           newText = sortedByText.map((hl) => hl.text).join('');
@@ -4231,9 +4235,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
         _bookmarks.removeWhere((b) => b.pageIndex == _currentPageIndex);
       });
       _saveBookmarks();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('书签已移除')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('书签已移除'), duration: Duration(seconds: 2)),
+      );
     } else {
       final currentPage = _pages.isNotEmpty ? _pages[_currentPageIndex] : null;
       setState(() {
@@ -4247,9 +4251,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
         );
       });
       _saveBookmarks();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('书签已添加')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('书签已添加'), duration: Duration(seconds: 2)),
+      );
     }
   }
 
