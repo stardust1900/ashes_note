@@ -97,6 +97,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
   // 当前选中的高亮/划线列表（支持叠加）
   List<Highlight> _selectedHighlights = [];
 
+  // 搜索相关
+  bool _showSearchDrawer = false;
+  bool _searchDrawerOnRight = true; // 搜索抽屉在右侧显示
+  List<SearchResult> _searchResults = [];
+  List<SearchResult> _displaySearchResults = []; // 用于对话框显示的合并后的结果
+  int _currentSearchIndex = 0;
+  bool _highlightSearchResults = false; // 是否高亮搜索结果
+  final TextEditingController _searchController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -112,6 +121,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _textPainterCache?.dispose();
     _noteController.dispose();
     _scrollController.dispose();
+    _searchController.dispose(); // 清理搜索控制器
     _hideTextToolbar(); // 清理工具栏
     super.dispose();
   }
@@ -132,11 +142,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
   /// 计算页面起始偏移量
   int _calculatePageStartOffset(PageContent page) {
     int offset = 0;
-    // 遍历当前章节之前的所有页面
-    for (final p in _pages) {
-      if (p.chapterIndex == page.chapterIndex &&
-          p.pageIndexInChapter < page.pageIndexInChapter) {
-        // 累加该页所有文本内容的长度
+    // 遍历该页之前的所有页面（全局索引）
+    for (int i = 0; i < _pages.length; i++) {
+      final p = _pages[i];
+      if (p == page) {
+        break; // 找到当前页面，停止累加
+      }
+      if (p.chapterIndex == page.chapterIndex) {
+        // 累加同章节之前所有页面文本的长度
         for (final item in p.contentItems) {
           if (item is TextContent) {
             offset += item.text.length;
@@ -160,7 +173,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
           h.startOffset < textStartOffset + text.length;
     }).toList();
 
-    if (textHighlights.isEmpty) {
+    // 获取搜索结果（如果启用搜索高亮）
+    // 注意：搜索结果的 positionOffset 是相对于章节纯文本的绝对位置
+    // textStartOffset 也是相对于章节纯文本的绝对位置（从页面开始累加）
+    final searchHighlights =
+        _highlightSearchResults && _searchResults.isNotEmpty
+        ? _searchResults.where((r) {
+            if (r.chapterIndex != chapterIndex) return false;
+            // 检查搜索结果的任意部分是否与当前文本段重叠
+            final searchEnd = r.positionOffset + r.matchedText.length;
+            return r.positionOffset < textStartOffset + text.length &&
+                searchEnd > textStartOffset;
+          }).toList()
+        : [];
+
+    if (textHighlights.isEmpty && searchHighlights.isEmpty) {
       return [TextSpan(text: text)];
     }
 
@@ -175,6 +202,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
       final end = (h.endOffset - textStartOffset).clamp(0, text.length);
       splitPoints.add(start);
       splitPoints.add(end);
+    }
+
+    // 添加搜索结果的分割点
+    for (final s in searchHighlights) {
+      // 计算搜索结果在当前文本段中的相对位置
+      final relativePos = s.positionOffset - textStartOffset;
+      // 使用搜索词的长度而不是 matchedText.length，确保高亮长度正确
+      final searchLength = s.matchedText.length;
+      final searchEndOffset = s.positionOffset + searchLength;
+      final relativeEnd = searchEndOffset - textStartOffset;
+
+      // 计算与当前文本段的交集
+      final intersectionStart = relativePos.clamp(0, text.length);
+      final intersectionEnd = relativeEnd.clamp(0, text.length);
+
+      // 如果有交集，添加分割点
+      if (intersectionStart < intersectionEnd) {
+        splitPoints.add(intersectionStart);
+        splitPoints.add(intersectionEnd);
+      }
     }
 
     final sortedPoints = splitPoints.toList()..sort();
@@ -202,6 +249,20 @@ class _BookReaderPageState extends State<BookReaderPage> {
         return segStart < hEnd && segEnd > hStart;
       });
 
+      // 检查该段是否有搜索结果高亮
+      final hasSearchHighlight = searchHighlights.any((s) {
+        final relativePos = s.positionOffset - textStartOffset;
+        final searchEndOffset = s.positionOffset + s.matchedText.length;
+        final relativeEnd = searchEndOffset - textStartOffset;
+
+        // 计算搜索结果与当前文本段的交集
+        final intersectionStart = relativePos.clamp(0, text.length);
+        final intersectionEnd = relativeEnd.clamp(0, text.length);
+
+        // 检查当前段是否与搜索结果有交集
+        return segStart < intersectionEnd && segEnd > intersectionStart;
+      });
+
       // 获取高亮颜色（取第一个匹配的高亮）
       Color? highlightColor;
       if (hasHighlight) {
@@ -215,7 +276,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
       // 构建样式
       TextStyle? style;
-      if (hasHighlight && hasUnderline) {
+      if (hasSearchHighlight) {
+        // 搜索结果高亮（优先级最高）：橙色背景
+        style = TextStyle(
+          backgroundColor: Colors.orange.withValues(alpha: 0.5),
+          fontWeight: FontWeight.bold,
+        );
+        if (hasUnderline) {
+          // 搜索结果高亮 + 划线：叠加样式
+          style = style!.copyWith(
+            decoration: TextDecoration.underline,
+            decorationColor: Colors.red,
+            decorationThickness: 2.5,
+          );
+        }
+      } else if (hasHighlight && hasUnderline) {
         // 既高亮又划线：红色划线 + 高亮背景
         style = TextStyle(
           backgroundColor: highlightColor!.withValues(alpha: 0.4),
@@ -289,11 +364,42 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
+  /// 判断文本是否主要为英文
+  bool _isEnglishText(String text) {
+    if (text.isEmpty) return false;
+    // 计算英文字符的比例
+    int englishCount = 0;
+    for (int i = 0; i < text.length; i++) {
+      final codeUnit = text.codeUnitAt(i);
+      // ASCII 范围（字母、数字、标点）
+      if ((codeUnit >= 32 && codeUnit <= 126) || codeUnit == 8230) {
+        englishCount++;
+      }
+    }
+    return englishCount / text.length > 0.7; // 70% 以上是英文字符
+  }
+
   /// 隐藏文本选择工具栏
   void _hideTextToolbar({bool applyDefaultHighlight = false}) {
-    if (applyDefaultHighlight && _selectedText != null && _selectedHighlights.isEmpty) {
-      // 如果应用默认高亮，且文本未被高亮过，则使用默认颜色高亮
-      _onHighlightWithColor(_defaultHighlightColor);
+    if (applyDefaultHighlight &&
+        _selectedText != null &&
+        _selectedHighlights.isEmpty) {
+      final text = _selectedText!;
+      final isEnglish = _isEnglishText(text);
+
+      // 根据语言类型决定是否自动高亮
+      if (isEnglish) {
+        // 英文：只有选中完整单词时才自动高亮
+        // 英文单词通常较长，且单个字母高亮意义不大
+        if (text.length >= 10 && _containsCompleteWord(text)) {
+          _onHighlightWithColor(_defaultHighlightColor);
+        }
+      } else {
+        // 中文：长度>=5个字符才自动高亮
+        if (text.length >= 5) {
+          _onHighlightWithColor(_defaultHighlightColor);
+        }
+      }
     }
 
     _toolbarOverlay?.remove();
@@ -301,6 +407,18 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _showTextToolbar = false;
     _selectedText = null;
     _selectedHighlights = [];
+  }
+
+  /// 判断文本是否包含完整单词（英文）
+  bool _containsCompleteWord(String text) {
+    // 简单判断：文本开始或结束是字母，且包含空格或连字符
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    // 检查是否以字母开头和结尾
+    final firstChar = trimmed[0];
+    final lastChar = trimmed[trimmed.length - 1];
+    final isAlpha = RegExp(r'^[a-zA-Z]$').hasMatch;
+    return isAlpha(firstChar) && isAlpha(lastChar);
   }
 
   /// 构建气泡式工具栏
@@ -353,12 +471,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
   List<Widget> _buildNewHighlightToolbar() {
     return [
       // 三种颜色高亮按钮（默认颜色高亮）
-      _buildColorHighlightButton(Colors.yellow, '黄色高亮',
-          isCurrentColor: _defaultHighlightColor == Colors.yellow),
-      _buildColorHighlightButton(Colors.green, '绿色高亮',
-          isCurrentColor: _defaultHighlightColor == Colors.green),
-      _buildColorHighlightButton(Colors.blue, '蓝色高亮',
-          isCurrentColor: _defaultHighlightColor == Colors.blue),
+      _buildColorHighlightButton(
+        Colors.yellow,
+        '黄色高亮',
+        isCurrentColor: _defaultHighlightColor == Colors.yellow,
+      ),
+      _buildColorHighlightButton(
+        Colors.green,
+        '绿色高亮',
+        isCurrentColor: _defaultHighlightColor == Colors.green,
+      ),
+      _buildColorHighlightButton(
+        Colors.blue,
+        '蓝色高亮',
+        isCurrentColor: _defaultHighlightColor == Colors.blue,
+      ),
       _buildToolbarDivider(),
       _buildToolbarIconButton(
         icon: Icons.format_underline,
@@ -374,15 +501,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
         tooltip: '添加笔记',
         onTap: () {
           _onAddNoteToNewHighlight();
-          _hideTextToolbar();
-        },
-      ),
-      _buildToolbarDivider(),
-      _buildToolbarIconButton(
-        icon: Icons.search,
-        tooltip: '搜索',
-        onTap: () {
-          _onSearchSelected();
           _hideTextToolbar();
         },
       ),
@@ -489,15 +607,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
       ),
       _buildToolbarDivider(),
       _buildToolbarIconButton(
-        icon: Icons.search,
-        tooltip: '搜索',
-        onTap: () {
-          _onSearchSelected();
-          _hideTextToolbar();
-        },
-      ),
-      _buildToolbarDivider(),
-      _buildToolbarIconButton(
         icon: Icons.translate,
         tooltip: '翻译',
         onTap: () {
@@ -595,20 +704,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 处理带颜色的高亮（新增或更换颜色）
   void _onHighlightWithColor(Color color) async {
-    if (_selectionStartOffset == null ||
-        _selectionEndOffset == null ||
-        _selectionChapterIndex == null)
+    // 立即保存所有选择相关的值，避免异步操作后被清空
+    final selectedText = _selectedText ?? '';
+    final startOffset = _selectionStartOffset;
+    final endOffset = _selectionEndOffset;
+    final chapterIndex = _selectionChapterIndex;
+    final pageIndex = _selectionPageIndex ?? _currentPageIndex;
+
+    if (startOffset == null ||
+        endOffset == null ||
+        chapterIndex == null ||
+        selectedText.isEmpty)
       return;
 
     // 保存默认高亮颜色
     await _saveDefaultHighlightColor(color);
-
-    // 保存到局部变量，避免异步操作后值被清空
-    final selectedText = _selectedText ?? '';
-    final startOffset = _selectionStartOffset!;
-    final endOffset = _selectionEndOffset!;
-    final chapterIndex = _selectionChapterIndex!;
-    final pageIndex = _selectionPageIndex ?? _currentPageIndex;
 
     // 只移除与该位置重叠的高亮（保留划线），避免同类型重复
     setState(() {
@@ -734,17 +844,18 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 处理划线
   void _onUnderlineSelected() async {
-    if (_selectionStartOffset == null ||
-        _selectionEndOffset == null ||
-        _selectionChapterIndex == null)
-      return;
-
-    // 保存到局部变量，避免异步操作后值被清空
+    // 立即保存所有选择相关的值，避免异步操作后被清空
     final selectedText = _selectedText ?? '';
-    final startOffset = _selectionStartOffset!;
-    final endOffset = _selectionEndOffset!;
-    final chapterIndex = _selectionChapterIndex!;
+    final startOffset = _selectionStartOffset;
+    final endOffset = _selectionEndOffset;
+    final chapterIndex = _selectionChapterIndex;
     final pageIndex = _selectionPageIndex ?? _currentPageIndex;
+
+    if (startOffset == null ||
+        endOffset == null ||
+        chapterIndex == null ||
+        selectedText.isEmpty)
+      return;
 
     // 只移除与该位置重叠的划线（保留高亮），避免同类型重复
     setState(() {
@@ -1174,7 +1285,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     ),
                   ),
                   icon: const Icon(Icons.download, size: 18),
-                  label: const Text('导出', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  label: const Text(
+                    '导出',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
               const SizedBox(width: 8),
               FilledButton(
@@ -1270,8 +1384,27 @@ class _BookReaderPageState extends State<BookReaderPage> {
             ? overlapping.endOffset
             : h.endOffset;
 
-        // 重新获取合并后的文本
-        final newText = _getTextForRange(h.chapterIndex, newStart, newEnd);
+        // 合并文本：优先使用已有的文本，避免依赖页面内容
+        // 先尝试从页面中获取完整范围的文本
+        String newText = _getTextForRange(h.chapterIndex, newStart, newEnd);
+
+        // 如果无法从页面获取文本，使用已有文本拼接
+        if (newText.isEmpty) {
+          // 找出所有有文本的原始高亮/划线
+          final allWithText = [...overlapping.originalHighlights, ...overlapping.originalUnderlines];
+          if (h.isUnderline) {
+            allWithText.add(h);
+          } else {
+            allWithText.add(h);
+          }
+
+          // 收集所有文本内容（按偏移量排序）
+          final sortedByText = allWithText.where((hl) => hl.text.isNotEmpty).toList()
+            ..sort((a, b) => a.startOffset.compareTo(b.startOffset));
+
+          // 拼接文本（简单拼接，避免重复）
+          newText = sortedByText.map((hl) => hl.text).join('');
+        }
 
         // 创建新的合并标记
         final newHighlights = List<Highlight>.from(
@@ -1726,8 +1859,41 @@ class _BookReaderPageState extends State<BookReaderPage> {
   Widget _buildMergedHighlightTextSpans(_MergedHighlight merged) {
     final hasUnderline = merged.hasUnderline;
     final hasHighlight = merged.hasHighlight;
-    final text = merged.text;
+    String text = merged.text;
     final textStartOffset = merged.startOffset;
+
+    // 优先使用原始高亮/划线中的文本，避免合并时丢失文本
+    if (text.isEmpty) {
+      for (final h in merged.originalHighlights) {
+        if (h.text.isNotEmpty) {
+          text = h.text;
+          break;
+        }
+      }
+      if (text.isEmpty) {
+        for (final u in merged.originalUnderlines) {
+          if (u.text.isNotEmpty) {
+            text = u.text;
+            break;
+          }
+        }
+      }
+    }
+
+    // 如果仍然没有文本，显示提示文字
+    if (text.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        child: Text(
+          '（文本内容丢失）',
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.grey[500],
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      );
+    }
 
     // 如果没有划线，直接显示普通文本
     if (!hasUnderline) {
@@ -2088,13 +2254,445 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
-  /// 处理搜索
-  void _onSearchSelected() {
-    if (_selectedText == null) return;
-    // TODO: 实现搜索功能
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('搜索: $_selectedText')));
+  /// 执行搜索
+  void _performSearch(String searchText) {
+    // 先清空之前的搜索结果（因为要执行新搜索）
+    setState(() {
+      _searchResults.clear();
+      _displaySearchResults.clear();
+      _currentSearchIndex = 0;
+    });
+
+    // 用于存储同一页的所有匹配位置
+    final Map<String, List<SearchResult>> pageResultsMap = {};
+
+    // 遍历所有章节进行搜索
+    for (
+      int chapterIndex = 0;
+      chapterIndex < _chapters.length;
+      chapterIndex++
+    ) {
+      final chapter = _chapters[chapterIndex];
+      if (chapter.htmlContent == null) continue;
+
+      // 获取该章节的所有页面，并构建完整的章节文本
+      final chapterPages = _pages
+          .where((p) => p.chapterIndex == chapterIndex)
+          .toList();
+      if (chapterPages.isEmpty) continue;
+
+      // 构建章节纯文本用于显示上下文（累积所有 TextContent）
+      final chapterText = chapterPages
+          .expand((page) => page.contentItems.whereType<TextContent>())
+          .map((tc) => tc.text)
+          .join();
+
+      // 遍历章节的所有页面和 TextContent 进行搜索
+      int cumulativeOffset = 0; // 章节内的累积偏移量
+
+      for (final page in chapterPages) {
+        int pageOffset = cumulativeOffset; // 该页在章节中的起始偏移量
+
+        for (final item in page.contentItems) {
+          if (item is TextContent) {
+            final textContent = item.text;
+            if (textContent.isEmpty) {
+              continue;
+            }
+
+            // 计算该 TextContent 在章节中的起始偏移量
+            final textOffset = cumulativeOffset;
+
+            // 在当前 TextContent 中搜索
+            int index = 0;
+            while (true) {
+              final pos = textContent.indexOf(searchText, index);
+              if (pos == -1) break;
+
+              // 计算该匹配在章节中的绝对位置
+              final absolutePos = textOffset + pos;
+
+              // 直接使用 TextContent 中的匹配文本
+              final actualMatchedText = textContent.substring(
+                pos.clamp(0, textContent.length),
+                (pos + searchText.length).clamp(0, textContent.length),
+              );
+
+              // 获取匹配文本的上下文（前后各30个字符）
+              final contextStart = (absolutePos - 30).clamp(
+                0,
+                chapterText.length,
+              );
+              final contextEnd = (absolutePos + actualMatchedText.length + 30)
+                  .clamp(0, chapterText.length);
+              final contextText = chapterText.substring(
+                contextStart,
+                contextEnd,
+              );
+
+              final pageIndex = _pages.indexOf(page);
+
+              final result = SearchResult(
+                chapterIndex: chapterIndex,
+                chapterTitle: chapter.title ?? '第 ${chapterIndex + 1} 章',
+                pageIndex: pageIndex,
+                positionOffset: absolutePos,
+                contextText: contextText,
+                matchedText: actualMatchedText,
+              );
+
+              // 使用章节和页面索引作为键来分组同一页的结果
+              final pageKey = '${chapterIndex}_${pageIndex}';
+
+              setState(() {
+                _searchResults.add(result);
+              });
+
+              // 添加到分组
+              if (!pageResultsMap.containsKey(pageKey)) {
+                pageResultsMap[pageKey] = [];
+              }
+              pageResultsMap[pageKey]!.add(result);
+
+              index = pos + searchText.length;
+            }
+
+            cumulativeOffset += textContent.length;
+          }
+        }
+      }
+    }
+
+    // 合并同一页的搜索结果到 _displaySearchResults
+    if (pageResultsMap.isNotEmpty) {
+      setState(() {
+        // 对每页的结果，只保留第一个用于显示
+        final mergedResults = <SearchResult>[];
+        pageResultsMap.forEach((pageKey, results) {
+          if (results.isNotEmpty) {
+            // 只保留第一个结果用于列表显示
+            mergedResults.add(results.first);
+          }
+        });
+        // 按 positionOffset 排序
+        mergedResults.sort((a, b) {
+          if (a.chapterIndex != b.chapterIndex) {
+            return a.chapterIndex.compareTo(b.chapterIndex);
+          }
+          return a.positionOffset.compareTo(b.positionOffset);
+        });
+        _displaySearchResults = mergedResults;
+      });
+    }
+
+    if (_searchResults.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('未找到匹配的内容')));
+    } else {
+      setState(() {
+        _showSearchDrawer = true;
+        _highlightSearchResults = true; // 显示搜索结果时自动启用高亮
+        _currentSearchIndex = 0;
+      });
+    }
+  }
+
+  /// 显示搜索对话框
+  /// 构建搜索抽屉
+  Widget _buildSearchDrawer() {
+    return Positioned(
+      left: _searchDrawerOnRight ? null : 0,
+      right: _searchDrawerOnRight ? 0 : null,
+      top: 0,
+      bottom: 0,
+      child: Container(
+        width: 320,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 8,
+              offset: Offset(_searchDrawerOnRight ? -2 : 2, 0),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '搜索',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      // 左右切换按钮
+                      IconButton(
+                        icon: Icon(
+                          _searchDrawerOnRight
+                              ? Icons.arrow_back
+                              : Icons.arrow_forward,
+                        ),
+                        color: Colors.grey[600],
+                        onPressed: () {
+                          setState(() {
+                            _searchDrawerOnRight = !_searchDrawerOnRight;
+                          });
+                        },
+                        tooltip: '切换位置',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        color: Colors.grey[600],
+                        onPressed: () {
+                          setState(() {
+                            _showSearchDrawer = false;
+                            _highlightSearchResults = false; // 关闭时取消高亮
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      autofocus: false,
+                      style: const TextStyle(color: Colors.black87),
+                      decoration: InputDecoration(
+                        hintText: '输入搜索词',
+                        hintStyle: const TextStyle(color: Colors.grey),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                      onSubmitted: (value) {
+                        final searchText = value.trim();
+                        if (searchText.isNotEmpty) {
+                          _performSearch(searchText);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      final searchText = _searchController.text.trim();
+                      if (searchText.isNotEmpty) {
+                        _performSearch(searchText);
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                    child: const Text('搜索'),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () {
+                      setState(() {
+                        _searchController.clear();
+                        _searchResults.clear();
+                        _displaySearchResults.clear();
+                        _currentSearchIndex = 0;
+                        _highlightSearchResults = false;
+                      });
+                    },
+                    tooltip: '清除',
+                  ),
+                ],
+              ),
+            ),
+            // 搜索结果数量
+            if (_searchResults.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Text(
+                  '共 ${_displaySearchResults.length} 页 (${_searchResults.length} 条)',
+                  style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                ),
+              ),
+            Expanded(
+              child: _displaySearchResults.isEmpty
+                  ? Center(
+                      child: Text(
+                        _searchResults.isEmpty ? '输入搜索词进行搜索' : '未找到匹配的内容',
+                        style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _displaySearchResults.length,
+                      itemBuilder: (context, index) {
+                        final result = _displaySearchResults[index];
+                        final matchCount = _searchResults
+                            .where(
+                              (r) =>
+                                  r.chapterIndex == result.chapterIndex &&
+                                  r.pageIndex == result.pageIndex,
+                            )
+                            .length;
+
+                        final tappedIndex = index;
+
+                        return Column(
+                          children: [
+                            InkWell(
+                              onTap: () {
+                                Future.microtask(() {
+                                  _goToSearchResult(
+                                    tappedIndex,
+                                    showDialog: false,
+                                  );
+                                });
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 14,
+                                      backgroundColor:
+                                          tappedIndex == _currentSearchIndex
+                                          ? Colors.blue
+                                          : Colors.blue.shade100,
+                                      child: Text(
+                                        '${tappedIndex + 1}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color:
+                                              tappedIndex == _currentSearchIndex
+                                              ? Colors.white
+                                              : null,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            result.chapterTitle,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w500,
+                                              fontSize: 13,
+                                              color:
+                                                  tappedIndex ==
+                                                      _currentSearchIndex
+                                                  ? Colors.blue
+                                                  : Colors.black87,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          if (matchCount > 1)
+                                            Text(
+                                              '该页 $matchCount 处匹配',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey[700],
+                                              ),
+                                            ),
+                                          Text(
+                                            result.contextText,
+                                            maxLines: matchCount > 1 ? 1 : 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.black54,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (index < _displaySearchResults.length - 1)
+                              Divider(height: 1, color: Colors.grey[200]!),
+                          ],
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 跳转到指定的搜索结果
+  void _goToSearchResult(int index, {bool showDialog = true}) {
+    if (index < 0 || index >= _displaySearchResults.length) return;
+
+    final result = _displaySearchResults[index];
+    setState(() {
+      _currentChapterIndex = result.chapterIndex;
+      _currentPageIndex = result.pageIndex;
+      _currentSearchIndex = index;
+      _highlightSearchResults = true; // 启用搜索结果高亮
+    });
+
+    if (showDialog) {
+      Navigator.pop(context);
+    }
+    _saveReadingPosition();
+
+    // 延迟一段时间后滚动到搜索位置
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          result.positionOffset.toDouble(),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
+  }
+
+  /// 跳转到下一个搜索结果
+  void _goToNextSearchResult({bool showDialog = true}) {
+    if (_displaySearchResults.isEmpty) return;
+    _currentSearchIndex =
+        (_currentSearchIndex + 1) % _displaySearchResults.length;
+    _goToSearchResult(_currentSearchIndex, showDialog: showDialog);
   }
 
   /// 处理翻译
@@ -3474,12 +4072,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                 child: Row(
                                   children: _bookmarks.map((bookmark) {
                                     return Padding(
-                                      padding: const EdgeInsets.only(
-                                        right: 4,
-                                      ),
+                                      padding: const EdgeInsets.only(right: 4),
                                       child: InkWell(
-                                        onTap: () =>
-                                            _onBookmarkTap(bookmark),
+                                        onTap: () => _onBookmarkTap(bookmark),
                                         child: Icon(
                                           Icons.bookmark,
                                           color: bookmark.color,
@@ -3505,10 +4100,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                   height: 12,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    valueColor:
-                                        AlwaysStoppedAnimation<Color>(
-                                          Colors.blue,
-                                        ),
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.blue,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -3913,6 +4507,22 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   onPressed: _showNotesListDialog,
                   tooltip: '笔记',
                 ),
+                IconButton(
+                  icon: Icon(
+                    Icons.search,
+                    color: _showSearchDrawer ? Colors.blue : null,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      if (_showSearchDrawer) {
+                        // 关闭抽屉时取消高亮
+                        _highlightSearchResults = false;
+                      }
+                      _showSearchDrawer = !_showSearchDrawer;
+                    });
+                  },
+                  tooltip: '搜索',
+                ),
               ],
             )
           : null,
@@ -3997,8 +4607,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   child: _buildPageMode(),
                 ),
               ),
-              if (_showTableOfContents)
-                _buildTableOfContents(),
+              if (_showTableOfContents) _buildTableOfContents(),
+              if (_showSearchDrawer) _buildSearchDrawer(),
               if (_showFontSizeSlider) _buildFontSizeSlider(),
               // 处理中提示（字体变化时显示在页面底部）
               if (_isProcessingPages && _isContentLoaded)
@@ -4530,12 +5140,18 @@ extension _BookReaderPageExport on _BookReaderPageState {
     // 按章节分组
     final groupedHighlights = _groupHighlightsByChapter(_highlights);
 
+    if (groupedHighlights.isEmpty) {
+      buffer.writeln('暂无笔记和高亮');
+      buffer.writeln();
+      return buffer.toString();
+    }
+
     for (final group in groupedHighlights) {
       // 章节标题
       buffer.writeln('## ${group.chapterTitle}');
       buffer.writeln();
 
-      // 该章节的笔记
+      // 该章节的笔记（包括有笔记和只有高亮的）
       for (final merged in group.mergedHighlights) {
         // 原文内容使用引用格式（处理换行，每行都加>）
         final quotedText = formatQuotedText(merged);
@@ -4544,6 +5160,17 @@ extension _BookReaderPageExport on _BookReaderPageState {
           buffer.writeln('> $line');
         }
         buffer.writeln();
+
+        // 添加标记类型说明
+        final tags = <String>[];
+        if (merged.hasHighlight) tags.add('高亮');
+        if (merged.hasUnderline) tags.add('划线');
+        if (merged.note != null && merged.note!.isNotEmpty) tags.add('笔记');
+
+        if (tags.isNotEmpty) {
+          buffer.writeln('> *${tags.join('、')}*');
+          buffer.writeln();
+        }
 
         // 用户笔记（如果有）
         if (merged.note != null && merged.note!.isNotEmpty) {
@@ -4732,4 +5359,23 @@ class _SelectableTextWithToolbarState
     final screenSize = MediaQuery.of(context).size;
     return Offset(screenSize.width / 2, screenSize.height * 0.4);
   }
+}
+
+/// 搜索结果类
+class SearchResult {
+  final int chapterIndex; // 章节索引
+  final String chapterTitle; // 章节标题
+  final int pageIndex; // 页面索引
+  final int positionOffset; // 在章节文本中的位置
+  final String contextText; // 上下文文本
+  final String matchedText; // 匹配的文本
+
+  SearchResult({
+    required this.chapterIndex,
+    required this.chapterTitle,
+    required this.pageIndex,
+    required this.positionOffset,
+    required this.contextText,
+    required this.matchedText,
+  });
 }
