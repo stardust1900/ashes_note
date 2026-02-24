@@ -506,6 +506,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
       ),
       _buildToolbarDivider(),
       _buildToolbarIconButton(
+        icon: Icons.copy,
+        tooltip: '复制',
+        onTap: () {
+          _onCopySelected();
+        },
+      ),
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
         icon: Icons.translate,
         tooltip: '翻译',
         onTap: () {
@@ -603,6 +611,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
         onTap: () {
           _onAddNoteToExistingHighlights();
           _hideTextToolbar();
+        },
+      ),
+      _buildToolbarDivider(),
+      _buildToolbarIconButton(
+        icon: Icons.copy,
+        tooltip: '复制',
+        onTap: () {
+          _onCopySelected();
         },
       ),
       _buildToolbarDivider(),
@@ -2693,6 +2709,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _currentSearchIndex =
         (_currentSearchIndex + 1) % _displaySearchResults.length;
     _goToSearchResult(_currentSearchIndex, showDialog: showDialog);
+  }
+
+  /// 复制选中文本
+  void _onCopySelected() async {
+    if (_selectedText == null || _selectedText!.isEmpty) return;
+
+    // 保存文本长度，因为 _hideTextToolbar 会清空 _selectedText
+    final textLength = _selectedText!.length;
+
+    await Clipboard.setData(ClipboardData(text: _selectedText!));
+    _hideTextToolbar();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已复制: $textLength 个字符'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   /// 处理翻译
