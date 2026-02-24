@@ -85,6 +85,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   // 高亮笔记相关
   final List<Highlight> _highlights = [];
   static const String _highlightsPrefix = 'book_highlights_';
+  static const String _defaultHighlightColorKey = 'default_highlight_color';
+  Color _defaultHighlightColor = Colors.yellow; // 默认高亮颜色
 
   // 当前选择的文本位置信息
   int? _selectionStartOffset;
@@ -99,6 +101,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   void initState() {
     super.initState();
     _loadBook();
+    _loadDefaultHighlightColor();
   }
 
   @override
@@ -258,8 +261,41 @@ class _BookReaderPageState extends State<BookReaderPage> {
     Overlay.of(context).insert(_toolbarOverlay!);
   }
 
+  /// 加载默认高亮颜色
+  Future<void> _loadDefaultHighlightColor() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final colorValue = prefs.getInt(_defaultHighlightColorKey);
+      if (colorValue != null) {
+        setState(() {
+          _defaultHighlightColor = Color(colorValue);
+        });
+      }
+    } catch (e) {
+      print('加载默认高亮颜色失败: $e');
+    }
+  }
+
+  /// 保存默认高亮颜色
+  Future<void> _saveDefaultHighlightColor(Color color) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_defaultHighlightColorKey, color.value);
+      setState(() {
+        _defaultHighlightColor = color;
+      });
+    } catch (e) {
+      print('保存默认高亮颜色失败: $e');
+    }
+  }
+
   /// 隐藏文本选择工具栏
-  void _hideTextToolbar() {
+  void _hideTextToolbar({bool applyDefaultHighlight = false}) {
+    if (applyDefaultHighlight && _selectedText != null && _selectedHighlights.isEmpty) {
+      // 如果应用默认高亮，且文本未被高亮过，则使用默认颜色高亮
+      _onHighlightWithColor(_defaultHighlightColor);
+    }
+
     _toolbarOverlay?.remove();
     _toolbarOverlay = null;
     _showTextToolbar = false;
@@ -282,11 +318,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
     return Stack(
       children: [
-        // 透明背景，点击隐藏工具栏
+        // 透明背景，点击隐藏工具栏（如果选中文本未高亮，则使用默认颜色高亮）
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onTap: _hideTextToolbar,
+            onTap: () => _hideTextToolbar(applyDefaultHighlight: true),
             child: Container(color: Colors.transparent),
           ),
         ),
@@ -316,10 +352,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
   /// 构建新选择文本的工具栏（未高亮）
   List<Widget> _buildNewHighlightToolbar() {
     return [
-      // 三种颜色高亮按钮
-      _buildColorHighlightButton(Colors.yellow, '黄色高亮'),
-      _buildColorHighlightButton(Colors.green, '绿色高亮'),
-      _buildColorHighlightButton(Colors.blue, '蓝色高亮'),
+      // 三种颜色高亮按钮（默认颜色高亮）
+      _buildColorHighlightButton(Colors.yellow, '黄色高亮',
+          isCurrentColor: _defaultHighlightColor == Colors.yellow),
+      _buildColorHighlightButton(Colors.green, '绿色高亮',
+          isCurrentColor: _defaultHighlightColor == Colors.green),
+      _buildColorHighlightButton(Colors.blue, '蓝色高亮',
+          isCurrentColor: _defaultHighlightColor == Colors.blue),
       _buildToolbarDivider(),
       _buildToolbarIconButton(
         icon: Icons.format_underline,
@@ -560,6 +599,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
         _selectionEndOffset == null ||
         _selectionChapterIndex == null)
       return;
+
+    // 保存默认高亮颜色
+    await _saveDefaultHighlightColor(color);
 
     // 保存到局部变量，避免异步操作后值被清空
     final selectedText = _selectedText ?? '';
