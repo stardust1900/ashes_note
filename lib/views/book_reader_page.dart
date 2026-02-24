@@ -1,15 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:epub_plus/epub_plus.dart';
 import 'package:flutter/material.dart' hide Image;
 import 'package:flutter/material.dart' as material show Image;
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:crypto/crypto.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/prefs_util.dart';
+import '../services/book_reader/dictionary_service.dart';
+import '../services/book_reader/youdao_dictionary_service.dart';
+import '../models/book_reader/dictionary_entry.dart';
 
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
@@ -97,6 +100,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
   // 当前选中的高亮/划线列表（支持叠加）
   List<Highlight> _selectedHighlights = [];
 
+  // 字典服务
+  final DictionaryService _dictionaryService = DictionaryService();
+
+  // 有道词典服务（需要配置 App ID 和 App Key）
+  late final YoudaoDictionaryService _youdaoService;
+
   // 搜索相关
   bool _showSearchDrawer = false;
   bool _searchDrawerOnRight = true; // 搜索抽屉在右侧显示
@@ -111,6 +120,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
     super.initState();
     _loadBook();
     _loadDefaultHighlightColor();
+
+    // 初始化有道词典服务（使用默认配置，实际使用需要替换）
+    _youdaoService = YoudaoDictionaryService(
+      appId: '55b585b48ea1a831', // 请替换为有道应用的 App ID
+      appKey: 'xi4pR1yRyTuWamZVCJRnNXC6FR4l8seQ', // 请替换为有道应用的 App Key
+    );
   }
 
   @override
@@ -324,16 +339,24 @@ class _BookReaderPageState extends State<BookReaderPage> {
     String selectedText, {
     List<Highlight>? existingHighlights,
   }) {
-    _hideTextToolbar();
     _selectedText = selectedText;
     _selectedHighlights = existingHighlights ?? []; // 恢复高亮/划线信息
     _toolbarPosition = position;
-    _showTextToolbar = true;
 
-    _toolbarOverlay = OverlayEntry(
-      builder: (context) => _buildTextToolbarOverlay(),
-    );
-    Overlay.of(context).insert(_toolbarOverlay!);
+    if (!_showTextToolbar) {
+      // 如果工具栏未显示，创建 Overlay
+      _showTextToolbar = true;
+      _toolbarOverlay = OverlayEntry(
+        builder: (context) => _buildTextToolbarOverlay(),
+      );
+      Overlay.of(context).insert(_toolbarOverlay!);
+    } else {
+      // 如果工具栏已显示，只更新位置并触发 Overlay 重建
+      _toolbarOverlay?.markNeedsBuild();
+    }
+
+    // 打印调试信息
+    // print('显示工具栏位置: $_toolbarPosition');
   }
 
   /// 加载默认高亮颜色
@@ -425,14 +448,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
   Widget _buildTextToolbarOverlay() {
     final screenSize = MediaQuery.of(context).size;
 
-    // 计算工具栏位置（在选中区域上方）
+    // 打印调试信息
+    // print('构建工具栏 - 原始位置: $_toolbarPosition');
+
+    // 计算工具栏位置（始终贴在所选文字上方，除了最上面几行）
     double left = _toolbarPosition.dx - 130; // 工具栏宽度约260，居中
-    double top = _toolbarPosition.dy - 50; // 在选中区域上方
+    double top = _toolbarPosition.dy - 50; // 贴在选中区域上方
+
+    // print('计算后 - left: $left, top: $top');
 
     // 边界检查
     if (left < 10) left = 10;
     if (left > screenSize.width - 270) left = screenSize.width - 270;
-    if (top < 50) top = _toolbarPosition.dy + 30; // 如果上方空间不够，显示在下方
+
+    // 只有在最上面几行（top < 100）时，工具栏才显示在文字下方
+    if (top < 100) {
+      top = _toolbarPosition.dy + 50; // 显示在选中区域下方
+      // print('空间不足，移到下方 - top: $top');
+    }
+
+    // print('最终位置 - left: $left, top: $top');
 
     return Stack(
       children: [
@@ -514,11 +549,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
       ),
       _buildToolbarDivider(),
       _buildToolbarIconButton(
-        icon: Icons.translate,
-        tooltip: '翻译',
+        icon: Icons.menu_book,
+        tooltip: '字典',
         onTap: () {
-          _onTranslateSelected();
-          _hideTextToolbar();
+          _onDictionarySelected();
         },
       ),
     ];
@@ -623,11 +657,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
       ),
       _buildToolbarDivider(),
       _buildToolbarIconButton(
-        icon: Icons.translate,
-        tooltip: '翻译',
+        icon: Icons.menu_book,
+        tooltip: '字典',
         onTap: () {
-          _onTranslateSelected();
-          _hideTextToolbar();
+          _onDictionarySelected();
         },
       ),
     ]);
@@ -2735,13 +2768,456 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
-  /// 处理翻译
-  void _onTranslateSelected() {
-    if (_selectedText == null) return;
-    // TODO: 实现翻译功能
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('翻译: $_selectedText')));
+  /// 处理字典查询
+  void _onDictionarySelected() async {
+    if (_selectedText == null || _selectedText!.trim().isEmpty) return;
+
+    final selectedWord = _selectedText!.trim();
+
+    // 检测所选文字的语言（是否包含中文字符）
+    final hasChinese = selectedWord.contains(RegExp(r'[\u4e00-\u9fa5]'));
+    final from = hasChinese ? 'zh-CHS' : 'en';
+    final to = hasChinese ? 'en' : 'zh-CHS';
+
+    // 先查询本地词库
+    final existingEntry = await _dictionaryService.getEntry(selectedWord);
+
+    if (!mounted) return;
+
+    if (existingEntry != null) {
+      // 显示本地词库中的定义
+      _showDictionaryDialog(
+        word: existingEntry.word,
+        definition: existingEntry.definition,
+        isExisting: true,
+      );
+      _hideTextToolbar();
+      return;
+    }
+
+    // 本地没有，调用有道词典 API
+    _showLoadingDialog();
+
+    try {
+      final result = await _youdaoService.lookup(selectedWord, from: from, to: to);
+      _hideLoadingDialog();
+
+      if (!mounted) return;
+
+      _hideTextToolbar();
+
+      if (result != null && result!.isSuccess) {
+        // 显示词典结果对话框
+        _showDictionaryResultDialog(selectedWord, result!, from: from, to: to);
+      } else {
+        // API 调用失败或无结果
+        _showDictionaryDialog(
+          word: selectedWord,
+          definition: '',
+          isExisting: false,
+        );
+      }
+    } catch (e) {
+      _hideLoadingDialog();
+      if (mounted) {
+        _hideTextToolbar();
+        _showDictionaryDialog(
+          word: selectedWord,
+          definition: '',
+          isExisting: false,
+        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('网络请求失败，使用本地词库')));
+      }
+    }
+  }
+
+  /// 显示加载对话框
+  void _showLoadingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('正在查询词典...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 隐藏加载对话框
+  void _hideLoadingDialog() {
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  /// 显示词典结果对话框
+  void _showDictionaryResultDialog(String word, DictionaryResult result, {String from = 'en', String to = 'zh-CHS'}) {
+    // 检测所选文字是否为中文
+    final isSourceChinese = word.contains(RegExp(r'[\u4e00-\u9fa5]'));
+    final sourceLanguageText = isSourceChinese ? '中文' : '英文';
+
+    StateSetter? setState;
+    String currentWord = word;
+    DictionaryResult? currentResult = result;
+    bool isLoading = false;
+    String currentFrom = from;
+    String currentTo = to;
+
+    void fetchDictionary(String newFrom, String newTo) async {
+      if (!mounted) return;
+      setState?.call(() {
+        isLoading = true;
+      });
+
+      final newResult = await _youdaoService.lookup(currentWord, from: newFrom, to: newTo);
+
+      if (!mounted) return;
+      setState?.call(() {
+        currentResult = newResult;
+        currentFrom = newFrom;
+        currentTo = newTo;
+        isLoading = false;
+      });
+    }
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setStateBuilder) {
+          setState = setStateBuilder;
+
+          final basic = currentResult?.basic;
+          // 根据源语言显示音标/拼音
+          final phoneticOrPinyin = currentFrom == 'en'
+              ? (basic?.phonetic ?? '')
+              : (currentResult?.basic?.phonetic ?? '');
+          final phoneticDisplay = currentFrom == 'en' && phoneticOrPinyin.isNotEmpty
+              ? '[$phoneticOrPinyin]'
+              : phoneticOrPinyin;
+          final explains = basic?.explains?.join('; ') ?? '';
+          final webTranslations = currentResult?.web
+                  ?.map((w) => '${w.key}: ${w.value.join('; ')}')
+                  .join('\n') ??
+              '';
+          final translation = currentResult?.translation ?? '';
+
+          // 根据当前翻译方向确定标签文字
+          String languageLabel;
+          if (currentFrom == 'zh-CHS' && currentTo == 'en') {
+            languageLabel = '中→英';
+          } else if (currentFrom == 'zh-CHS' && currentTo == 'zh-CHS') {
+            languageLabel = '中→中';
+          } else if (currentFrom == 'en' && currentTo == 'zh-CHS') {
+            languageLabel = '英→中';
+          } else if (currentFrom == 'en' && currentTo == 'en') {
+            languageLabel = '英→英';
+          } else {
+            languageLabel = '${currentFrom == 'en' ? '英' : '中'}→${currentTo == 'en' ? '英' : '中'}';
+          }
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.menu_book, size: 28),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(currentWord, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      Text(sourceLanguageText, style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ],
+                  ),
+                ),
+                if (phoneticDisplay.isNotEmpty)
+                  Text(
+                    phoneticDisplay,
+                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+              ],
+            ),
+            content: isLoading
+                ? Center(child: CircularProgressIndicator())
+                : SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // 翻译方向切换按钮
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            if (isSourceChinese) ...[
+                              // 中文源：可切换 中→英 或 中→中
+                              ChoiceChip(
+                                label: Text('中→英'),
+                                selected: currentTo == 'en',
+                                onSelected: (selected) {
+                                  if (selected) fetchDictionary('zh-CHS', 'en');
+                                },
+                              ),
+                              ChoiceChip(
+                                label: Text('中→中'),
+                                selected: currentTo == 'zh-CHS',
+                                onSelected: (selected) {
+                                  if (selected) fetchDictionary('zh-CHS', 'zh-CHS');
+                                },
+                              ),
+                            ] else ...[
+                              // 英文源：可切换 英→中 或 英→英
+                              ChoiceChip(
+                                label: Text('英→中'),
+                                selected: currentTo == 'zh-CHS',
+                                onSelected: (selected) {
+                                  if (selected) fetchDictionary('en', 'zh-CHS');
+                                },
+                              ),
+                              ChoiceChip(
+                                label: Text('英→英'),
+                                selected: currentTo == 'en',
+                                onSelected: (selected) {
+                                  if (selected) fetchDictionary('en', 'en');
+                                },
+                              ),
+                            ],
+                          ],
+                        ),
+                        SizedBox(height: 12),
+                        if (translation.isNotEmpty) ...[
+                          Text('翻译', style: TextStyle(fontWeight: FontWeight.bold)),
+                          SizedBox(height: 8),
+                          Text(translation),
+                          SizedBox(height: 16),
+                        ],
+                        if (explains.isNotEmpty) ...[
+                          Text('基本释义', style: TextStyle(fontWeight: FontWeight.bold)),
+                          SizedBox(height: 8),
+                          Text(explains),
+                          SizedBox(height: 16),
+                        ],
+                        if (webTranslations.isNotEmpty) ...[
+                          Text('网络释义', style: TextStyle(fontWeight: FontWeight.bold)),
+                          SizedBox(height: 8),
+                          Text(webTranslations),
+                          SizedBox(height: 16),
+                        ],
+                      ],
+                    ),
+                  ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: Text('关闭'),
+              ),
+              ElevatedButton(
+                onPressed: isLoading
+                    ? null
+                    : () {
+                        Navigator.of(dialogContext).pop();
+                        // 保存到本地词库
+                        final definition = [
+                          translation,
+                          explains,
+                          webTranslations,
+                        ].where((s) => s.isNotEmpty).join('\n\n');
+                        _showDictionaryDialog(
+                          word: currentWord,
+                          definition: definition,
+                          isExisting: false,
+                        );
+                      },
+                child: Text('保存到词库'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 显示字典对话框
+  void _showDictionaryDialog({
+    required String word,
+    required String definition,
+    required bool isExisting,
+  }) {
+    final definitionController = TextEditingController(text: definition);
+    final isEditing = !isExisting || definition.isNotEmpty;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.menu_book, size: 28),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  word,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (isExisting) ...[
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withAlpha(25),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.withAlpha(100)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '该词已在您的词库中',
+                            style: TextStyle(color: Colors.blue, fontSize: 14),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                ],
+                TextField(
+                  controller: definitionController,
+                  maxLines: 6,
+                  minLines: 3,
+                  decoration: InputDecoration(
+                    labelText: '词义解释',
+                    hintText: '输入单词的含义、例句或注释...',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                  autofocus: isEditing,
+                ),
+                if (isEditing && isExisting) ...[
+                  SizedBox(height: 8),
+                  Text(
+                    '提示：修改后会更新词库中的定义',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text('取消'),
+            ),
+            if (isExisting)
+              TextButton(
+                onPressed: () async {
+                  final confirmed = await _showDeleteConfirmDialog();
+                  if (confirmed && mounted) {
+                    await _dictionaryService.deleteEntry(word);
+                    Navigator.of(dialogContext).pop();
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('已从词库中删除')));
+                  }
+                },
+                child: Text('删除', style: TextStyle(color: Colors.red)),
+              ),
+            ElevatedButton(
+              onPressed: () async {
+                final newDefinition = definitionController.text.trim();
+                if (newDefinition.isEmpty) {
+                  ScaffoldMessenger.of(
+                    dialogContext,
+                  ).showSnackBar(SnackBar(content: Text('请输入词义解释')));
+                  return;
+                }
+
+                // 获取当前章节信息
+                final chapterTitle = _chapters.isNotEmpty
+                    ? _chapters[_currentChapterIndex].title ?? ''
+                    : '';
+
+                final entry = DictionaryEntry(
+                  word: word,
+                  definition: newDefinition,
+                  createdAt: isExisting
+                      ? (await _dictionaryService.getEntry(word))?.createdAt ??
+                            DateTime.now()
+                      : DateTime.now(),
+                  bookTitle: _bookTitle.isNotEmpty ? _bookTitle : null,
+                  chapterTitle: chapterTitle.isNotEmpty ? chapterTitle : null,
+                  chapterIndex: _currentChapterIndex,
+                  pageIndex: _currentPageIndex,
+                );
+
+                await _dictionaryService.saveEntry(entry);
+
+                if (mounted) {
+                  Navigator.of(dialogContext).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(isExisting ? '已更新词义' : '已添加到词库'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              child: Text(isEditing ? '保存' : '添加'),
+            ),
+          ],
+        );
+      },
+    ).then((_) {
+      definitionController.dispose();
+    });
+  }
+
+  /// 显示删除确认对话框
+  Future<bool> _showDeleteConfirmDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange, size: 24),
+            SizedBox(width: 8),
+            Text('确认删除'),
+          ],
+        ),
+        content: Text('确定要从词库中删除这个词吗？删除后将无法恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   /// 生成书籍的唯一标识键
@@ -5336,62 +5812,90 @@ class _SelectableTextWithToolbar extends StatefulWidget {
 
 class _SelectableTextWithToolbarState
     extends State<_SelectableTextWithToolbar> {
-  Offset? _lastTapPosition;
+  final GlobalKey _selectableKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onLongPressStart: (details) {
-        // 记录长按开始位置
-        _lastTapPosition = details.globalPosition;
-      },
-      onLongPressMoveUpdate: (details) {
-        // 更新拖动位置
-        _lastTapPosition = details.globalPosition;
-      },
-      child: SelectableText.rich(
-        TextSpan(children: widget.spans, style: widget.style),
-        onSelectionChanged: (selection, cause) {
-          if (selection.isValid && !selection.isCollapsed) {
-            // 用户选择了文本
-            // 获取选中的原始文本
-            final selectedText = widget.text.substring(
-              selection.start.clamp(0, widget.text.length),
-              selection.end.clamp(0, widget.text.length),
+    return SelectableText.rich(
+      key: _selectableKey,
+      TextSpan(children: widget.spans, style: widget.style),
+      onSelectionChanged: (selection, cause) {
+        if (selection.isValid && !selection.isCollapsed) {
+          // 用户选择了文本
+          // 获取选中的原始文本
+          final selectedText = widget.text.substring(
+            selection.start.clamp(0, widget.text.length),
+            selection.end.clamp(0, widget.text.length),
+          );
+
+          if (selectedText.isNotEmpty) {
+            // 计算在章节中的实际偏移位置
+            final startOffset = widget.textStartOffset + selection.start;
+            final endOffset = widget.textStartOffset + selection.end;
+
+            // 计算选中文本的实际位置
+            final position = _calculateSelectionPosition(selection);
+            widget.onTextSelected(
+              selectedText,
+              position,
+              startOffset,
+              endOffset,
             );
-
-            if (selectedText.isNotEmpty) {
-              // 计算在章节中的实际偏移位置
-              final startOffset = widget.textStartOffset + selection.start;
-              final endOffset = widget.textStartOffset + selection.end;
-
-              // 延迟显示工具栏，等待选择手柄出现
-              Future.delayed(const Duration(milliseconds: 150), () {
-                if (mounted) {
-                  // 使用最后记录的位置或计算位置
-                  final position =
-                      _lastTapPosition ?? _calculateCenterPosition();
-                  widget.onTextSelected(
-                    selectedText,
-                    position,
-                    startOffset,
-                    endOffset,
-                  );
-                }
-              });
-            }
-          } else if (selection.isCollapsed) {
-            // 选择被取消
-            widget.onSelectionCleared();
           }
-        },
-        // 禁用默认上下文菜单，使用自定义工具栏
-        contextMenuBuilder: (context, editableTextState) {
-          return const SizedBox.shrink();
-        },
+        } else if (selection.isCollapsed) {
+          // 选择被取消
+          widget.onSelectionCleared();
+        }
+      },
+      // 禁用默认上下文菜单，使用自定义工具栏
+      contextMenuBuilder: (context, editableTextState) {
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
+  /// 计算选中文本的位置（使用 RenderBox 获取实际边界）
+  Offset _calculateSelectionPosition(TextSelection selection) {
+    final RenderBox? renderBox =
+        _selectableKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) {
+      return _calculateCenterPosition();
+    }
+
+    // 获取文本的渲染信息
+    final TextPainter textPainter = TextPainter(
+      text: TextSpan(text: widget.text, style: widget.style),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.left,
+    )..layout(maxWidth: renderBox.size.width);
+
+    // 获取选中文本的坐标
+    final startRect = textPainter.getBoxesForSelection(
+      TextSelection(
+        baseOffset: selection.start,
+        extentOffset: selection.start + 1,
       ),
     );
+    final endRect = textPainter.getBoxesForSelection(
+      TextSelection(baseOffset: selection.end - 1, extentOffset: selection.end),
+    );
+
+    // 计算选中区域的中点
+    double top;
+    double left;
+
+    if (startRect.isNotEmpty && endRect.isNotEmpty) {
+      top = (startRect.first.toRect().top + endRect.last.toRect().bottom) / 2;
+      left = (startRect.first.toRect().left + endRect.last.toRect().right) / 2;
+    } else {
+      return _calculateCenterPosition();
+    }
+
+    // 转换为全局坐标
+    final localPosition = Offset(left, top);
+    final globalPosition = renderBox.localToGlobal(localPosition);
+
+    return globalPosition;
   }
 
   /// 计算屏幕中央位置（作为备选）
