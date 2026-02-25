@@ -119,6 +119,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
   static const String _defaultHighlightColorKey = 'default_highlight_color';
   Color _defaultHighlightColor = Colors.yellow; // 默认高亮颜色
 
+  // 默认高亮长度
+  static const int _defaultHighlightLengthChinese = 5; // 中文默认高亮长度
+  static const int _defaultHighlightLengthEnglish = 10; // 英文默认高亮长度
+
   // 当前选择的文本位置信息
   int? _selectionStartOffset;
   int? _selectionEndOffset;
@@ -566,23 +570,46 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 构建新选择文本的工具栏（未高亮）
   List<Widget> _buildNewHighlightToolbar() {
-    return [
-      // 三种颜色高亮按钮（默认颜色高亮）
+    // 判断选择文本长度是否超过默认高亮长度
+    List<Widget> colorButtons;
+    bool showAsDelete = false; // 是否显示为删除按钮
+
+    if (_selectedText != null) {
+      final text = _selectedText!;
+      final isEnglish = _isEnglishText(text);
+      final defaultLength = isEnglish
+          ? _defaultHighlightLengthEnglish
+          : _defaultHighlightLengthChinese;
+      showAsDelete = text.length >= defaultLength;
+    }
+
+    // 只有默认高亮颜色按钮显示为删除状态，其他颜色按钮正常显示
+    // 使用 toARGB32() 比较颜色值，避免 MaterialColor 对象比较问题
+    final defaultColorValue = _defaultHighlightColor.toARGB32();
+    final yellowIsCurrent = showAsDelete && defaultColorValue == Colors.yellow.toARGB32();
+    final greenIsCurrent = showAsDelete && defaultColorValue == Colors.green.toARGB32();
+    final blueIsCurrent = showAsDelete && defaultColorValue == Colors.blue.toARGB32();
+
+    colorButtons = [
       _buildColorHighlightButton(
         Colors.yellow,
-        '黄色高亮',
-        isCurrentColor: _defaultHighlightColor == Colors.yellow,
+        yellowIsCurrent ? '删除高亮' : '黄色高亮',
+        isCurrentColor: yellowIsCurrent,
       ),
       _buildColorHighlightButton(
         Colors.green,
-        '绿色高亮',
-        isCurrentColor: _defaultHighlightColor == Colors.green,
+        greenIsCurrent ? '删除高亮' : '绿色高亮',
+        isCurrentColor: greenIsCurrent,
       ),
       _buildColorHighlightButton(
         Colors.blue,
-        '蓝色高亮',
-        isCurrentColor: _defaultHighlightColor == Colors.blue,
+        blueIsCurrent ? '删除高亮' : '蓝色高亮',
+        isCurrentColor: blueIsCurrent,
       ),
+    ];
+
+    return [
+      ...colorButtons,
       _buildToolbarDivider(),
       _buildToolbarIconButton(
         icon: Icons.format_underline,
@@ -753,7 +780,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
         onTap: () {
           if (isCurrentColor) {
             // 点击当前颜色按钮，删除高亮
-            _onDeleteHighlight();
+            if (_selectedHighlights.isEmpty) {
+              // 如果没有选中任何高亮，则查找并删除当前选择范围内的高亮
+              _deleteHighlightsInRange();
+            } else {
+              _onDeleteHighlight();
+            }
           } else {
             // 点击其他颜色按钮，更换颜色
             _onHighlightWithColor(color);
@@ -891,6 +923,43 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
     setState(() {
       for (final h in highlights) {
+        _highlights.removeWhere((item) => item.id == h.id);
+      }
+    });
+    await _saveHighlights();
+  }
+
+  /// 删除当前选择范围内的高亮
+  void _deleteHighlightsInRange() async {
+    if (_selectionChapterIndex == null ||
+        _selectionPageIndex == null ||
+        _selectionStartOffset == null ||
+        _selectionEndOffset == null) {
+      return;
+    }
+
+    final chapterIndex = _selectionChapterIndex!;
+    final pageIndex = _selectionPageIndex!;
+    final startOffset = _selectionStartOffset!;
+    final endOffset = _selectionEndOffset!;
+
+    // 查找与当前选择范围重叠的高亮
+    final highlightsToDelete = <Highlight>[];
+    for (final highlight in _highlights) {
+      if (!highlight.isUnderline &&
+          highlight.chapterIndex == chapterIndex &&
+          highlight.pageIndex == pageIndex) {
+        // 检查是否与选择范围重叠
+        if (highlight.startOffset < endOffset && highlight.endOffset > startOffset) {
+          highlightsToDelete.add(highlight);
+        }
+      }
+    }
+
+    if (highlightsToDelete.isEmpty) return;
+
+    setState(() {
+      for (final h in highlightsToDelete) {
         _highlights.removeWhere((item) => item.id == h.id);
       }
     });
@@ -6273,7 +6342,7 @@ class _SelectableTextWithToolbarState
           );
         }
 
-        // 选中的部分（添加蓝色背景）
+        // 选中的部分（添加粉色背景）
         result.add(
           TextSpan(
             text: text.substring(
@@ -6281,7 +6350,7 @@ class _SelectableTextWithToolbarState
               overlapEnd - spanStart,
             ),
             style: span.style?.copyWith(
-              backgroundColor: Colors.blue.withOpacity(0.3),
+              backgroundColor: Colors.pink.withOpacity(0.4),
             ),
           ),
         );

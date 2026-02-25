@@ -16,11 +16,38 @@ void main() async {
   runApp(AshesNoteApp());
 }
 
-class AshesNoteApp extends StatelessWidget {
-  AshesNoteApp({super.key});
+class AshesNoteApp extends StatefulWidget {
+  const AshesNoteApp({super.key});
 
-  final _controller = SidebarXController(selectedIndex: 0, extended: true);
+  @override
+  State<AshesNoteApp> createState() => _AshesNoteAppState();
+}
+
+class _AshesNoteAppState extends State<AshesNoteApp> {
+  late SidebarXController _controller;
   final _key = GlobalKey<ScaffoldState>();
+  static const String _lastSelectedMenuKey = 'last_selected_menu';
+
+  @override
+  void initState() {
+    super.initState();
+    // 从本地存储加载上次选择的菜单索引
+    final lastSelectedIndex = SPUtil.get<int>(_lastSelectedMenuKey, 0);
+    _controller = SidebarXController(selectedIndex: lastSelectedIndex, extended: true);
+    // 监听菜单选择变化并保存
+    _controller.addListener(_onMenuChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onMenuChanged);
+    super.dispose();
+  }
+
+  void _onMenuChanged() {
+    // 保存当前选择的菜单索引
+    SPUtil.set(_lastSelectedMenuKey, _controller.selectedIndex);
+  }
 
   @override
   Widget build(BuildContext context) {
