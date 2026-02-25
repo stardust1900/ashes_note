@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
-import 'dart:typed_data';
+
+/// 类型别名：保持向后兼容
+typedef DictionaryResult = YoudaoDictionaryResult;
 
 /// 有道词典 API 服务
 /// 参考：https://ai.youdao.com/DOCS2022/assets/jsapi/zh-CN/apidoc.html
@@ -17,10 +19,9 @@ class YoudaoDictionaryService {
   YoudaoDictionaryService({required this.appId, required this.appKey});
 
   /// 查询词典
-  Future<DictionaryResult?> lookup(String word, {String from = 'en', String to = 'zh-CHS'}) async {
+  Future<YoudaoDictionaryResult?> lookup(String word, {String from = 'en', String to = 'zh-CHS'}) async {
     final salt = const Uuid().v4().toString();
     final timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final truncatedQuery = _truncateQuery(word);
     final sign = _generateSign(word, salt, timestamp.toString());
 
     final url = Uri.parse(_apiUrl).replace(
@@ -44,7 +45,7 @@ class YoudaoDictionaryService {
         final data = jsonDecode(responseBody);
 
         if (data['errorCode'] == 0 || data['errorCode'] == '0') {
-          return DictionaryResult.fromJson(data);
+          return YoudaoDictionaryResult.fromJson(data);
         } else {
           print('有道词典API错误 [${data['errorCode']}]: ${responseBody}');
           return null;
@@ -83,7 +84,7 @@ class YoudaoDictionaryService {
 }
 
 /// 词典查询结果
-class DictionaryResult {
+class YoudaoDictionaryResult {
   final String? query;
   final String? errorCode;
   final String? errorMsg;
@@ -92,7 +93,7 @@ class DictionaryResult {
   final String? translation;
   final List<String>? translations;
 
-  DictionaryResult({
+  YoudaoDictionaryResult({
     this.query,
     this.errorCode,
     this.errorMsg,
@@ -102,7 +103,7 @@ class DictionaryResult {
     this.translations,
   });
 
-  factory DictionaryResult.fromJson(Map<String, dynamic> json) {
+  factory YoudaoDictionaryResult.fromJson(Map<String, dynamic> json) {
     // translation 可能是字符串或数组
     String? translation;
     List<String>? translations;
@@ -117,7 +118,7 @@ class DictionaryResult {
       }
     }
 
-    return DictionaryResult(
+    return YoudaoDictionaryResult(
       query: json['query'] as String?,
       errorCode: json['errorCode']?.toString(),
       errorMsg: json['errorMsg'] as String?,
@@ -153,22 +154,16 @@ class BasicInfo {
   factory BasicInfo.fromJson(Map<String, dynamic>? json) {
     if (json == null) return BasicInfo();
 
-    // 调试输出
-    print('BasicInfo JSON keys: ${json!.keys.toList()}');
-    print('phonetic: ${json!['phonetic']}');
-    print('uk-phonetic: ${json!['uk-phonetic']} (${json!['uk-phonetic'].runtimeType})');
-    print('us-phonetic: ${json!['us-phonetic']} (${json!['us-phonetic'].runtimeType})');
-
     return BasicInfo(
-      phonetic: json!['phonetic'] as String?,
-      explains: (json!['explains'] as List?)?.map((e) => e.toString()).toList(),
-      ukPhonetic: json!['uk-phonetic'] != null
-          ? [json!['uk-phonetic'].toString()]
+      phonetic: json['phonetic'] as String?,
+      explains: (json['explains'] as List?)?.map((e) => e.toString()).toList(),
+      ukPhonetic: json['uk-phonetic'] != null
+          ? [json['uk-phonetic'].toString()]
           : null,
-      usPhonetic: json!['us-phonetic'] != null
-          ? [json!['us-phonetic'].toString()]
+      usPhonetic: json['us-phonetic'] != null
+          ? [json['us-phonetic'].toString()]
           : null,
-      wfs: (json!['wfs'] as List?)?.map((e) => e.toString()).toList(),
+      wfs: (json['wfs'] as List?)?.map((e) => e.toString()).toList(),
     );
   }
 
