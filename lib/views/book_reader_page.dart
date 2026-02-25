@@ -4565,18 +4565,37 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   pageIndex: _currentPageIndex,
                   spans: highlightedSpans,
                   onTextSelected:
-                      (selectedText, position, startOffset, endOffset) {
+                      (
+                        selectedText,
+                        position,
+                        startOffset,
+                        endOffset,
+                        isFromDoubleTap,
+                      ) {
                         _selectionStartOffset = startOffset;
                         _selectionEndOffset = endOffset;
                         _selectionChapterIndex = page.chapterIndex;
                         _selectionPageIndex = _currentPageIndex;
 
                         // 检查是否选中了已有高亮/划线
-                        final existingHighlights = _getHighlightsAtSelection(
+                        var existingHighlights = _getHighlightsAtSelection(
                           page.chapterIndex,
                           startOffset,
                           endOffset,
                         );
+
+                        // 如果是双击选中的文本，使用选中内容的颜色（如果有高亮）
+                        if (isFromDoubleTap) {
+                          // 查找选中文本的高亮颜色
+                          final highlights = existingHighlights
+                              .where((h) => !h.isUnderline)
+                              .toList();
+
+                          if (highlights.isNotEmpty) {
+                            // 如果有高亮，更新默认颜色为选中的高亮颜色
+                            _saveDefaultHighlightColor(highlights.first.color);
+                          }
+                        }
 
                         _showTextToolbarAt(
                           position,
@@ -6057,6 +6076,7 @@ class _SelectableTextWithToolbar extends StatefulWidget {
     Offset position,
     int startOffset,
     int endOffset,
+    bool isFromDoubleTap,
   )
   onTextSelected;
   final VoidCallback onSelectionCleared;
@@ -6082,6 +6102,7 @@ class _SelectableTextWithToolbar extends StatefulWidget {
 class _SelectableTextWithToolbarState
     extends State<_SelectableTextWithToolbar> {
   final GlobalKey _selectableKey = GlobalKey();
+  TextRange? _doubleTapSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -6094,42 +6115,59 @@ class _SelectableTextWithToolbarState
       },
       child: SelectableText.rich(
         key: _selectableKey,
-        TextSpan(children: widget.spans, style: widget.style),
-      onSelectionChanged: (selection, cause) {
-        // 打印 cause 用于调试
-        print('选择变化: selection=$selection, cause=$cause');
+        TextSpan(children: _buildSpansWithSelection(), style: widget.style),
+        onSelectionChanged: (selection, cause) {
+          // 打印 cause 用于调试
+          print('选择变化: selection=$selection, cause=$cause');
 
-        if (selection.isValid && !selection.isCollapsed) {
-          // 用户选择了文本
-          // 获取选中的原始文本
-          final selectedText = widget.text.substring(
-            selection.start.clamp(0, widget.text.length),
-            selection.end.clamp(0, widget.text.length),
-          );
-
-          if (selectedText.isNotEmpty) {
-            // 计算在章节中的实际偏移位置
-            final startOffset = widget.textStartOffset + selection.start;
-            final endOffset = widget.textStartOffset + selection.end;
-
-            // 计算选中文本的实际位置
-            final position = _calculateSelectionPosition(selection);
-            widget.onTextSelected(
-              selectedText,
-              position,
-              startOffset,
-              endOffset,
-            );
+          // 如果是手动拖动选择，清除双击选区
+          if (cause == SelectionChangedCause.drag ||
+              cause == SelectionChangedCause.longPress) {
+            if (_doubleTapSelection != null) {
+              setState(() {
+                _doubleTapSelection = null;
+              });
+            }
           }
-        } else if (selection.isCollapsed) {
-          // 选择被取消
-          widget.onSelectionCleared();
-        }
-      },
-      // 禁用默认上下文菜单，使用自定义工具栏
-      contextMenuBuilder: (context, editableTextState) {
-        return const SizedBox.shrink();
-      },
+
+          if (selection.isValid && !selection.isCollapsed) {
+            // 用户选择了文本
+            // 获取选中的原始文本
+            final selectedText = widget.text.substring(
+              selection.start.clamp(0, widget.text.length),
+              selection.end.clamp(0, widget.text.length),
+            );
+
+            if (selectedText.isNotEmpty) {
+              // 计算在章节中的实际偏移位置
+              final startOffset = widget.textStartOffset + selection.start;
+              final endOffset = widget.textStartOffset + selection.end;
+
+              // 计算选中文本的实际位置
+              final position = _calculateSelectionPosition(selection);
+              widget.onTextSelected(
+                selectedText,
+                position,
+                startOffset,
+                endOffset,
+                false, // 手动选择，不是双击
+              );
+            }
+          } else if (selection.isCollapsed) {
+            // 选择被取消
+            widget.onSelectionCleared();
+            // 同时清除双击选区
+            if (_doubleTapSelection != null) {
+              setState(() {
+                _doubleTapSelection = null;
+              });
+            }
+          }
+        },
+        // 禁用默认上下文菜单，使用自定义工具栏
+        contextMenuBuilder: (context, editableTextState) {
+          return const SizedBox.shrink();
+        },
       ),
     );
   }
@@ -6167,6 +6205,11 @@ class _SelectableTextWithToolbarState
       extentOffset: wordRange.end,
     );
 
+    // 设置双击选区，显示蓝色背景
+    setState(() {
+      _doubleTapSelection = wordRange;
+    });
+
     // 获取选中的文本
     final selectedText = widget.text.substring(
       selection.start.clamp(0, widget.text.length),
@@ -6179,8 +6222,85 @@ class _SelectableTextWithToolbarState
       final startOffset = widget.textStartOffset + selection.start;
       final endOffset = widget.textStartOffset + selection.end;
       final position = _calculateSelectionPosition(selection);
-      widget.onTextSelected(selectedText, position, startOffset, endOffset);
+      widget.onTextSelected(
+        selectedText,
+        position,
+        startOffset,
+        endOffset,
+        true, // 来自双击
+      );
     }
+  }
+
+  /// 构建带选中效果的 spans
+  List<TextSpan> _buildSpansWithSelection() {
+    // 如果没有双击选中，返回原始 spans
+    if (_doubleTapSelection == null) {
+      return widget.spans;
+    }
+
+    final selection = _doubleTapSelection!;
+    final result = <TextSpan>[];
+    int currentOffset = 0;
+
+    // 遍历所有原始 spans
+    for (final span in widget.spans) {
+      final text = span.text ?? '';
+      if (text.isEmpty) {
+        result.add(span);
+        continue;
+      }
+
+      final spanStart = currentOffset;
+      final spanEnd = currentOffset + text.length;
+
+      // 检查选区是否与当前 span 有交集
+      if (selection.end <= spanStart || selection.start >= spanEnd) {
+        // 无交集，直接添加
+        result.add(span);
+      } else {
+        // 有交集，需要分割
+        final overlapStart = selection.start.clamp(spanStart, spanEnd);
+        final overlapEnd = selection.end.clamp(spanStart, spanEnd);
+
+        // 选中之前的部分
+        if (overlapStart > spanStart) {
+          result.add(
+            TextSpan(
+              text: text.substring(0, overlapStart - spanStart),
+              style: span.style,
+            ),
+          );
+        }
+
+        // 选中的部分（添加蓝色背景）
+        result.add(
+          TextSpan(
+            text: text.substring(
+              overlapStart - spanStart,
+              overlapEnd - spanStart,
+            ),
+            style: span.style?.copyWith(
+              backgroundColor: Colors.blue.withOpacity(0.3),
+            ),
+          ),
+        );
+
+        // 选中之后的部分
+        if (overlapEnd < spanEnd) {
+          result.add(
+            TextSpan(
+              text: text.substring(overlapEnd - spanStart),
+              style: span.style,
+            ),
+          );
+        }
+      }
+
+      currentOffset = spanEnd;
+    }
+
+    return result;
   }
 
   /// 查找单词的边界
@@ -6195,50 +6315,43 @@ class _SelectableTextWithToolbarState
     final char = text[offset];
     print('点击位置的字符: "$char" (Unicode: ${char.codeUnitAt(0)})'); // 调试
 
-    // 检查是否是中文字符
-    if (_isChinese(char)) {
-      print('检测到中文字符，只选中一个字'); // 调试
-      // 中文字符，只选中这一个字
-      return TextRange(start: offset, end: offset + 1);
-    }
+    // 使用正则表达式匹配单词
+    // 中文：连续的中文字符视为一个词，但限制长度避免选中整句
+    // 英文：字母、数字、连字符、撇号组成的单词
+    final chinesePattern = RegExp(r'[\u4e00-\u9fa5]+', unicode: true);
+    final englishPattern = RegExp(r'[a-zA-Z0-9]+');
 
-    // 英文单词，查找边界
-    int start = offset;
-    int end = offset;
-
-    // 单词分隔符（更严格的分隔符列表）
-    final String wordSeparators =
-        ' \\t\\n\\r\\f\\v!?.,;:"\'()[]{}<>-—–@#\$%^&*+=/\\|~`';
-
-    // 如果点击的是分隔符，向右查找下一个单词
-    if (wordSeparators.contains(char)) {
-      print('点击的是分隔符，向右查找单词'); // 调试
-      // 跳过连续的分隔符
-      while (start < text.length && wordSeparators.contains(text[start])) {
-        start++;
-        end = start;
+    // 先检查中文字符
+    final chineseMatches = chinesePattern.allMatches(text);
+    for (final match in chineseMatches) {
+      if (offset >= match.start && offset < match.end) {
+        final matchedText = match.group(0) ?? '';
+        // 如果中文词长度超过10，只选单个字
+        if (matchedText.length > 10) {
+          print('中文词过长，选中单个字符: $char'); // 调试
+          return TextRange(start: offset, end: offset + 1);
+        }
+        print(
+          '查找到中文词: ${match.start} - ${match.end}, 文本: "$matchedText"',
+        ); // 调试
+        return TextRange(start: match.start, end: match.end);
       }
     }
 
-    // 向左查找单词起始
-    while (start > 0 && !wordSeparators.contains(text[start - 1])) {
-      start--;
+    // 再检查英文字符
+    final englishMatches = englishPattern.allMatches(text);
+    for (final match in englishMatches) {
+      if (offset >= match.start && offset < match.end) {
+        print(
+          '查找到英文词: ${match.start} - ${match.end}, 文本: "${match.group(0)}"',
+        ); // 调试
+        return TextRange(start: match.start, end: match.end);
+      }
     }
 
-    // 向右查找单词结束
-    while (end < text.length && !wordSeparators.contains(text[end])) {
-      end++;
-    }
-
-    print('查找到的单词边界: $start - $end'); // 调试
-
-    return TextRange(start: start, end: end);
-  }
-
-  /// 检查是否是中文字符
-  bool _isChinese(String char) {
-    if (char.isEmpty) return false;
-    return RegExp(r'[\u4e00-\u9fa5]').hasMatch(char);
+    // 如果没有找到单词匹配，则只选中点击位置的字符
+    print('未找到单词，选中单个字符'); // 调试
+    return TextRange(start: offset, end: offset + 1);
   }
 
   /// 计算选中文本的位置（使用 RenderBox 获取实际边界）
