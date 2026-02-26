@@ -4090,6 +4090,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 },
               ),
               // 底部控制栏（放在最上层，可以响应点击事件）
+              if (_showControls)
               Positioned(
                 left: 0,
                 right: 0,
@@ -4106,29 +4107,36 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            // 书签列表
-                            if (_bookmarks.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 12),
-                                child: Row(
-                                  children: _bookmarks.map((bookmark) {
-                                    return Padding(
-                                      padding: const EdgeInsets.only(right: 4),
-                                      child: InkWell(
-                                        onTap: () => _onBookmarkTap(bookmark),
-                                        child: Icon(
-                                          Icons.bookmark,
-                                          color: bookmark.color,
-                                          size: 20,
-                                        ),
-                                      ),
-                                    );
-                                  }).toList(),
-                                ),
-                              ),
-                            Text(
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                // 书签列表
+                                if (_bookmarks.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 12),
+                                    child: Row(
+                                      children: _bookmarks.map((bookmark) {
+                                        return Padding(
+                                          padding: const EdgeInsets.only(right: 4),
+                                          child: InkWell(
+                                            onTap: () => _onBookmarkTap(bookmark),
+                                            borderRadius: BorderRadius.circular(20),
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(8),
+                                              child: Icon(
+                                                Icons.bookmark,
+                                                color: bookmark.color,
+                                                size: 20,
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                Text(
                               '第 ${_currentPageIndex + 1} 页 / 共 $_totalPages 页',
                               style: TextStyle(
                                 color: Colors.grey[600],
@@ -4163,7 +4171,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                   ),
                                 ),
                               ),
-                          ],
+                              ],
+                            ),
+                          ),
                         ),
                         Text(
                           '${((_currentPageIndex + 1) / _totalPages * 100).toStringAsFixed(1)}%',
