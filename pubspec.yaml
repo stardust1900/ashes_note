@@ -52,6 +52,7 @@ dependencies:
   epub_plus: ^5.1.0
   flutter_html: ^3.0.0-beta.2
   archive: ^4.0.0
+  image: ^4.8.0
 
 dev_dependencies:
   flutter_test:

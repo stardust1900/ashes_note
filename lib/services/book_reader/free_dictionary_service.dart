@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+typedef DictionaryResult = FreeDictionaryResult;
+
 /// Free Dictionary API 服务（免费英文词典）
 /// 参考：https://freedictionaryapi.com/
 class FreeDictionaryService {
@@ -10,7 +12,11 @@ class FreeDictionaryService {
   FreeDictionaryService();
 
   /// 查询英文词典
-  Future<DictionaryResult?> lookup(String word, {String from = 'en', String to = 'en'}) async {
+  Future<DictionaryResult?> lookup(
+    String word, {
+    String from = 'en',
+    String to = 'en',
+  }) async {
     // Free Dictionary API 支持多种语言，语言代码使用 ISO 639-1
     // API 路径: /api/v1/entries/{language}/{word}
     // 需要翻译时添加 translations=true 参数
@@ -21,7 +27,9 @@ class FreeDictionaryService {
       queryParameters: needTranslations ? {'translations': 'true'} : {},
     );
 
-    print('lookup: word=$word, from=$from, to=$to, needTranslations=$needTranslations');
+    print(
+      'lookup: word=$word, from=$from, to=$to, needTranslations=$needTranslations',
+    );
     print('URL: $url');
 
     try {
@@ -33,22 +41,29 @@ class FreeDictionaryService {
         final result = DictionaryResult.fromJson(data, targetLanguage: to);
 
         // 如果需要翻译但没有翻译结果，尝试查询单数形式
-        if (needTranslations && (result.translation == null || result.translation!.isEmpty)) {
+        if (needTranslations &&
+            (result.translation == null || result.translation!.isEmpty)) {
           print('当前单词没有翻译结果，尝试查询单数形式');
           final singularWord = _tryGetSingular(lowerWord);
           if (singularWord != lowerWord) {
             print('尝试查询单数形式: $singularWord');
-            final singularUrl = Uri.parse('$_apiUrl/$from/$singularWord').replace(
-              queryParameters: {'translations': 'true'},
-            );
+            final singularUrl = Uri.parse(
+              '$_apiUrl/$from/$singularWord',
+            ).replace(queryParameters: {'translations': 'true'});
             final singularResponse = await http.get(singularUrl);
             if (singularResponse.statusCode == 200) {
-              final singularData = jsonDecode(utf8.decode(singularResponse.bodyBytes));
+              final singularData = jsonDecode(
+                utf8.decode(singularResponse.bodyBytes),
+              );
               print('单数形式响应报文: ${jsonEncode(singularData)}');
-              final singularResult = DictionaryResult.fromJson(singularData, targetLanguage: to);
+              final singularResult = DictionaryResult.fromJson(
+                singularData,
+                targetLanguage: to,
+              );
 
               // 如果单数形式有翻译，返回合并的结果
-              if (singularResult.translation != null && singularResult.translation!.isNotEmpty) {
+              if (singularResult.translation != null &&
+                  singularResult.translation!.isNotEmpty) {
                 print('单数形式找到翻译: ${singularResult.translation}');
                 return DictionaryResult(
                   word: word, // 保留原词
@@ -57,7 +72,8 @@ class FreeDictionaryService {
                   meanings: result.meanings,
                   translation: singularResult.translation,
                   web: result.web, // 保留原词的释义（如果有的话）
-                  formInfo: result.formInfo ?? singularResult.formInfo, // 保留变形信息
+                  formInfo:
+                      result.formInfo ?? singularResult.formInfo, // 保留变形信息
                 );
               }
             }
@@ -95,13 +111,25 @@ class FreeDictionaryService {
     // 2. -es → 去掉 es (如 boxes → box, buses → bus)
     // 但要注意不是所有 -es 结尾的都是复数（如 yes, his, 等）
     // 这里只处理常见的复数后缀
-    if (word.endsWith('xes') || word.endsWith('ches') || word.endsWith('shes') || word.endsWith('ses')) {
+    if (word.endsWith('xes') ||
+        word.endsWith('ches') ||
+        word.endsWith('shes') ||
+        word.endsWith('ses')) {
       return word.substring(0, word.length - 2);
     }
 
     // 3. -s → 去掉 s (如 lectures → lecture, books → book)
     // 但要排除一些不是复数的常见词
-    final commonNonPluralWords = {'yes', 'his', 'is', 'as', 'us', 'bus', 'this', 'that'};
+    final commonNonPluralWords = {
+      'yes',
+      'his',
+      'is',
+      'as',
+      'us',
+      'bus',
+      'this',
+      'that',
+    };
     if (word.endsWith('s') && !commonNonPluralWords.contains(word)) {
       return word.substring(0, word.length - 1);
     }
@@ -111,7 +139,7 @@ class FreeDictionaryService {
 }
 
 /// 词典查询结果
-class DictionaryResult {
+class FreeDictionaryResult {
   final String? word;
   final String? phonetic;
   final String? audio;
@@ -121,7 +149,7 @@ class DictionaryResult {
   final List<WebTranslation>? web;
   final String? formInfo; // 变形信息（复数、过去式等）
 
-  DictionaryResult({
+  FreeDictionaryResult({
     this.word,
     this.phonetic,
     this.audio,
@@ -132,7 +160,10 @@ class DictionaryResult {
     this.formInfo,
   });
 
-  factory DictionaryResult.fromJson(Map<String, dynamic> json, {String? targetLanguage}) {
+  factory FreeDictionaryResult.fromJson(
+    Map<String, dynamic> json, {
+    String? targetLanguage,
+  }) {
     // 解析发音信息
     String? phonetic;
     String? audio;
@@ -145,7 +176,9 @@ class DictionaryResult {
     print('fromJson: targetLanguage=$targetLanguage');
 
     // 从 entries 中获取发音和释义
-    if (json['entries'] != null && json['entries'] is List && json['entries'].isNotEmpty) {
+    if (json['entries'] != null &&
+        json['entries'] is List &&
+        json['entries'].isNotEmpty) {
       final entries = json['entries'] as List;
       print('找到 ${entries.length} 个 entries');
 
@@ -154,7 +187,9 @@ class DictionaryResult {
         final entryMap = entry as Map<String, dynamic>;
 
         // 解析 pronunciations（从第一个 entry 获取）
-        if (phonetic == null && entryMap['pronunciations'] != null && entryMap['pronunciations'] is List) {
+        if (phonetic == null &&
+            entryMap['pronunciations'] != null &&
+            entryMap['pronunciations'] is List) {
           final pronunciations = entryMap['pronunciations'] as List;
           final phoneticList = <String>[];
 
@@ -188,14 +223,17 @@ class DictionaryResult {
               final tagList = tags.map((e) => e.toString()).toList();
               print('  tags: $tagList');
               // 查找变形标签：form of, plural, past, participle 等
-              final formTags = tagList.where((tag) =>
-                tag.contains('form of') ||
-                tag == 'plural' ||
-                tag == 'past' ||
-                tag == 'participle' ||
-                tag == 'present' ||
-                tag == 'singular'
-              ).toList();
+              final formTags = tagList
+                  .where(
+                    (tag) =>
+                        tag.contains('form of') ||
+                        tag == 'plural' ||
+                        tag == 'past' ||
+                        tag == 'participle' ||
+                        tag == 'present' ||
+                        tag == 'singular',
+                  )
+                  .toList();
 
               print('  formTags: $formTags');
               if (formTags.isNotEmpty) {
@@ -211,19 +249,19 @@ class DictionaryResult {
               }
             }
 
-            if (definition != null && !definition.contains('plural of') && !definition.contains('form of')) {
-              webTranslations.add(WebTranslation(
-                key: partOfSpeech,
-                value: [definition],
-              ));
+            if (definition != null &&
+                !definition.contains('plural of') &&
+                !definition.contains('form of')) {
+              webTranslations.add(
+                WebTranslation(key: partOfSpeech, value: [definition]),
+              );
 
               // 如果有例句，添加为单独的条目
               if (examples != null && examples.isNotEmpty) {
                 final exampleTexts = examples.map((e) => e.toString()).toList();
-                webTranslations.add(WebTranslation(
-                  key: '例句',
-                  value: exampleTexts,
-                ));
+                webTranslations.add(
+                  WebTranslation(key: '例句', value: exampleTexts),
+                );
               }
             }
 
@@ -238,10 +276,14 @@ class DictionaryResult {
                   final langCode = lang?['code'] as String?;
                   final translatedWord = tMap['word'] as String?;
 
-                  print('    翻译: langCode=$langCode, word=$translatedWord, 目标=$targetLanguage');
+                  print(
+                    '    翻译: langCode=$langCode, word=$translatedWord, 目标=$targetLanguage',
+                  );
 
                   // 匹配目标语言代码
-                  if (langCode != null && langCode == targetLanguage && translatedWord != null) {
+                  if (langCode != null &&
+                      langCode == targetLanguage &&
+                      translatedWord != null) {
                     if (!targetTranslations.contains(translatedWord)) {
                       targetTranslations.add(translatedWord);
                       print('      添加翻译: $translatedWord');
@@ -291,7 +333,9 @@ class DictionaryResult {
     if (definition == null) return null;
 
     // 匹配 "plural of lecture" 或 "third-person singular of lecture" 等格式
-    final regex = RegExp(r'(?:plural|form of|singular|past|present|participle)\s+(?:of\s+)?([a-zA-Z]+)');
+    final regex = RegExp(
+      r'(?:plural|form of|singular|past|present|participle)\s+(?:of\s+)?([a-zA-Z]+)',
+    );
     final match = regex.firstMatch(definition);
     if (match != null && match.groupCount >= 1) {
       return match.group(1);
@@ -315,10 +359,7 @@ class DictionaryResult {
   /// 获取基本释义
   List<String> get explains {
     if (web == null || web!.isEmpty) return [];
-    return web!
-        .where((w) => w.key != '例句')
-        .expand((w) => w.value)
-        .toList();
+    return web!.where((w) => w.key != '例句').expand((w) => w.value).toList();
   }
 }
 
@@ -327,10 +368,7 @@ class Meaning {
   final String? partOfSpeech;
   final List<Definition>? definitions;
 
-  Meaning({
-    this.partOfSpeech,
-    this.definitions,
-  });
+  Meaning({this.partOfSpeech, this.definitions});
 
   factory Meaning.fromJson(Map<String, dynamic> json) {
     final List<Definition> defs = [];
@@ -352,10 +390,7 @@ class Definition {
   final String? definition;
   final String? example;
 
-  Definition({
-    this.definition,
-    this.example,
-  });
+  Definition({this.definition, this.example});
 
   factory Definition.fromJson(Map<String, dynamic> json) {
     return Definition(

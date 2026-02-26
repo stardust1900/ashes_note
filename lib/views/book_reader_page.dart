@@ -5,12 +5,10 @@ import 'package:crypto/crypto.dart';
 import 'package:epub_plus/epub_plus.dart';
 import 'package:flutter/material.dart' hide Image;
 import 'package:flutter/material.dart' as material show Image;
-import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/book_reader/youdao_dictionary_service.dart';
-import '../services/book_reader/free_dictionary_service.dart'
-    as free_dictionary_service;
 import '../services/book_reader/free_dictionary_service.dart';
 import '../services/book_reader/hz_dictionary_service.dart';
 import '../models/book_reader/page_content.dart';
@@ -2494,8 +2492,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             // Hz Dictionary 结果
             hzDefinition = currentResult.definition;
             hzImageUrl = currentResult.imageUrl;
-          } else if (currentDataSource == 'free' &&
-              currentResult is free_dictionary_service.DictionaryResult) {
+          } else if (currentDataSource == 'free') {
             // Free Dictionary 结果
             phoneticOrPinyin = currentResult.phonetic ?? '';
             explains = currentResult.explains;
