@@ -84,8 +84,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   double _tempFontSize = 16;
 
   // 词典翻译目标语言保存相关
-  String _currentTargetLanguage = 'zh-CHS'; // 默认翻译成中文（有道词典格式）
-
   // 语言代码映射（有道词典 -> Free Dictionary API）
   // Free Dictionary API 使用 cmn 表示普通话（中文翻译）
   static const Map<String, String> _languageCodeMap = {
@@ -261,15 +259,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
   /// 加载词典翻译目标语言
   Future<void> _loadDictionaryTargetLanguage() async {
     final targetLang = await StorageManager.loadDictionaryTargetLanguage();
-    if (targetLang != null) {
-      _currentTargetLanguage = targetLang;
-    }
+    if (targetLang != null) {}
   }
 
   /// 保存词典翻译目标语言
   Future<void> _saveDictionaryTargetLanguage(String language) async {
     await StorageManager.saveDictionaryTargetLanguage(language);
-    _currentTargetLanguage = language;
   }
 
   /// 判断文本是否主要为英文
@@ -1695,7 +1690,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   /// 构建合并高亮项的文本显示 - 分段渲染，只对实际有划线的部分加下划线
   Widget _buildMergedHighlightTextSpans(MergedHighlight merged) {
     final hasUnderline = merged.hasUnderline;
-    final hasHighlight = merged.hasHighlight;
     String text = merged.text;
     final textStartOffset = merged.startOffset;
 
@@ -1818,242 +1812,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
       maxLines: 3,
       overflow: TextOverflow.ellipsis,
       text: TextSpan(children: spans),
-    );
-  }
-
-  /// 构建高亮列表项（保留用于兼容）
-  Widget _buildHighlightListItem(
-    Highlight highlight, [
-    StateSetter? setDialogState,
-  ]) {
-    final hasNote = highlight.note != null && highlight.note!.isNotEmpty;
-    final isUnderline = highlight.isUnderline;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10, left: 4, right: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              Navigator.pop(context);
-              _jumpToHighlight(highlight);
-            },
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 顶部：高亮颜色条/划线图标 + 日期 + 操作按钮
-                Container(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
-                  decoration: BoxDecoration(
-                    color: isUnderline
-                        ? Colors.grey.withValues(alpha: 0.05)
-                        : highlight.color.withValues(alpha: 0.08),
-                    border: Border(
-                      bottom: BorderSide(
-                        color: isUnderline
-                            ? Colors.grey.withValues(alpha: 0.2)
-                            : highlight.color.withValues(alpha: 0.15),
-                      ),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      // 类型标识：高亮显示颜色块，划线显示下划线图标
-                      isUnderline
-                          ? Container(
-                              padding: const EdgeInsets.all(3),
-                              decoration: BoxDecoration(
-                                color: Colors.grey.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Icon(
-                                Icons.format_underline,
-                                size: 14,
-                                color: Colors.grey[700],
-                              ),
-                            )
-                          : Container(
-                              width: 12,
-                              height: 12,
-                              decoration: BoxDecoration(
-                                color: highlight.color.withValues(alpha: 0.8),
-                                borderRadius: BorderRadius.circular(3),
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 1.5,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: highlight.color.withValues(
-                                      alpha: 0.4,
-                                    ),
-                                    blurRadius: 2,
-                                  ),
-                                ],
-                              ),
-                            ),
-                      const SizedBox(width: 8),
-                      // 日期
-                      Expanded(
-                        child: Text(
-                          _formatDate(highlight.createdAt),
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[600],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      // 笔记按钮
-                      InkWell(
-                        onTap: () async {
-                          // 不关闭父对话框，直接显示笔记编辑对话框
-                          await _showAddNoteDialog(highlight);
-                          // 笔记保存后刷新对话框状态
-                          setDialogState?.call(() {});
-                        },
-                        borderRadius: BorderRadius.circular(6),
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: hasNote
-                                ? Colors.blue.withValues(alpha: 0.1)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Icon(
-                            hasNote ? Icons.edit_note : Icons.note_add_outlined,
-                            size: 18,
-                            color: hasNote
-                                ? Colors.blue[700]
-                                : Colors.grey[500],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      // 删除按钮
-                      InkWell(
-                        onTap: () async {
-                          await _deleteHighlight(highlight.id);
-                          if (mounted) {
-                            setState(() {});
-                            setDialogState?.call(() {});
-                          }
-                        },
-                        borderRadius: BorderRadius.circular(6),
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          child: Icon(
-                            Icons.delete_outline,
-                            size: 18,
-                            color: Colors.red[400],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // 内容区域
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 高亮/划线文本
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isUnderline
-                              ? Colors.grey.withValues(alpha: 0.05)
-                              : highlight.color.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: isUnderline
-                                ? Colors.grey.withValues(alpha: 0.2)
-                                : highlight.color.withValues(alpha: 0.25),
-                          ),
-                        ),
-                        child: Text(
-                          highlight.text,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.black87,
-                            height: 1.5,
-                            fontWeight: FontWeight.w500,
-                            decoration: isUnderline
-                                ? TextDecoration.underline
-                                : null,
-                            decorationColor: isUnderline
-                                ? Colors.black54
-                                : null,
-                            decorationThickness: isUnderline ? 2 : null,
-                          ),
-                        ),
-                      ),
-                      // 笔记内容
-                      if (hasNote) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey[200]!),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.comment_outlined,
-                                size: 14,
-                                color: Colors.grey[500],
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  highlight.note!,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.grey[700],
-                                    height: 1.4,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 
@@ -2408,14 +2166,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
         );
       }
     });
-  }
-
-  /// 跳转到下一个搜索结果
-  void _goToNextSearchResult({bool showDialog = true}) {
-    if (_displaySearchResults.isEmpty) return;
-    _currentSearchIndex =
-        (_currentSearchIndex + 1) % _displaySearchResults.length;
-    _goToSearchResult(_currentSearchIndex, showDialog: showDialog);
   }
 
   /// 复制选中文本
@@ -2883,14 +2633,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                 // Hz 词典显示完整解释（使用 Markdown 渲染）
                                 if (currentDataSource == 'hz' &&
                                     hzDefinition != null &&
-                                    hzDefinition!.isNotEmpty) ...[
+                                    hzDefinition.isNotEmpty) ...[
                                   // 显示汉字图片
                                   if (hzImageUrl != null &&
-                                      hzImageUrl!.isNotEmpty) ...[
+                                      hzImageUrl.isNotEmpty) ...[
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
                                       child: material.Image.network(
-                                        hzImageUrl!,
+                                        hzImageUrl,
                                         width: 120,
                                         height: 120,
                                         fit: BoxFit.contain,
@@ -2913,8 +2663,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                             },
                                         loadingBuilder:
                                             (context, child, loadingProgress) {
-                                              if (loadingProgress == null)
+                                              if (loadingProgress == null) {
                                                 return child;
+                                              }
                                               return Container(
                                                 width: 120,
                                                 height: 120,
@@ -2939,7 +2690,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
-                                      children: _parseMarkdown(hzDefinition!),
+                                      children: _parseMarkdown(hzDefinition),
                                     ),
                                   ),
                                 ] else ...[
@@ -2954,24 +2705,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                             label: Text('中→英'),
                                             selected: currentTo == 'en',
                                             onSelected: (selected) {
-                                              if (selected)
+                                              if (selected) {
                                                 fetchDictionary(
                                                   'youdao',
                                                   'zh-CHS',
                                                   'en',
                                                 );
+                                              }
                                             },
                                           ),
                                           ChoiceChip(
                                             label: Text('中→中'),
                                             selected: currentTo == 'zh-CHS',
                                             onSelected: (selected) {
-                                              if (selected)
+                                              if (selected) {
                                                 fetchDictionary(
                                                   'youdao',
                                                   'zh-CHS',
                                                   'zh-CHS',
                                                 );
+                                              }
                                             },
                                           ),
                                         ] else ...[
