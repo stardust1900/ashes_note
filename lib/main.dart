@@ -2,9 +2,7 @@ import 'package:ashes_note/ashes_theme.dart';
 import 'package:ashes_note/l10n/app_localizations.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
-// import 'package:ashes_note/views/editor_view.dart';
 import 'package:ashes_note/views/flyme_note_view.dart';
-// import 'package:ashes_note/views/note_view.dart';
 import 'package:ashes_note/views/settings_view.dart';
 import 'package:ashes_note/views/book_library_page.dart';
 import 'package:flutter/material.dart';
@@ -33,7 +31,10 @@ class _AshesNoteAppState extends State<AshesNoteApp> {
     super.initState();
     // 从本地存储加载上次选择的菜单索引
     final lastSelectedIndex = SPUtil.get<int>(_lastSelectedMenuKey, 0);
-    _controller = SidebarXController(selectedIndex: lastSelectedIndex, extended: true);
+    _controller = SidebarXController(
+      selectedIndex: lastSelectedIndex,
+      extended: true,
+    );
     // 监听菜单选择变化并保存
     _controller.addListener(_onMenuChanged);
   }
