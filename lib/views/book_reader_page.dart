@@ -2465,14 +2465,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
     // 本地没有，调用词典 API
     _showLoadingDialog();
 
-    try {
-      // 检测文字类型，选择默认词典源
-      final isEnglish = RegExp(r'^[a-zA-Z\s\-]+$').hasMatch(selectedWord);
-      dynamic result;
-      String dataSource;
-      String from = isEnglish ? 'en' : 'zh-CHS';
-      String to = isEnglish ? 'zh-CHS' : 'zh-CHS';
+    // 检测文字类型，选择默认词典源
+    final isEnglish = RegExp(r'^[a-zA-Z\s\-]+$').hasMatch(selectedWord);
+    dynamic result;
+    String dataSource = isEnglish ? 'free' : 'hz'; // 默认值
+    String from = isEnglish ? 'en' : 'zh-CHS';
+    String to = isEnglish ? 'zh-CHS' : 'zh-CHS';
 
+    try {
       if (isEnglish) {
         // 英文默认使用 Free Dictionary
         dataSource = 'free';
@@ -2496,37 +2496,30 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
       _hideTextToolbar();
 
-      if (result != null) {
-        // 显示词典结果对话框
-        _showDictionaryResultDialog(
-          selectedWord,
-          result,
-          from: from,
-          to: to,
-          dataSource: dataSource,
-        );
-      } else {
-        // API 调用失败或无结果
-        print('$dataSource 词典返回 null'); // 调试信息
-        _showDictionaryDialog(
-          word: selectedWord,
-          definition: '',
-          isExisting: false,
-        );
-      }
+      // 无论 result 是否为 null，都显示词典结果对话框
+      // 如果为 null，对话框会显示"没有查到"信息
+      _showDictionaryResultDialog(
+        selectedWord,
+        result,
+        from: from,
+        to: to,
+        dataSource: dataSource,
+      );
     } catch (e) {
       print('词典查询异常: $e'); // 调试信息
       _hideLoadingDialog();
       if (mounted) {
         _hideTextToolbar();
-        _showDictionaryDialog(
-          word: selectedWord,
-          definition: '',
-          isExisting: false,
+        _showDictionaryResultDialog(
+          selectedWord,
+          null,
+          from: from,
+          to: to,
+          dataSource: dataSource,
         );
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('网络请求失败，使用本地词库')));
+        ).showSnackBar(SnackBar(content: Text('网络请求失败')));
       }
     }
   }
@@ -2559,6 +2552,128 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (mounted && Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
+  }
+
+  /// 解析简单的 Markdown 格式文本为 Widget 列表
+  List<Widget> _parseMarkdown(String markdown) {
+    final widgets = <Widget>[];
+    final lines = markdown.split('\n');
+    final buffer = StringBuffer();
+    bool isBold = false;
+
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+
+      if (line.isEmpty) {
+        // 空行，如果 buffer 有内容则添加
+        if (buffer.isNotEmpty) {
+          widgets.add(
+            SelectableText(
+              buffer.toString().trim(),
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.6,
+                color: Colors.white,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          );
+          widgets.add(SizedBox(height: 8));
+          buffer.clear();
+          isBold = false;
+        } else {
+          // 连续的空行
+          widgets.add(SizedBox(height: 8));
+        }
+        continue;
+      }
+
+      // 检查是否是粗体标记 **文本**
+      if (line.startsWith('**') && line.endsWith('**')) {
+        // 处理单行粗体
+        if (buffer.isNotEmpty) {
+          widgets.add(
+            SelectableText(
+              buffer.toString().trim(),
+              style: TextStyle(fontSize: 14, height: 1.6, color: Colors.white),
+            ),
+          );
+          buffer.clear();
+        }
+        final boldText = line.substring(2, line.length - 2);
+        widgets.add(
+          SelectableText(
+            boldText,
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.6,
+              fontWeight: FontWeight.bold,
+              color: Colors.blue[700],
+            ),
+          ),
+        );
+        widgets.add(SizedBox(height: 4));
+        continue;
+      }
+
+      // 检查是否是粗体开始标记 **
+      if (line.startsWith('**')) {
+        if (buffer.isNotEmpty) {
+          widgets.add(
+            SelectableText(
+              buffer.toString().trim(),
+              style: TextStyle(fontSize: 14, height: 1.6, color: Colors.white),
+            ),
+          );
+          buffer.clear();
+        }
+        final boldPart = line.substring(2);
+        buffer.writeln(boldPart);
+        isBold = true;
+        continue;
+      }
+
+      // 检查是否是粗体结束标记 **
+      if (line.endsWith('**')) {
+        final boldPart = line.substring(0, line.length - 2);
+        buffer.writeln(boldPart);
+        isBold = false;
+        widgets.add(
+          SelectableText(
+            buffer.toString().trim(),
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.6,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        );
+        widgets.add(SizedBox(height: 8));
+        buffer.clear();
+        continue;
+      }
+
+      // 普通文本行
+      buffer.writeln(line);
+    }
+
+    // 处理剩余的 buffer
+    if (buffer.isNotEmpty) {
+      widgets.add(
+        SelectableText(
+          buffer.toString().trim(),
+          style: TextStyle(
+            fontSize: 14,
+            height: 1.6,
+            color: Colors.white,
+            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      );
+    }
+
+    return widgets;
   }
 
   /// 显示词典结果对话框
@@ -2639,10 +2754,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
           String? translation;
           String? formInfo; // 变形信息
           String? hzDefinition; // Hz 词典的完整解释
+          String? hzImageUrl; // Hz 词典的图片 URL
 
           if (currentDataSource == 'hz' && currentResult is DictionaryEntry) {
             // Hz Dictionary 结果
             hzDefinition = currentResult.definition;
+            hzImageUrl = currentResult.imageUrl;
           } else if (currentDataSource == 'free' &&
               currentResult is free_dictionary_service.DictionaryResult) {
             // Free Dictionary 结果
@@ -2708,50 +2825,113 @@ class _BookReaderPageState extends State<BookReaderPage> {
             ),
             content: isLoading
                 ? Center(child: CircularProgressIndicator())
-                : SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // 词典源选择下拉框
-                        DropdownButtonFormField<String>(
-                          value: currentDataSource,
-                          decoration: InputDecoration(
-                            labelText: '词典源',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 词典源选择下拉框（不在滚动区域内）
+                      DropdownButtonFormField<String>(
+                        value: currentDataSource,
+                        decoration: InputDecoration(
+                          labelText: '词典源',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
                           ),
-                          items: [
-                            DropdownMenuItem(value: 'hz', child: Text('Hz 词典')),
-                            DropdownMenuItem(
-                              value: 'youdao',
-                              child: Text('有道词典'),
-                            ),
-                            if (canUseFreeDictionary)
-                              DropdownMenuItem(
-                                value: 'free',
-                                child: Text('Free Dictionary'),
-                              ),
-                          ],
-                          onChanged: (value) {
-                            if (value != null && value != currentDataSource) {
-                              fetchDictionary(value, currentFrom, currentTo);
-                            }
-                          },
                         ),
-                        SizedBox(height: 12),
-                        // Hz 词典显示完整解释
+                        items: [
+                          DropdownMenuItem(value: 'hz', child: Text('Hz 词典')),
+                          DropdownMenuItem(
+                            value: 'youdao',
+                            child: Text('有道词典'),
+                          ),
+                          if (canUseFreeDictionary)
+                            DropdownMenuItem(
+                              value: 'free',
+                              child: Text('Free Dictionary'),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null && value != currentDataSource) {
+                            fetchDictionary(value, currentFrom, currentTo);
+                          }
+                        },
+                      ),
+                      SizedBox(height: 12),
+                      // 内容区域（可滚动）
+                      Flexible(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // 检查是否有结果
+                              if ((currentDataSource == 'hz' && hzDefinition == null) ||
+                                  (currentDataSource != 'hz' && explainsText.isEmpty && translation?.isEmpty != false)) ...[
+                                // 没有查到结果
+                                Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(24),
+                                    child: Column(
+                                      children: [
+                                        Icon(Icons.search_off, size: 48, color: Colors.grey[400]),
+                                        SizedBox(height: 16),
+                                        Text(
+                                          '没有查到结果',
+                                          style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ] else ...[
+                              // Hz 词典显示完整解释（使用 Markdown 渲染）
                         if (currentDataSource == 'hz' &&
                             hzDefinition != null &&
                             hzDefinition!.isNotEmpty) ...[
+                          // 显示汉字图片
+                          if (hzImageUrl != null && hzImageUrl!.isNotEmpty) ...[
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: material.Image.network(
+                                hzImageUrl!,
+                                width: 120,
+                                height: 120,
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    width: 120,
+                                    height: 120,
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[200],
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(Icons.image_not_supported, size: 40, color: Colors.grey),
+                                  );
+                                },
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Container(
+                                    width: 120,
+                                    height: 120,
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[100],
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Center(child: CircularProgressIndicator()),
+                                  );
+                                },
+                              ),
+                            ),
+                            SizedBox(height: 12),
+                          ],
+                          // 显示详细解释
                           Container(
                             padding: EdgeInsets.all(12),
-                            child: Text(
-                              hzDefinition!,
-                              style: TextStyle(fontSize: 14, height: 1.6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: _parseMarkdown(hzDefinition!),
                             ),
                           ),
                         ] else ...[
@@ -2883,35 +3063,17 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             SizedBox(height: 16),
                           ],
                         ],
+                        ],
                       ],
                     ),
                   ),
+                ),
+                ],
+              ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: Text('关闭'),
-              ),
-              ElevatedButton(
-                onPressed: isLoading
-                    ? null
-                    : () {
-                        Navigator.of(dialogContext).pop();
-                        // 保存到本地词库
-                        final definition = [
-                          if (currentDataSource == 'hz' && hzDefinition != null)
-                            hzDefinition!,
-                          if (translation?.isNotEmpty == true) translation!,
-                          if (explainsText.isNotEmpty) explainsText,
-                          if (webTranslationsText.isNotEmpty)
-                            webTranslationsText,
-                        ].where((s) => s.isNotEmpty).join('\n\n');
-                        _showDictionaryDialog(
-                          word: currentWord,
-                          definition: definition,
-                          isExisting: false,
-                        );
-                      },
-                child: Text('保存到词库'),
               ),
             ],
           );

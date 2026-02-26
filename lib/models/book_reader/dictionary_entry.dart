@@ -8,6 +8,7 @@ class DictionaryEntry {
   final String? chapterTitle;
   final int? chapterIndex;
   final int? pageIndex;
+  final String? imageUrl; // 图片 URL
 
   DictionaryEntry({
     required this.word,
@@ -18,6 +19,7 @@ class DictionaryEntry {
     this.chapterTitle,
     this.chapterIndex,
     this.pageIndex,
+    this.imageUrl,
   });
 
   Map<String, dynamic> toJson() {
@@ -30,6 +32,7 @@ class DictionaryEntry {
       if (chapterTitle != null) 'chapterTitle': chapterTitle,
       if (chapterIndex != null) 'chapterIndex': chapterIndex,
       if (pageIndex != null) 'pageIndex': pageIndex,
+      if (imageUrl != null) 'imageUrl': imageUrl,
     };
   }
 
@@ -45,6 +48,7 @@ class DictionaryEntry {
       chapterTitle: json['chapterTitle'] as String?,
       chapterIndex: json['chapterIndex'] as int?,
       pageIndex: json['pageIndex'] as int?,
+      imageUrl: json['imageUrl'] as String?,
     );
   }
 
@@ -57,6 +61,7 @@ class DictionaryEntry {
     String? chapterTitle,
     int? chapterIndex,
     int? pageIndex,
+    String? imageUrl,
   }) {
     return DictionaryEntry(
       word: word ?? this.word,
@@ -67,6 +72,7 @@ class DictionaryEntry {
       chapterTitle: chapterTitle ?? this.chapterTitle,
       chapterIndex: chapterIndex ?? this.chapterIndex,
       pageIndex: pageIndex ?? this.pageIndex,
+      imageUrl: imageUrl ?? this.imageUrl,
     );
   }
 }
