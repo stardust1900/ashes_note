@@ -5,8 +5,6 @@ import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
-// import 'package:ashes_note/views/note_detail_supereditor_view.dart'
-//     show NoteDetailPage;
 import 'package:ashes_note/views/note_detail_view.dart' show NoteDetailPage;
 import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
@@ -227,7 +225,10 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     print(
                       'workingDirectory: $workingDirectory/notes notebookName: $notebookName',
                     );
-                    FileUtil().deleteDirectory('$workingDirectory/notes', notebookName);
+                    FileUtil().deleteDirectory(
+                      '$workingDirectory/notes',
+                      notebookName,
+                    );
                     print("delete second then");
                   });
 
@@ -1051,7 +1052,10 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     )
                     .then((value) {
                       FileUtil()
-                          .listNotes('$workingDirectory/notes', _selectedNotebook!.name)
+                          .listNotes(
+                            '$workingDirectory/notes',
+                            _selectedNotebook!.name,
+                          )
                           .then((notes) {
                             setState(() {
                               final notebookIndex = _notebooks.indexWhere(
