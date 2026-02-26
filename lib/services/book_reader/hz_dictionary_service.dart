@@ -4,9 +4,9 @@ import '../../models/book_reader/dictionary_entry.dart';
 
 /// 单词类型枚举
 enum WordType {
-  chineseChar,  // 汉字单字
-  chineseWord,  // 汉字词语
-  english,      // 英文单词
+  chineseChar, // 汉字单字
+  chineseWord, // 汉字词语
+  english, // 英文单词
 }
 
 /// HzDictionary API 服务
@@ -20,14 +20,11 @@ class HzDictionaryService {
   static const String _baseUrl = 'https://cn.apihz.cn/api/zici';
 
   /// API 端点
-  static const String _wordEndpoint = '$_baseUrl/chaciyu.php';  // 汉字词语
-  static const String _charEndpoint = '$_baseUrl/chazd.php';    // 汉字单字
-  static const String _englishEndpoint = '$_baseUrl/danci.php';  // 英文单词
+  static const String _wordEndpoint = '$_baseUrl/chaciyu.php'; // 汉字词语
+  static const String _charEndpoint = '$_baseUrl/chazd.php'; // 汉字单字
+  static const String _englishEndpoint = '$_baseUrl/danci.php'; // 英文单词
 
-  HzDictionaryService({
-    required this.apiId,
-    required this.apiKey,
-  });
+  HzDictionaryService({required this.apiId, required this.apiKey});
 
   /// 查找单词
   Future<DictionaryEntry?> lookup(String word) async {
@@ -96,19 +93,17 @@ class HzDictionaryService {
 
   /// 查询汉字单字
   Future<Map<String, dynamic>> _lookupChineseChar(String char) async {
-    final url = Uri.parse('$_charEndpoint').replace(
-      queryParameters: {
-        'word': char,
-        'id': apiId,
-        'key': apiKey,
-      },
-    );
-    final response = await http.get(url).timeout(
-      const Duration(seconds: 10),
-      onTimeout: () {
-        throw Exception('请求超时');
-      },
-    );
+    final url = Uri.parse(
+      '$_charEndpoint',
+    ).replace(queryParameters: {'word': char, 'id': apiId, 'key': apiKey});
+    final response = await http
+        .get(url)
+        .timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            throw Exception('请求超时');
+          },
+        );
 
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode}');
@@ -121,27 +116,22 @@ class HzDictionaryService {
     }
 
     // API 直接返回扁平结构
-    return {
-      'type': 'char',
-      'data': data,
-    };
+    return {'type': 'char', 'data': data};
   }
 
   /// 查询汉字词语
   Future<Map<String, dynamic>> _lookupChineseWord(String word) async {
-    final url = Uri.parse('$_wordEndpoint').replace(
-      queryParameters: {
-        'words': word,
-        'id': apiId,
-        'key': apiKey,
-      },
-    );
-    final response = await http.get(url).timeout(
-      const Duration(seconds: 10),
-      onTimeout: () {
-        throw Exception('请求超时');
-      },
-    );
+    final url = Uri.parse(
+      '$_wordEndpoint',
+    ).replace(queryParameters: {'words': word, 'id': apiId, 'key': apiKey});
+    final response = await http
+        .get(url)
+        .timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            throw Exception('请求超时');
+          },
+        );
 
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode}');
@@ -154,28 +144,23 @@ class HzDictionaryService {
     }
 
     // API 直接返回扁平结构，不是嵌套的 data 对象
-    return {
-      'type': 'word',
-      'data': data,
-    };
+    return {'type': 'word', 'data': data};
   }
 
   /// 查询英文单词
   Future<Map<String, dynamic>> _lookupEnglish(String word) async {
-    final url = Uri.parse('$_englishEndpoint').replace(
-      queryParameters: {
-        'word': word,
-        'id': apiId,
-        'key': apiKey,
-      },
-    );
+    final url = Uri.parse(
+      '$_englishEndpoint',
+    ).replace(queryParameters: {'word': word, 'id': apiId, 'key': apiKey});
     print('英文查询 URL: $url'); // 调试
-    final response = await http.get(url).timeout(
-      const Duration(seconds: 10),
-      onTimeout: () {
-        throw Exception('请求超时');
-      },
-    );
+    final response = await http
+        .get(url)
+        .timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            throw Exception('请求超时');
+          },
+        );
 
     print('英文查询响应状态码: ${response.statusCode}'); // 调试
     print('英文查询响应体: ${response.body}'); // 调试
@@ -191,10 +176,7 @@ class HzDictionaryService {
     }
 
     // API 直接返回扁平结构
-    return {
-      'type': 'english',
-      'data': data,
-    };
+    return {'type': 'english', 'data': data};
   }
 
   /// 格式化定义为展示文本
@@ -214,7 +196,8 @@ class HzDictionaryService {
           buffer.writeln();
         }
         if (data['pinyin'] != null || data['yindiao'] != null) {
-          final pinyin = data['yindiao']?.toString() ?? data['pinyin']?.toString() ?? '';
+          final pinyin =
+              data['yindiao']?.toString() ?? data['pinyin']?.toString() ?? '';
           buffer.writeln('拼音: ${_formatPinyin(pinyin)}');
           buffer.writeln();
         }
@@ -281,7 +264,10 @@ class HzDictionaryService {
           buffer.writeln();
           final content = data['content'].toString();
           // 清理 HTML 标签
-          final cleanContent = content.replaceAll('<br>', '\n').replaceAll('</br>', '\n').replaceAll('<br/>', '\n');
+          final cleanContent = content
+              .replaceAll('<br>', '\n')
+              .replaceAll('</br>', '\n')
+              .replaceAll('<br/>', '\n');
           // 按序号分割解释内容,但保留序号
           final expParts = cleanContent.split(RegExp(r'(?=[①②③④⑤⑥⑦⑧⑨⑩])'));
           for (var part in expParts) {
@@ -349,7 +335,10 @@ class HzDictionaryService {
   /// 格式化详细解释
   String _formatJieshi(String jieshi) {
     // 清理格式
-    var cleaned = jieshi.replaceAll(RegExp(r'\{|\}|"|type|data|:|word|code|200'), '');
+    var cleaned = jieshi.replaceAll(
+      RegExp(r'\{|\}|"|type|data|:|word|code|200'),
+      '',
+    );
     // 移除逗号分隔的多余空格
     cleaned = cleaned.replaceAll(RegExp(r',\s*'), '，');
     // 移除中英文混合的分隔符
@@ -365,29 +354,73 @@ class HzDictionaryService {
   /// 处理类似 "luè" 这样的拼音，将数字声调转换为带声调符号
   String _formatPinyin(String pinyin) {
     if (pinyin.isEmpty) return pinyin;
-    
+
     // 替换常见的声调数字为带声调符号的字母
     final toneMap = {
-      'a1': 'ā', 'a2': 'á', 'a3': 'ǎ', 'a4': 'à', 'a5': 'a',
-      'e1': 'ē', 'e2': 'é', 'e3': 'ě', 'e4': 'è', 'e5': 'e',
-      'i1': 'ī', 'i2': 'í', 'i3': 'ǐ', 'i4': 'ì', 'i5': 'i',
-      'o1': 'ō', 'o2': 'ó', 'o3': 'ǒ', 'o4': 'ò', 'o5': 'o',
-      'u1': 'ū', 'u2': 'ú', 'u3': 'ǔ', 'u4': 'ù', 'u5': 'u',
-      'v1': 'ǖ', 'v2': 'ǘ', 'v3': 'ǚ', 'v4': 'ǜ', 'v5': 'ü',
-      'A1': 'Ā', 'A2': 'Á', 'A3': 'Ǎ', 'A4': 'À', 'A5': 'A',
-      'E1': 'Ē', 'E2': 'É', 'E3': 'Ě', 'E4': 'È', 'E5': 'E',
-      'I1': 'Ī', 'I2': 'Í', 'I3': 'Ǐ', 'I4': 'Ì', 'I5': 'I',
-      'O1': 'Ō', 'O2': 'Ó', 'O3': 'Ǒ', 'O4': 'Ò', 'O5': 'O',
-      'U1': 'Ū', 'U2': 'Ú', 'U3': 'Ǔ', 'U4': 'Ù', 'U5': 'U',
+      'a1': 'ā',
+      'a2': 'á',
+      'a3': 'ǎ',
+      'a4': 'à',
+      'a5': 'a',
+      'e1': 'ē',
+      'e2': 'é',
+      'e3': 'ě',
+      'e4': 'è',
+      'e5': 'e',
+      'i1': 'ī',
+      'i2': 'í',
+      'i3': 'ǐ',
+      'i4': 'ì',
+      'i5': 'i',
+      'o1': 'ō',
+      'o2': 'ó',
+      'o3': 'ǒ',
+      'o4': 'ò',
+      'o5': 'o',
+      'u1': 'ū',
+      'u2': 'ú',
+      'u3': 'ǔ',
+      'u4': 'ù',
+      'u5': 'u',
+      'v1': 'ǖ',
+      'v2': 'ǘ',
+      'v3': 'ǚ',
+      'v4': 'ǜ',
+      'v5': 'ü',
+      'A1': 'Ā',
+      'A2': 'Á',
+      'A3': 'Ǎ',
+      'A4': 'À',
+      'A5': 'A',
+      'E1': 'Ē',
+      'E2': 'É',
+      'E3': 'Ě',
+      'E4': 'È',
+      'E5': 'E',
+      'I1': 'Ī',
+      'I2': 'Í',
+      'I3': 'Ǐ',
+      'I4': 'Ì',
+      'I5': 'I',
+      'O1': 'Ō',
+      'O2': 'Ó',
+      'O3': 'Ǒ',
+      'O4': 'Ò',
+      'O5': 'O',
+      'U1': 'Ū',
+      'U2': 'Ú',
+      'U3': 'Ǔ',
+      'U4': 'Ù',
+      'U5': 'U',
     };
-    
+
     String result = pinyin;
-    
+
     // 遍历映射表进行替换
     for (final entry in toneMap.entries) {
       result = result.replaceAll(entry.key, entry.value);
     }
-    
+
     return result;
   }
 }

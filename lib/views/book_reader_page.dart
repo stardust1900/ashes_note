@@ -8,17 +8,16 @@ import 'package:flutter/material.dart' as material show Image;
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
-import '../services/book_reader/dictionary_service.dart';
 import '../services/book_reader/youdao_dictionary_service.dart';
 import '../services/book_reader/free_dictionary_service.dart'
     as free_dictionary_service;
 import '../services/book_reader/free_dictionary_service.dart';
 import '../services/book_reader/hz_dictionary_service.dart';
-import '../models/book_reader/dictionary_entry.dart';
 import '../models/book_reader/page_content.dart';
 import '../models/book_reader/bookmark.dart';
 import '../models/book_reader/highlight.dart';
-import '../models/book_reader/content_item.dart' show ContentItem, TextContent, ImageContent, CoverContent;
+import '../models/book_reader/content_item.dart'
+    show ContentItem, TextContent, ImageContent, CoverContent;
 import 'book_reader/highlight_operations.dart';
 import 'book_reader/search_manager.dart';
 import 'book_reader/note_export.dart';
@@ -130,8 +129,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   List<Highlight> _selectedHighlights = [];
 
   // 字典服务
-  final DictionaryService _dictionaryService = DictionaryService();
-
   // 有道词典服务（需要配置 App ID 和 App Key）
   late final YoudaoDictionaryService _youdaoService;
   late final FreeDictionaryService _freeDictionaryService;
@@ -179,8 +176,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _hideTextToolbar(); // 清理工具栏
     super.dispose();
   }
-
-
 
   /// 计算页面起始偏移量
   int _calculatePageStartOffset(PageContent page) {
@@ -410,9 +405,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
     // 只有默认高亮颜色按钮显示为删除状态，其他颜色按钮正常显示
     // 使用 toARGB32() 比较颜色值，避免 MaterialColor 对象比较问题
     final defaultColorValue = _defaultHighlightColor.toARGB32();
-    final yellowIsCurrent = showAsDelete && defaultColorValue == Colors.yellow.toARGB32();
-    final greenIsCurrent = showAsDelete && defaultColorValue == Colors.green.toARGB32();
-    final blueIsCurrent = showAsDelete && defaultColorValue == Colors.blue.toARGB32();
+    final yellowIsCurrent =
+        showAsDelete && defaultColorValue == Colors.yellow.toARGB32();
+    final greenIsCurrent =
+        showAsDelete && defaultColorValue == Colors.green.toARGB32();
+    final blueIsCurrent =
+        showAsDelete && defaultColorValue == Colors.blue.toARGB32();
 
     colorButtons = [
       _buildColorHighlightButton(
@@ -774,7 +772,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
           highlight.chapterIndex == chapterIndex &&
           highlight.pageIndex == pageIndex) {
         // 检查是否与选择范围重叠
-        if (highlight.startOffset < endOffset && highlight.endOffset > startOffset) {
+        if (highlight.startOffset < endOffset &&
+            highlight.endOffset > startOffset) {
           highlightsToDelete.add(highlight);
         }
       }
@@ -2446,22 +2445,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     final selectedWord = _selectedText!.trim();
     print('词典查询: $selectedWord'); // 调试信息
 
-    // 先查询本地词库
-    final existingEntry = await _dictionaryService.getEntry(selectedWord);
-
     if (!mounted) return;
-
-    if (existingEntry != null) {
-      // 显示本地词库中的定义
-      _showDictionaryDialog(
-        word: existingEntry.word,
-        definition: existingEntry.definition,
-        isExisting: true,
-      );
-      _hideTextToolbar();
-      return;
-    }
-
     // 本地没有，调用词典 API
     _showLoadingDialog();
 
@@ -2756,7 +2740,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           String? hzDefinition; // Hz 词典的完整解释
           String? hzImageUrl; // Hz 词典的图片 URL
 
-          if (currentDataSource == 'hz' && currentResult is DictionaryEntry) {
+          if (currentDataSource == 'hz') {
             // Hz Dictionary 结果
             hzDefinition = currentResult.definition;
             hzImageUrl = currentResult.imageUrl;
@@ -2867,209 +2851,259 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               // 检查是否有结果
-                              if ((currentDataSource == 'hz' && hzDefinition == null) ||
-                                  (currentDataSource != 'hz' && explainsText.isEmpty && translation?.isEmpty != false)) ...[
+                              if ((currentDataSource == 'hz' &&
+                                      hzDefinition == null) ||
+                                  (currentDataSource != 'hz' &&
+                                      explainsText.isEmpty &&
+                                      translation?.isEmpty != false)) ...[
                                 // 没有查到结果
                                 Center(
                                   child: Padding(
                                     padding: EdgeInsets.all(24),
                                     child: Column(
                                       children: [
-                                        Icon(Icons.search_off, size: 48, color: Colors.grey[400]),
+                                        Icon(
+                                          Icons.search_off,
+                                          size: 48,
+                                          color: Colors.grey[400],
+                                        ),
                                         SizedBox(height: 16),
                                         Text(
                                           '没有查到结果',
-                                          style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: Colors.grey[600],
+                                          ),
                                         ),
                                       ],
                                     ),
                                   ),
                                 ),
                               ] else ...[
-                              // Hz 词典显示完整解释（使用 Markdown 渲染）
-                        if (currentDataSource == 'hz' &&
-                            hzDefinition != null &&
-                            hzDefinition!.isNotEmpty) ...[
-                          // 显示汉字图片
-                          if (hzImageUrl != null && hzImageUrl!.isNotEmpty) ...[
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: material.Image.network(
-                                hzImageUrl!,
-                                width: 120,
-                                height: 120,
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    width: 120,
-                                    height: 120,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[200],
+                                // Hz 词典显示完整解释（使用 Markdown 渲染）
+                                if (currentDataSource == 'hz' &&
+                                    hzDefinition != null &&
+                                    hzDefinition!.isNotEmpty) ...[
+                                  // 显示汉字图片
+                                  if (hzImageUrl != null &&
+                                      hzImageUrl!.isNotEmpty) ...[
+                                    ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
+                                      child: material.Image.network(
+                                        hzImageUrl!,
+                                        width: 120,
+                                        height: 120,
+                                        fit: BoxFit.contain,
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                              return Container(
+                                                width: 120,
+                                                height: 120,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey[200],
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: Icon(
+                                                  Icons.image_not_supported,
+                                                  size: 40,
+                                                  color: Colors.grey,
+                                                ),
+                                              );
+                                            },
+                                        loadingBuilder:
+                                            (context, child, loadingProgress) {
+                                              if (loadingProgress == null)
+                                                return child;
+                                              return Container(
+                                                width: 120,
+                                                height: 120,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey[100],
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: Center(
+                                                  child:
+                                                      CircularProgressIndicator(),
+                                                ),
+                                              );
+                                            },
+                                      ),
                                     ),
-                                    child: Icon(Icons.image_not_supported, size: 40, color: Colors.grey),
-                                  );
-                                },
-                                loadingBuilder: (context, child, loadingProgress) {
-                                  if (loadingProgress == null) return child;
-                                  return Container(
-                                    width: 120,
-                                    height: 120,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[100],
-                                      borderRadius: BorderRadius.circular(8),
+                                    SizedBox(height: 12),
+                                  ],
+                                  // 显示详细解释
+                                  Container(
+                                    padding: EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: _parseMarkdown(hzDefinition!),
                                     ),
-                                    child: Center(child: CircularProgressIndicator()),
-                                  );
-                                },
-                              ),
-                            ),
-                            SizedBox(height: 12),
-                          ],
-                          // 显示详细解释
-                          Container(
-                            padding: EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: _parseMarkdown(hzDefinition!),
-                            ),
-                          ),
-                        ] else ...[
-                          // 翻译方向切换按钮
-                          if (currentDataSource == 'youdao') ...[
-                            // 有道词典支持中文
-                            Wrap(
-                              spacing: 8,
-                              children: [
-                                if (isSourceChinese) ...[
-                                  ChoiceChip(
-                                    label: Text('中→英'),
-                                    selected: currentTo == 'en',
-                                    onSelected: (selected) {
-                                      if (selected)
-                                        fetchDictionary(
-                                          'youdao',
-                                          'zh-CHS',
-                                          'en',
-                                        );
-                                    },
-                                  ),
-                                  ChoiceChip(
-                                    label: Text('中→中'),
-                                    selected: currentTo == 'zh-CHS',
-                                    onSelected: (selected) {
-                                      if (selected)
-                                        fetchDictionary(
-                                          'youdao',
-                                          'zh-CHS',
-                                          'zh-CHS',
-                                        );
-                                    },
                                   ),
                                 ] else ...[
-                                  ChoiceChip(
-                                    label: Text('英→中'),
-                                    selected: currentTo == 'zh-CHS',
-                                    onSelected: (selected) {
-                                      if (selected) {
-                                        _saveDictionaryTargetLanguage('zh-CHS');
-                                        fetchDictionary(
-                                          'youdao',
-                                          'en',
-                                          'zh-CHS',
-                                        );
-                                      }
-                                    },
-                                  ),
-                                  ChoiceChip(
-                                    label: Text('英→英'),
-                                    selected: currentTo == 'en',
-                                    onSelected: (selected) {
-                                      if (selected) {
-                                        _saveDictionaryTargetLanguage('en');
-                                        fetchDictionary('youdao', 'en', 'en');
-                                      }
-                                    },
-                                  ),
+                                  // 翻译方向切换按钮
+                                  if (currentDataSource == 'youdao') ...[
+                                    // 有道词典支持中文
+                                    Wrap(
+                                      spacing: 8,
+                                      children: [
+                                        if (isSourceChinese) ...[
+                                          ChoiceChip(
+                                            label: Text('中→英'),
+                                            selected: currentTo == 'en',
+                                            onSelected: (selected) {
+                                              if (selected)
+                                                fetchDictionary(
+                                                  'youdao',
+                                                  'zh-CHS',
+                                                  'en',
+                                                );
+                                            },
+                                          ),
+                                          ChoiceChip(
+                                            label: Text('中→中'),
+                                            selected: currentTo == 'zh-CHS',
+                                            onSelected: (selected) {
+                                              if (selected)
+                                                fetchDictionary(
+                                                  'youdao',
+                                                  'zh-CHS',
+                                                  'zh-CHS',
+                                                );
+                                            },
+                                          ),
+                                        ] else ...[
+                                          ChoiceChip(
+                                            label: Text('英→中'),
+                                            selected: currentTo == 'zh-CHS',
+                                            onSelected: (selected) {
+                                              if (selected) {
+                                                _saveDictionaryTargetLanguage(
+                                                  'zh-CHS',
+                                                );
+                                                fetchDictionary(
+                                                  'youdao',
+                                                  'en',
+                                                  'zh-CHS',
+                                                );
+                                              }
+                                            },
+                                          ),
+                                          ChoiceChip(
+                                            label: Text('英→英'),
+                                            selected: currentTo == 'en',
+                                            onSelected: (selected) {
+                                              if (selected) {
+                                                _saveDictionaryTargetLanguage(
+                                                  'en',
+                                                );
+                                                fetchDictionary(
+                                                  'youdao',
+                                                  'en',
+                                                  'en',
+                                                );
+                                              }
+                                            },
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    SizedBox(height: 12),
+                                  ] else if (currentDataSource == 'free') ...[
+                                    // Free Dictionary 支持英文翻译方向
+                                    Wrap(
+                                      spacing: 8,
+                                      children: [
+                                        ChoiceChip(
+                                          label: Text('英→中'),
+                                          selected: currentTo == 'zh-CHS',
+                                          onSelected: (selected) {
+                                            if (selected) {
+                                              _saveDictionaryTargetLanguage(
+                                                'zh-CHS',
+                                              );
+                                              fetchDictionary(
+                                                'free',
+                                                'en',
+                                                'zh-CHS',
+                                              );
+                                            }
+                                          },
+                                        ),
+                                        ChoiceChip(
+                                          label: Text('英→英'),
+                                          selected: currentTo == 'en',
+                                          onSelected: (selected) {
+                                            if (selected) {
+                                              _saveDictionaryTargetLanguage(
+                                                'en',
+                                              );
+                                              fetchDictionary(
+                                                'free',
+                                                'en',
+                                                'en',
+                                              );
+                                            }
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                    SizedBox(height: 12),
+                                  ],
+                                  if (formInfo?.isNotEmpty == true) ...[
+                                    Text(
+                                      formInfo!,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orange[700],
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                    SizedBox(height: 16),
+                                  ],
+                                  if (translation?.isNotEmpty == true) ...[
+                                    Text(
+                                      '翻译',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    SizedBox(height: 8),
+                                    Text(translation!),
+                                    SizedBox(height: 16),
+                                  ],
+                                  if (explainsText.isNotEmpty) ...[
+                                    Text(
+                                      '基本释义',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    SizedBox(height: 8),
+                                    Text(explainsText),
+                                    SizedBox(height: 16),
+                                  ],
+                                  if (webTranslationsText.isNotEmpty) ...[
+                                    Text(
+                                      '网络释义',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    SizedBox(height: 8),
+                                    Text(webTranslationsText),
+                                    SizedBox(height: 16),
+                                  ],
                                 ],
                               ],
-                            ),
-                            SizedBox(height: 12),
-                          ] else if (currentDataSource == 'free') ...[
-                            // Free Dictionary 支持英文翻译方向
-                            Wrap(
-                              spacing: 8,
-                              children: [
-                                ChoiceChip(
-                                  label: Text('英→中'),
-                                  selected: currentTo == 'zh-CHS',
-                                  onSelected: (selected) {
-                                    if (selected) {
-                                      _saveDictionaryTargetLanguage('zh-CHS');
-                                      fetchDictionary('free', 'en', 'zh-CHS');
-                                    }
-                                  },
-                                ),
-                                ChoiceChip(
-                                  label: Text('英→英'),
-                                  selected: currentTo == 'en',
-                                  onSelected: (selected) {
-                                    if (selected) {
-                                      _saveDictionaryTargetLanguage('en');
-                                      fetchDictionary('free', 'en', 'en');
-                                    }
-                                  },
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 12),
-                          ],
-                          if (formInfo?.isNotEmpty == true) ...[
-                            Text(
-                              formInfo!,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.orange[700],
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                            SizedBox(height: 16),
-                          ],
-                          if (translation?.isNotEmpty == true) ...[
-                            Text(
-                              '翻译',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            SizedBox(height: 8),
-                            Text(translation!),
-                            SizedBox(height: 16),
-                          ],
-                          if (explainsText.isNotEmpty) ...[
-                            Text(
-                              '基本释义',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            SizedBox(height: 8),
-                            Text(explainsText),
-                            SizedBox(height: 16),
-                          ],
-                          if (webTranslationsText.isNotEmpty) ...[
-                            Text(
-                              '网络释义',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            SizedBox(height: 8),
-                            Text(webTranslationsText),
-                            SizedBox(height: 16),
-                          ],
-                        ],
-                        ],
-                      ],
-                    ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                ],
-              ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
@@ -3080,178 +3114,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
         },
       ),
     );
-  }
-
-  /// 显示字典对话框
-  void _showDictionaryDialog({
-    required String word,
-    required String definition,
-    required bool isExisting,
-  }) {
-    final definitionController = TextEditingController(text: definition);
-    final isEditing = !isExisting || definition.isNotEmpty;
-
-    showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.menu_book, size: 28),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  word,
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (isExisting) ...[
-                  Container(
-                    padding: EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withAlpha(25),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue.withAlpha(100)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info_outline, color: Colors.blue, size: 20),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '该词已在您的词库中',
-                            style: TextStyle(color: Colors.blue, fontSize: 14),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                ],
-                TextField(
-                  controller: definitionController,
-                  maxLines: 6,
-                  minLines: 3,
-                  decoration: InputDecoration(
-                    labelText: '词义解释',
-                    hintText: '输入单词的含义、例句或注释...',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                  autofocus: isEditing,
-                ),
-                if (isEditing && isExisting) ...[
-                  SizedBox(height: 8),
-                  Text(
-                    '提示：修改后会更新词库中的定义',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text('取消'),
-            ),
-            if (isExisting)
-              TextButton(
-                onPressed: () async {
-                  final confirmed = await _showDeleteConfirmDialog();
-                  if (confirmed && mounted) {
-                    await _dictionaryService.deleteEntry(word);
-                    Navigator.of(dialogContext).pop();
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text('已从词库中删除')));
-                  }
-                },
-                child: Text('删除', style: TextStyle(color: Colors.red)),
-              ),
-            ElevatedButton(
-              onPressed: () async {
-                final newDefinition = definitionController.text.trim();
-                if (newDefinition.isEmpty) {
-                  ScaffoldMessenger.of(
-                    dialogContext,
-                  ).showSnackBar(SnackBar(content: Text('请输入词义解释')));
-                  return;
-                }
-
-                // 获取当前章节信息
-                final chapterTitle = _chapters.isNotEmpty
-                    ? _chapters[_currentChapterIndex].title ?? ''
-                    : '';
-
-                final entry = DictionaryEntry(
-                  word: word,
-                  definition: newDefinition,
-                  createdAt: isExisting
-                      ? (await _dictionaryService.getEntry(word))?.createdAt ??
-                            DateTime.now()
-                      : DateTime.now(),
-                  bookTitle: _bookTitle.isNotEmpty ? _bookTitle : null,
-                  chapterTitle: chapterTitle.isNotEmpty ? chapterTitle : null,
-                  chapterIndex: _currentChapterIndex,
-                  pageIndex: _currentPageIndex,
-                );
-
-                await _dictionaryService.saveEntry(entry);
-
-                if (mounted) {
-                  Navigator.of(dialogContext).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(isExisting ? '已更新词义' : '已添加到词库'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                }
-              },
-              child: Text(isEditing ? '保存' : '添加'),
-            ),
-          ],
-        );
-      },
-    ).then((_) {
-      definitionController.dispose();
-    });
-  }
-
-  /// 显示删除确认对话框
-  Future<bool> _showDeleteConfirmDialog() async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.warning, color: Colors.orange, size: 24),
-            SizedBox(width: 8),
-            Text('确认删除'),
-          ],
-        ),
-        content: Text('确定要从词库中删除这个词吗？删除后将无法恢复。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('删除', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-    return result ?? false;
   }
 
   /// 生成书籍缓存键（基于文件内容MD5）
@@ -4214,31 +4076,28 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   chapterIndex: page.chapterIndex,
                   pageIndex: _currentPageIndex,
                   spans: highlightedSpans,
-                  onTextSelected: (
-                    selectedText,
-                    position,
-                    startOffset,
-                    endOffset,
-                  ) {
-                    _selectionStartOffset = startOffset;
-                    _selectionEndOffset = endOffset;
-                    _selectionChapterIndex = page.chapterIndex;
-                    _selectionPageIndex = _currentPageIndex;
+                  onTextSelected:
+                      (selectedText, position, startOffset, endOffset) {
+                        _selectionStartOffset = startOffset;
+                        _selectionEndOffset = endOffset;
+                        _selectionChapterIndex = page.chapterIndex;
+                        _selectionPageIndex = _currentPageIndex;
 
-                    // 检查是否选中了已有高亮/划线
-                    var existingHighlights = HighlightOperations.getHighlightsAtSelection(
-                      _highlights,
-                      page.chapterIndex,
-                      startOffset,
-                      endOffset,
-                    );
+                        // 检查是否选中了已有高亮/划线
+                        var existingHighlights =
+                            HighlightOperations.getHighlightsAtSelection(
+                              _highlights,
+                              page.chapterIndex,
+                              startOffset,
+                              endOffset,
+                            );
 
-                    _showTextToolbarAt(
-                      position,
-                      selectedText,
-                      existingHighlights: existingHighlights,
-                    );
-                  },
+                        _showTextToolbarAt(
+                          position,
+                          selectedText,
+                          existingHighlights: existingHighlights,
+                        );
+                      },
                   onSelectionCleared: () {
                     if (_showTextToolbar) {
                       _hideTextToolbar();
@@ -5195,4 +5054,3 @@ class _BookReaderPageState extends State<BookReaderPage> {
     );
   }
 }
-
