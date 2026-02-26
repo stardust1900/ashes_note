@@ -8,8 +8,6 @@ import 'package:flutter/material.dart' as material show Image;
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../utils/prefs_util.dart';
 import '../services/book_reader/dictionary_service.dart';
 import '../services/book_reader/youdao_dictionary_service.dart';
 import '../services/book_reader/free_dictionary_service.dart'
@@ -17,6 +15,15 @@ import '../services/book_reader/free_dictionary_service.dart'
 import '../services/book_reader/free_dictionary_service.dart';
 import '../services/book_reader/hz_dictionary_service.dart';
 import '../models/book_reader/dictionary_entry.dart';
+import '../models/book_reader/page_content.dart';
+import '../models/book_reader/bookmark.dart';
+import '../models/book_reader/highlight.dart';
+import '../models/book_reader/content_item.dart' show ContentItem, TextContent, ImageContent, CoverContent;
+import 'book_reader/highlight_operations.dart';
+import 'book_reader/search_manager.dart';
+import 'book_reader/note_export.dart';
+import 'book_reader/storage_manager.dart';
+import 'book_reader/selectable_text_with_toolbar.dart';
 
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
@@ -61,8 +68,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   bool _showControls = true;
 
   // 阅读位置保存相关
-  static const String _readingPositionPrefix = 'reading_position_';
-  static const String _lastReadBookKey = 'last_read_book';
   Timer? _savePositionTimer;
   static const Duration _savePositionDebounceDuration = Duration(seconds: 2);
 
@@ -76,16 +81,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
   String? _bookCacheKey;
 
   // 字体大小保存相关
-  static const String _fontSizeKey = 'reader_font_size';
   bool _showFontSizeSlider = false;
   double _tempFontSize = 16;
 
-  // 书签保存相关
-  static const String _bookmarksPrefix = 'bookmarks_';
-
   // 词典翻译目标语言保存相关
-  static const String _dictionaryTargetLanguageKey =
-      'dictionary_target_language';
   String _currentTargetLanguage = 'zh-CHS'; // 默认翻译成中文（有道词典格式）
 
   // 语言代码映射（有道词典 -> Free Dictionary API）
@@ -115,8 +114,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   // 高亮笔记相关
   final List<Highlight> _highlights = [];
-  static const String _highlightsPrefix = 'book_highlights_';
-  static const String _defaultHighlightColorKey = 'default_highlight_color';
   Color _defaultHighlightColor = Colors.yellow; // 默认高亮颜色
 
   // 默认高亮长度
@@ -183,18 +180,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     super.dispose();
   }
 
-  /// 检查选择区域是否与已有高亮/划线重叠，返回所有匹配的标记
-  List<Highlight> _getHighlightsAtSelection(
-    int chapterIndex,
-    int startOffset,
-    int endOffset,
-  ) {
-    return _highlights.where((h) {
-      return h.chapterIndex == chapterIndex &&
-          h.startOffset < endOffset &&
-          h.endOffset > startOffset;
-    }).toList();
-  }
+
 
   /// 计算页面起始偏移量
   int _calculatePageStartOffset(PageContent page) {
@@ -223,156 +209,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
     int textStartOffset,
     int chapterIndex,
   ) {
-    // 获取当前文本段的所有高亮和划线
-    final textHighlights = _highlights.where((h) {
-      return h.chapterIndex == chapterIndex &&
-          h.endOffset > textStartOffset &&
-          h.startOffset < textStartOffset + text.length;
-    }).toList();
-
-    // 获取搜索结果（如果启用搜索高亮）
-    // 注意：搜索结果的 positionOffset 是相对于章节纯文本的绝对位置
-    // textStartOffset 也是相对于章节纯文本的绝对位置（从页面开始累加）
-    final searchHighlights =
-        _highlightSearchResults && _searchResults.isNotEmpty
-        ? _searchResults.where((r) {
-            if (r.chapterIndex != chapterIndex) return false;
-            // 检查搜索结果的任意部分是否与当前文本段重叠
-            final searchEnd = r.positionOffset + r.matchedText.length;
-            return r.positionOffset < textStartOffset + text.length &&
-                searchEnd > textStartOffset;
-          }).toList()
-        : [];
-
-    if (textHighlights.isEmpty && searchHighlights.isEmpty) {
-      return [TextSpan(text: text)];
-    }
-
-    // 分离高亮和划线
-    final highlights = textHighlights.where((h) => !h.isUnderline).toList();
-    final underlines = textHighlights.where((h) => h.isUnderline).toList();
-
-    // 收集所有分割点
-    final Set<int> splitPoints = {0, text.length};
-    for (final h in textHighlights) {
-      final start = (h.startOffset - textStartOffset).clamp(0, text.length);
-      final end = (h.endOffset - textStartOffset).clamp(0, text.length);
-      splitPoints.add(start);
-      splitPoints.add(end);
-    }
-
-    // 添加搜索结果的分割点
-    for (final s in searchHighlights) {
-      // 计算搜索结果在当前文本段中的相对位置
-      final relativePos = s.positionOffset - textStartOffset;
-      // 使用搜索词的长度而不是 matchedText.length，确保高亮长度正确
-      final searchLength = s.matchedText.length;
-      final searchEndOffset = s.positionOffset + searchLength;
-      final relativeEnd = searchEndOffset - textStartOffset;
-
-      // 计算与当前文本段的交集
-      final intersectionStart = relativePos.clamp(0, text.length);
-      final intersectionEnd = relativeEnd.clamp(0, text.length);
-
-      // 如果有交集，添加分割点
-      if (intersectionStart < intersectionEnd) {
-        splitPoints.add(intersectionStart);
-        splitPoints.add(intersectionEnd);
-      }
-    }
-
-    final sortedPoints = splitPoints.toList()..sort();
-
-    // 构建每个段的样式
-    final spans = <TextSpan>[];
-    for (int i = 0; i < sortedPoints.length - 1; i++) {
-      final segStart = sortedPoints[i];
-      final segEnd = sortedPoints[i + 1];
-      if (segStart >= segEnd) continue;
-
-      final segText = text.substring(segStart, segEnd);
-
-      // 检查该段是否有高亮
-      final hasHighlight = highlights.any((h) {
-        final hStart = h.startOffset - textStartOffset;
-        final hEnd = h.endOffset - textStartOffset;
-        return segStart < hEnd && segEnd > hStart;
-      });
-
-      // 检查该段是否有划线
-      final hasUnderline = underlines.any((h) {
-        final hStart = h.startOffset - textStartOffset;
-        final hEnd = h.endOffset - textStartOffset;
-        return segStart < hEnd && segEnd > hStart;
-      });
-
-      // 检查该段是否有搜索结果高亮
-      final hasSearchHighlight = searchHighlights.any((s) {
-        final relativePos = s.positionOffset - textStartOffset;
-        final searchEndOffset = s.positionOffset + s.matchedText.length;
-        final relativeEnd = searchEndOffset - textStartOffset;
-
-        // 计算搜索结果与当前文本段的交集
-        final intersectionStart = relativePos.clamp(0, text.length);
-        final intersectionEnd = relativeEnd.clamp(0, text.length);
-
-        // 检查当前段是否与搜索结果有交集
-        return segStart < intersectionEnd && segEnd > intersectionStart;
-      });
-
-      // 获取高亮颜色（取第一个匹配的高亮）
-      Color? highlightColor;
-      if (hasHighlight) {
-        final matchingHighlight = highlights.firstWhere((h) {
-          final hStart = h.startOffset - textStartOffset;
-          final hEnd = h.endOffset - textStartOffset;
-          return segStart < hEnd && segEnd > hStart;
-        });
-        highlightColor = matchingHighlight.color;
-      }
-
-      // 构建样式
-      TextStyle? style;
-      if (hasSearchHighlight) {
-        // 搜索结果高亮（优先级最高）：橙色背景
-        style = TextStyle(
-          backgroundColor: Colors.orange.withValues(alpha: 0.5),
-          fontWeight: FontWeight.bold,
-        );
-        if (hasUnderline) {
-          // 搜索结果高亮 + 划线：叠加样式
-          style = style!.copyWith(
-            decoration: TextDecoration.underline,
-            decorationColor: Colors.red,
-            decorationThickness: 2.5,
-          );
-        }
-      } else if (hasHighlight && hasUnderline) {
-        // 既高亮又划线：红色划线 + 高亮背景
-        style = TextStyle(
-          backgroundColor: highlightColor!.withValues(alpha: 0.4),
-          decoration: TextDecoration.underline,
-          decorationColor: Colors.red,
-          decorationThickness: 2.5,
-        );
-      } else if (hasHighlight) {
-        // 只有高亮
-        style = TextStyle(
-          backgroundColor: highlightColor!.withValues(alpha: 0.4),
-        );
-      } else if (hasUnderline) {
-        // 只有划线：黑色
-        style = TextStyle(
-          decoration: TextDecoration.underline,
-          decorationColor: Colors.black,
-          decorationThickness: 2.5,
-        );
-      }
-
-      spans.add(TextSpan(text: segText, style: style));
-    }
-
-    return spans;
+    return HighlightOperations.buildHighlightSpans(
+      text,
+      textStartOffset,
+      chapterIndex,
+      _highlights,
+      _highlightSearchResults ? _searchResults : null,
+      _highlightSearchResults,
+    );
   }
 
   /// 显示文本选择工具栏
@@ -403,54 +247,34 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 加载默认高亮颜色
   Future<void> _loadDefaultHighlightColor() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final colorValue = prefs.getInt(_defaultHighlightColorKey);
-      if (colorValue != null) {
-        setState(() {
-          _defaultHighlightColor = Color(colorValue);
-        });
-      }
-    } catch (e) {
-      print('加载默认高亮颜色失败: $e');
+    final color = await StorageManager.loadDefaultHighlightColor();
+    if (color != null) {
+      setState(() {
+        _defaultHighlightColor = color;
+      });
     }
   }
 
   /// 保存默认高亮颜色
   Future<void> _saveDefaultHighlightColor(Color color) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_defaultHighlightColorKey, color.value);
-      setState(() {
-        _defaultHighlightColor = color;
-      });
-    } catch (e) {
-      print('保存默认高亮颜色失败: $e');
-    }
+    await StorageManager.saveDefaultHighlightColor(color);
+    setState(() {
+      _defaultHighlightColor = color;
+    });
   }
 
   /// 加载词典翻译目标语言
   Future<void> _loadDictionaryTargetLanguage() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final targetLang = prefs.getString(_dictionaryTargetLanguageKey);
-      if (targetLang != null) {
-        _currentTargetLanguage = targetLang;
-      }
-    } catch (e) {
-      print('加载词典翻译目标语言失败: $e');
+    final targetLang = await StorageManager.loadDictionaryTargetLanguage();
+    if (targetLang != null) {
+      _currentTargetLanguage = targetLang;
     }
   }
 
   /// 保存词典翻译目标语言
   Future<void> _saveDictionaryTargetLanguage(String language) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_dictionaryTargetLanguageKey, language);
-      _currentTargetLanguage = language;
-    } catch (e) {
-      print('保存词典翻译目标语言失败: $e');
-    }
+    await StorageManager.saveDictionaryTargetLanguage(language);
+    _currentTargetLanguage = language;
   }
 
   /// 判断文本是否主要为英文
@@ -981,37 +805,16 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 保存高亮到本地存储
   Future<void> _saveHighlights() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final bookKey = '${_highlightsPrefix}${widget.bookPath.hashCode}';
-      final highlightsJson = _highlights.map((h) => h.toJson()).toList();
-      await prefs.setString(bookKey, jsonEncode(highlightsJson));
-    } catch (e) {
-      print('保存高亮失败: $e');
-    }
+    await StorageManager.saveHighlights(widget.bookPath, _highlights);
   }
 
   /// 从本地存储加载高亮
   Future<void> _loadHighlights() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final bookKey = '${_highlightsPrefix}${widget.bookPath.hashCode}';
-      final highlightsString = prefs.getString(bookKey);
-
-      if (highlightsString != null) {
-        final highlightsList = jsonDecode(highlightsString) as List<dynamic>;
-        setState(() {
-          _highlights.clear();
-          _highlights.addAll(
-            highlightsList.map(
-              (json) => Highlight.fromJson(json as Map<String, dynamic>),
-            ),
-          );
-        });
-      }
-    } catch (e) {
-      print('加载高亮失败: $e');
-    }
+    final highlights = await StorageManager.loadHighlights(widget.bookPath);
+    setState(() {
+      _highlights.clear();
+      _highlights.addAll(highlights);
+    });
   }
 
   /// 删除高亮
@@ -1494,172 +1297,23 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   /// 按章节分组高亮，并合并重叠的高亮和划线
-  List<_ChapterGroup> _groupHighlightsByChapter(List<Highlight> highlights) {
-    // 先按章节索引排序
-    final sorted = List<Highlight>.from(highlights)
-      ..sort((a, b) {
-        if (a.chapterIndex != b.chapterIndex) {
-          return a.chapterIndex.compareTo(b.chapterIndex);
-        }
-        return a.startOffset.compareTo(b.startOffset);
-      });
-
-    final groups = <_ChapterGroup>[];
-
-    // 按章节分组
-    final chapterMap = <int, List<Highlight>>{};
-    for (final h in sorted) {
-      chapterMap.putIfAbsent(h.chapterIndex, () => []).add(h);
-    }
-
-    // 对每个章节内的标记进行合并
-    for (final entry in chapterMap.entries) {
-      final chapterHighlights = entry.value;
-      final mergedList = _mergeOverlappingHighlights(chapterHighlights);
-
-      groups.add(
-        _ChapterGroup(
-          chapterIndex: entry.key,
-          chapterTitle: _getChapterTitle(entry.key),
-          mergedHighlights: mergedList,
-        ),
-      );
-    }
-
-    // 按章节索引排序
-    groups.sort((a, b) => a.chapterIndex.compareTo(b.chapterIndex));
-    return groups;
+  List<ChapterGroup> _groupHighlightsByChapter(List<Highlight> highlights) {
+    return HighlightOperations.groupHighlightsByChapter(
+      highlights,
+      _getChapterTitle,
+      _getTextForRange,
+    );
   }
 
-  /// 合并重叠的高亮和划线
-  /// 将位置重叠的标记合并成一条，取最大范围
-  List<_MergedHighlight> _mergeOverlappingHighlights(
-    List<Highlight> highlights,
-  ) {
-    if (highlights.isEmpty) return [];
-
-    // 按起始位置排序
-    final sorted = List<Highlight>.from(highlights)
-      ..sort((a, b) => a.startOffset.compareTo(b.startOffset));
-
-    final merged = <_MergedHighlight>[];
-
-    for (final h in sorted) {
-      // 查找是否有重叠的已合并标记
-      _MergedHighlight? overlapping;
-      for (final m in merged) {
-        // 检查是否有重叠：一个的结束 > 另一个的开始，且一个的开始 < 另一个的结束
-        if (h.startOffset < m.endOffset && h.endOffset > m.startOffset) {
-          overlapping = m;
-          break;
-        }
-      }
-
-      if (overlapping != null) {
-        // 合并到已有标记中，扩展范围
-        final newStart = overlapping.startOffset < h.startOffset
-            ? overlapping.startOffset
-            : h.startOffset;
-        final newEnd = overlapping.endOffset > h.endOffset
-            ? overlapping.endOffset
-            : h.endOffset;
-
-        // 合并文本：优先使用已有的文本，避免依赖页面内容
-        // 先尝试从页面中获取完整范围的文本
-        String newText = _getTextForRange(h.chapterIndex, newStart, newEnd);
-
-        // 如果无法从页面获取文本，使用已有文本拼接
-        if (newText.isEmpty) {
-          // 找出所有有文本的原始高亮/划线
-          final allWithText = [
-            ...overlapping.originalHighlights,
-            ...overlapping.originalUnderlines,
-          ];
-          if (h.isUnderline) {
-            allWithText.add(h);
-          } else {
-            allWithText.add(h);
-          }
-
-          // 收集所有文本内容（按偏移量排序）
-          final sortedByText =
-              allWithText.where((hl) => hl.text.isNotEmpty).toList()
-                ..sort((a, b) => a.startOffset.compareTo(b.startOffset));
-
-          // 拼接文本（简单拼接，避免重复）
-          newText = sortedByText.map((hl) => hl.text).join('');
-        }
-
-        // 创建新的合并标记
-        final newHighlights = List<Highlight>.from(
-          overlapping.originalHighlights,
-        );
-        final newUnderlines = List<Highlight>.from(
-          overlapping.originalUnderlines,
-        );
-
-        if (h.isUnderline) {
-          if (!newUnderlines.any((u) => u.id == h.id)) {
-            newUnderlines.add(h);
-          }
-        } else {
-          if (!newHighlights.any((hl) => hl.id == h.id)) {
-            newHighlights.add(h);
-          }
-        }
-
-        // 优先取高亮的笔记，如果没有则取划线的笔记
-        final newNote = newHighlights
-            .firstWhere(
-              (hl) => hl.note != null && hl.note!.isNotEmpty,
-              orElse: () => newUnderlines.firstWhere(
-                (u) => u.note != null && u.note!.isNotEmpty,
-                orElse: () => newHighlights.isNotEmpty
-                    ? newHighlights.first
-                    : newUnderlines.first,
-              ),
-            )
-            .note;
-
-        // 移除旧的，添加新的
-        merged.remove(overlapping);
-        merged.add(
-          _MergedHighlight(
-            chapterIndex: h.chapterIndex,
-            pageIndex: h.pageIndex,
-            text: newText,
-            startOffset: newStart,
-            endOffset: newEnd,
-            originalHighlights: newHighlights,
-            originalUnderlines: newUnderlines,
-            createdAt: overlapping.createdAt.isBefore(h.createdAt)
-                ? overlapping.createdAt
-                : h.createdAt,
-            note: newNote,
-          ),
-        );
-      } else {
-        // 创建新的合并标记
-        final highlights = h.isUnderline ? <Highlight>[] : [h];
-        final underlines = h.isUnderline ? [h] : <Highlight>[];
-
-        merged.add(
-          _MergedHighlight(
-            chapterIndex: h.chapterIndex,
-            pageIndex: h.pageIndex,
-            text: h.text,
-            startOffset: h.startOffset,
-            endOffset: h.endOffset,
-            originalHighlights: highlights,
-            originalUnderlines: underlines,
-            createdAt: h.createdAt,
-            note: h.note,
-          ),
-        );
-      }
-    }
-
-    return merged;
+  /// 导出笔记到 Markdown 文件
+  Future<void> exportNotesToMarkdown() async {
+    await NoteExport.exportNotesToMarkdown(
+      _bookTitle,
+      _highlights,
+      _getChapterTitle,
+      _getTextForRange,
+      context,
+    );
   }
 
   /// 根据章节和位置范围获取文本
@@ -1709,7 +1363,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 构建分组的高亮项
   Widget _buildGroupedHighlightItem(
-    _ChapterGroup group,
+    ChapterGroup group,
     StateSetter setDialogState,
   ) {
     return Column(
@@ -1770,7 +1424,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 构建合并后的高亮列表项
   Widget _buildMergedHighlightListItem(
-    _MergedHighlight merged, [
+    MergedHighlight merged, [
     StateSetter? setDialogState,
   ]) {
     final hasNote = merged.note != null && merged.note!.isNotEmpty;
@@ -2040,7 +1694,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   /// 构建合并高亮项的文本显示 - 分段渲染，只对实际有划线的部分加下划线
-  Widget _buildMergedHighlightTextSpans(_MergedHighlight merged) {
+  Widget _buildMergedHighlightTextSpans(MergedHighlight merged) {
     final hasUnderline = merged.hasUnderline;
     final hasHighlight = merged.hasHighlight;
     String text = merged.text;
@@ -2440,143 +2094,29 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 执行搜索
   void _performSearch(String searchText) {
-    // 先清空之前的搜索结果（因为要执行新搜索）
+    // 先清空之前的搜索结果
     setState(() {
       _searchResults.clear();
       _displaySearchResults.clear();
       _currentSearchIndex = 0;
     });
 
-    // 用于存储同一页的所有匹配位置
-    final Map<String, List<SearchResult>> pageResultsMap = {};
+    // 执行搜索
+    final results = SearchManager.performSearch(searchText, _chapters, _pages);
 
-    // 遍历所有章节进行搜索
-    for (
-      int chapterIndex = 0;
-      chapterIndex < _chapters.length;
-      chapterIndex++
-    ) {
-      final chapter = _chapters[chapterIndex];
-      if (chapter.htmlContent == null) continue;
-
-      // 获取该章节的所有页面，并构建完整的章节文本
-      final chapterPages = _pages
-          .where((p) => p.chapterIndex == chapterIndex)
-          .toList();
-      if (chapterPages.isEmpty) continue;
-
-      // 构建章节纯文本用于显示上下文（累积所有 TextContent）
-      final chapterText = chapterPages
-          .expand((page) => page.contentItems.whereType<TextContent>())
-          .map((tc) => tc.text)
-          .join();
-
-      // 遍历章节的所有页面和 TextContent 进行搜索
-      int cumulativeOffset = 0; // 章节内的累积偏移量
-
-      for (final page in chapterPages) {
-        int pageOffset = cumulativeOffset; // 该页在章节中的起始偏移量
-
-        for (final item in page.contentItems) {
-          if (item is TextContent) {
-            final textContent = item.text;
-            if (textContent.isEmpty) {
-              continue;
-            }
-
-            // 计算该 TextContent 在章节中的起始偏移量
-            final textOffset = cumulativeOffset;
-
-            // 在当前 TextContent 中搜索
-            int index = 0;
-            while (true) {
-              final pos = textContent.indexOf(searchText, index);
-              if (pos == -1) break;
-
-              // 计算该匹配在章节中的绝对位置
-              final absolutePos = textOffset + pos;
-
-              // 直接使用 TextContent 中的匹配文本
-              final actualMatchedText = textContent.substring(
-                pos.clamp(0, textContent.length),
-                (pos + searchText.length).clamp(0, textContent.length),
-              );
-
-              // 获取匹配文本的上下文（前后各30个字符）
-              final contextStart = (absolutePos - 30).clamp(
-                0,
-                chapterText.length,
-              );
-              final contextEnd = (absolutePos + actualMatchedText.length + 30)
-                  .clamp(0, chapterText.length);
-              final contextText = chapterText.substring(
-                contextStart,
-                contextEnd,
-              );
-
-              final pageIndex = _pages.indexOf(page);
-
-              final result = SearchResult(
-                chapterIndex: chapterIndex,
-                chapterTitle: chapter.title ?? '第 ${chapterIndex + 1} 章',
-                pageIndex: pageIndex,
-                positionOffset: absolutePos,
-                contextText: contextText,
-                matchedText: actualMatchedText,
-              );
-
-              // 使用章节和页面索引作为键来分组同一页的结果
-              final pageKey = '${chapterIndex}_${pageIndex}';
-
-              setState(() {
-                _searchResults.add(result);
-              });
-
-              // 添加到分组
-              if (!pageResultsMap.containsKey(pageKey)) {
-                pageResultsMap[pageKey] = [];
-              }
-              pageResultsMap[pageKey]!.add(result);
-
-              index = pos + searchText.length;
-            }
-
-            cumulativeOffset += textContent.length;
-          }
-        }
-      }
-    }
-
-    // 合并同一页的搜索结果到 _displaySearchResults
-    if (pageResultsMap.isNotEmpty) {
-      setState(() {
-        // 对每页的结果，只保留第一个用于显示
-        final mergedResults = <SearchResult>[];
-        pageResultsMap.forEach((pageKey, results) {
-          if (results.isNotEmpty) {
-            // 只保留第一个结果用于列表显示
-            mergedResults.add(results.first);
-          }
-        });
-        // 按 positionOffset 排序
-        mergedResults.sort((a, b) {
-          if (a.chapterIndex != b.chapterIndex) {
-            return a.chapterIndex.compareTo(b.chapterIndex);
-          }
-          return a.positionOffset.compareTo(b.positionOffset);
-        });
-        _displaySearchResults = mergedResults;
-      });
-    }
-
-    if (_searchResults.isEmpty) {
+    if (results.isEmpty) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('未找到匹配的内容')));
     } else {
+      // 合并同一页的搜索结果
+      final mergedResults = SearchManager.mergeResultsByPage(results);
+
       setState(() {
+        _searchResults = results;
+        _displaySearchResults = mergedResults;
         _showSearchDrawer = true;
-        _highlightSearchResults = true; // 显示搜索结果时自动启用高亮
+        _highlightSearchResults = true;
         _currentSearchIndex = 0;
       });
     }
@@ -3552,12 +3092,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     return result ?? false;
   }
 
-  /// 生成书籍的唯一标识键
-  String _getBookKey() {
-    // 使用书籍路径的 hashCode 作为唯一标识
-    return '${_readingPositionPrefix}${widget.bookPath.hashCode}';
-  }
-
   /// 生成书籍缓存键（基于文件内容MD5）
   Future<String> _generateBookCacheKey() async {
     try {
@@ -3670,74 +3204,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
   Future<void> _saveReadingPosition() async {
     if (_epubBook == null) return;
 
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final bookKey = _getBookKey();
-
-      // 保存阅读位置信息
-      final positionData = {
-        'bookPath': widget.bookPath,
-        'bookTitle': _bookTitle,
-        'chapterIndex': _currentChapterIndex,
-        'pageIndex': _currentPageIndex,
-        'scrollOffset': _scrollController.hasClients
-            ? _scrollController.offset
-            : 0.0,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
-
-      await prefs.setString(bookKey, positionData.toString());
-      await prefs.setString(_lastReadBookKey, widget.bookPath);
-
-      print('阅读位置已保存: 第 $_currentPageIndex 页, 章节 $_currentChapterIndex');
-    } catch (e) {
-      print('保存阅读位置失败: $e');
-    }
+    await StorageManager.saveReadingPosition(
+      bookPath: widget.bookPath,
+      bookTitle: _bookTitle,
+      chapterIndex: _currentChapterIndex,
+      pageIndex: _currentPageIndex,
+      scrollOffset: _scrollController.hasClients
+          ? _scrollController.offset
+          : 0.0,
+    );
+    print('阅读位置已保存: 第 $_currentPageIndex 页, 章节 $_currentChapterIndex');
   }
 
   /// 从本地加载阅读位置
   Future<Map<String, dynamic>?> _loadReadingPosition() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final bookKey = _getBookKey();
-      final positionStr = prefs.getString(bookKey);
-
-      if (positionStr == null) return null;
-
-      // 解析保存的位置数据
-      final positionData = _parsePositionData(positionStr);
-      return positionData;
-    } catch (e) {
-      print('加载阅读位置失败: $e');
-      return null;
-    }
-  }
-
-  /// 解析位置数据字符串
-  Map<String, dynamic> _parsePositionData(String data) {
-    final result = <String, dynamic>{};
-    // 移除大括号并按逗号分割
-    final content = data.substring(1, data.length - 1);
-    final pairs = content.split(', ');
-
-    for (final pair in pairs) {
-      final parts = pair.split(': ');
-      if (parts.length == 2) {
-        final key = parts[0].trim();
-        final value = parts[1].trim();
-
-        if (key == 'bookPath' || key == 'bookTitle') {
-          result[key] = value;
-        } else if (key == 'timestamp') {
-          result[key] = int.tryParse(value) ?? 0;
-        } else if (key == 'scrollOffset') {
-          result[key] = double.tryParse(value) ?? 0.0;
-        } else {
-          result[key] = int.tryParse(value) ?? 0;
-        }
-      }
-    }
-    return result;
+    return await StorageManager.loadReadingPosition(widget.bookPath);
   }
 
   /// 延迟保存阅读位置（防抖）
@@ -3750,92 +3231,30 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 加载保存的字体大小
   Future<void> _loadFontSize() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedFontSize = prefs.getDouble(_fontSizeKey);
-      if (savedFontSize != null && savedFontSize >= 12 && savedFontSize <= 32) {
-        setState(() {
-          _fontSize = savedFontSize;
-        });
-        print('加载字体大小: $_fontSize');
-      }
-    } catch (e) {
-      print('加载字体大小失败: $e');
+    final savedFontSize = await StorageManager.loadFontSize();
+    if (savedFontSize != null && savedFontSize >= 12 && savedFontSize <= 32) {
+      setState(() {
+        _fontSize = savedFontSize;
+      });
+      print('加载字体大小: $_fontSize');
     }
   }
 
   /// 保存字体大小
   Future<void> _saveFontSize() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble(_fontSizeKey, _fontSize);
-      print('保存字体大小: $_fontSize');
-    } catch (e) {
-      print('保存字体大小失败: $e');
-    }
-  }
-
-  /// 生成书签存储键
-  String _getBookmarksKey() {
-    return '$_bookmarksPrefix${widget.bookPath.hashCode}';
+    await StorageManager.saveFontSize(_fontSize);
+    print('保存字体大小: $_fontSize');
   }
 
   /// 保存书签到本地
   Future<void> _saveBookmarks() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final key = _getBookmarksKey();
-      final bookmarksJson = _bookmarks
-          .map(
-            (b) => jsonEncode({
-              'chapterIndex': b.chapterIndex,
-              'pageIndex': b.pageIndex,
-              'title': b.title,
-              'timestamp': b.timestamp.millisecondsSinceEpoch,
-              'note': b.note,
-              'colorIndex': b.colorIndex,
-            }),
-          )
-          .toList();
-      await prefs.setStringList(key, bookmarksJson);
-      print('保存了 ${_bookmarks.length} 个书签');
-    } catch (e) {
-      print('保存书签失败: $e');
-    }
+    await StorageManager.saveBookmarks(widget.bookPath, _bookmarks);
   }
 
   /// 从本地加载书签
   Future<void> _loadBookmarks() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final key = _getBookmarksKey();
-      final bookmarksJson = prefs.getStringList(key);
-      if (bookmarksJson != null && bookmarksJson.isNotEmpty) {
-        _bookmarks.clear();
-        for (var json in bookmarksJson) {
-          try {
-            final data = jsonDecode(json) as Map<String, dynamic>;
-            _bookmarks.add(
-              Bookmark(
-                chapterIndex: data['chapterIndex'] as int,
-                pageIndex: data['pageIndex'] as int,
-                title: data['title'] as String,
-                timestamp: DateTime.fromMillisecondsSinceEpoch(
-                  data['timestamp'] as int,
-                ),
-                note: data['note'] as String?,
-                colorIndex: data['colorIndex'] as int? ?? 0,
-              ),
-            );
-          } catch (e) {
-            print('解析书签失败: $e');
-          }
-        }
-        print('加载了 ${_bookmarks.length} 个书签');
-      }
-    } catch (e) {
-      print('加载书签失败: $e');
-    }
+    _bookmarks.clear();
+    _bookmarks.addAll(await StorageManager.loadBookmarks(widget.bookPath));
   }
 
   /// 恢复阅读位置
@@ -4622,7 +4041,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: _SelectableTextWithToolbar(
+                child: SelectableTextWithToolbar(
                   text: item.text,
                   style: TextStyle(
                     fontSize: _fontSize,
@@ -4633,53 +4052,35 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   chapterIndex: page.chapterIndex,
                   pageIndex: _currentPageIndex,
                   spans: highlightedSpans,
-                  onTextSelected:
-                      (
-                        selectedText,
-                        position,
-                        startOffset,
-                        endOffset,
-                        isFromDoubleTap,
-                      ) {
-                        _selectionStartOffset = startOffset;
-                        _selectionEndOffset = endOffset;
-                        _selectionChapterIndex = page.chapterIndex;
-                        _selectionPageIndex = _currentPageIndex;
+                  onTextSelected: (
+                    selectedText,
+                    position,
+                    startOffset,
+                    endOffset,
+                  ) {
+                    _selectionStartOffset = startOffset;
+                    _selectionEndOffset = endOffset;
+                    _selectionChapterIndex = page.chapterIndex;
+                    _selectionPageIndex = _currentPageIndex;
 
-                        // 检查是否选中了已有高亮/划线
-                        var existingHighlights = _getHighlightsAtSelection(
-                          page.chapterIndex,
-                          startOffset,
-                          endOffset,
-                        );
+                    // 检查是否选中了已有高亮/划线
+                    var existingHighlights = HighlightOperations.getHighlightsAtSelection(
+                      _highlights,
+                      page.chapterIndex,
+                      startOffset,
+                      endOffset,
+                    );
 
-                        // 如果是双击选中的文本，使用选中内容的颜色（如果有高亮）
-                        if (isFromDoubleTap) {
-                          // 查找选中文本的高亮颜色
-                          final highlights = existingHighlights
-                              .where((h) => !h.isUnderline)
-                              .toList();
-
-                          if (highlights.isNotEmpty) {
-                            // 如果有高亮，更新默认颜色为选中的高亮颜色
-                            _saveDefaultHighlightColor(highlights.first.color);
-                          }
-                        }
-
-                        _showTextToolbarAt(
-                          position,
-                          selectedText,
-                          existingHighlights: existingHighlights,
-                        );
-                      },
+                    _showTextToolbarAt(
+                      position,
+                      selectedText,
+                      existingHighlights: existingHighlights,
+                    );
+                  },
                   onSelectionCleared: () {
                     if (_showTextToolbar) {
                       _hideTextToolbar();
                     }
-                  },
-                  onDoubleTap: (globalPosition) {
-                    // 双击回调，目前不需要额外的处理
-                    print('父组件收到双击事件: $globalPosition');
                   },
                 ),
               );
@@ -5538,7 +4939,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 8,
               offset: const Offset(2, 0),
             ),
@@ -5633,862 +5034,3 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 }
 
-abstract class ContentItem {
-  Map<String, dynamic> toJson();
-  static ContentItem fromJson(Map<String, dynamic> json) {
-    final type = json['type'] as String?;
-    switch (type) {
-      case 'text':
-        return TextContent.fromJson(json);
-      case 'image':
-        return ImageContent.fromJson(json);
-      case 'cover':
-        return CoverContent.fromJson(json);
-      default:
-        throw Exception('Unknown content type: $type');
-    }
-  }
-}
-
-class TextContent extends ContentItem {
-  final String text;
-  final int startOffset; // 文本在章节中的起始偏移量
-
-  TextContent({required this.text, this.startOffset = 0});
-
-  @override
-  Map<String, dynamic> toJson() {
-    return {'type': 'text', 'text': text, 'startOffset': startOffset};
-  }
-
-  factory TextContent.fromJson(Map<String, dynamic> json) {
-    return TextContent(
-      text: json['text'] as String,
-      startOffset: json['startOffset'] as int? ?? 0,
-    );
-  }
-}
-
-class ImageContent extends ContentItem {
-  final String source;
-
-  ImageContent({required this.source});
-
-  @override
-  Map<String, dynamic> toJson() {
-    return {'type': 'image', 'source': source};
-  }
-
-  factory ImageContent.fromJson(Map<String, dynamic> json) {
-    return ImageContent(source: json['source'] as String);
-  }
-}
-
-class CoverContent extends ContentItem {
-  final Uint8List imageData;
-
-  CoverContent({required this.imageData});
-
-  @override
-  Map<String, dynamic> toJson() {
-    return {'type': 'cover', 'imageData': base64Encode(imageData)};
-  }
-
-  factory CoverContent.fromJson(Map<String, dynamic> json) {
-    return CoverContent(imageData: base64Decode(json['imageData'] as String));
-  }
-}
-
-class PageContent {
-  final int chapterIndex;
-  final int pageIndexInChapter;
-  final List<ContentItem> contentItems;
-  final String? title;
-
-  PageContent({
-    required this.chapterIndex,
-    required this.pageIndexInChapter,
-    required this.contentItems,
-    this.title,
-  });
-
-  Map<String, dynamic> toJson() {
-    return {
-      'chapterIndex': chapterIndex,
-      'pageIndexInChapter': pageIndexInChapter,
-      'contentItems': contentItems.map((item) => item.toJson()).toList(),
-      'title': title,
-    };
-  }
-
-  factory PageContent.fromJson(Map<String, dynamic> json) {
-    return PageContent(
-      chapterIndex: json['chapterIndex'] as int,
-      pageIndexInChapter: json['pageIndexInChapter'] as int,
-      contentItems: (json['contentItems'] as List<dynamic>)
-          .map((item) => ContentItem.fromJson(item as Map<String, dynamic>))
-          .toList(),
-      title: json['title'] as String?,
-    );
-  }
-}
-
-class Bookmark {
-  final int chapterIndex;
-  final int pageIndex;
-  final String title;
-  final DateTime timestamp;
-  final String? note;
-  int colorIndex; // 0-4 对应5种颜色
-
-  Bookmark({
-    required this.chapterIndex,
-    required this.pageIndex,
-    required this.title,
-    required this.timestamp,
-    this.note,
-    this.colorIndex = 0,
-  });
-
-  // 获取书签颜色
-  Color get color =>
-      BookmarkColors.colors[colorIndex % BookmarkColors.colors.length];
-}
-
-// 书签颜色配置 - 5种显眼颜色
-class BookmarkColors {
-  static const List<Color> colors = [
-    Color(0xFFFF0000), // 红色
-    Color(0xFFFFA500), // 橙色
-    Color(0xFFFFFF00), // 黄色
-    Color(0xFF00FF00), // 绿色
-    Color(0xFF0000FF), // 蓝色
-  ];
-}
-
-/// 高亮笔记数据类
-class Highlight {
-  final String id; // 唯一标识
-  final int chapterIndex; // 章节索引
-  final int pageIndex; // 页面索引
-  final String text; // 高亮文本内容
-  final Color color; // 高亮颜色
-  final int startOffset; // 在章节文本中的起始位置
-  final int endOffset; // 在章节文本中的结束位置
-  final DateTime createdAt; // 创建时间
-  String? note; // 用户添加的笔记内容
-  final bool isUnderline; // 是否为划线（false=高亮，true=划线）
-
-  Highlight({
-    String? id,
-    required this.chapterIndex,
-    required this.pageIndex,
-    required this.text,
-    required this.color,
-    required this.startOffset,
-    required this.endOffset,
-    this.note,
-    DateTime? createdAt,
-    this.isUnderline = false,
-  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-       createdAt = createdAt ?? DateTime.now();
-
-  // 转换为JSON
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'chapterIndex': chapterIndex,
-      'pageIndex': pageIndex,
-      'text': text,
-      'color': color.toARGB32(),
-      'startOffset': startOffset,
-      'endOffset': endOffset,
-      'note': note,
-      'createdAt': createdAt.millisecondsSinceEpoch,
-      'isUnderline': isUnderline,
-    };
-  }
-
-  // 从JSON创建
-  factory Highlight.fromJson(Map<String, dynamic> json) {
-    return Highlight(
-      id: json['id'] as String,
-      chapterIndex: json['chapterIndex'] as int,
-      pageIndex: json['pageIndex'] as int,
-      text: json['text'] as String,
-      color: Color(json['color'] as int),
-      startOffset: json['startOffset'] as int,
-      endOffset: json['endOffset'] as int,
-      note: json['note'] as String?,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt'] as int),
-      isUnderline: json['isUnderline'] as bool? ?? false,
-    );
-  }
-}
-
-/// 章节分组辅助类
-class _ChapterGroup {
-  final int chapterIndex;
-  final String chapterTitle;
-  final List<_MergedHighlight> mergedHighlights;
-
-  _ChapterGroup({
-    required this.chapterIndex,
-    required this.chapterTitle,
-    required this.mergedHighlights,
-  });
-}
-
-/// 合并后的高亮/划线标记
-/// 将重叠的高亮和划线合并成一条显示
-class _MergedHighlight {
-  final int chapterIndex;
-  final int pageIndex;
-  final String text; // 合并后的文本（取最大范围）
-  final int startOffset; // 合并后的起始位置（最小）
-  final int endOffset; // 合并后的结束位置（最大）
-  final List<Highlight> originalHighlights; // 原始高亮列表
-  final List<Highlight> originalUnderlines; // 原始划线列表
-  final DateTime createdAt; // 最早的创建时间
-  String? note; // 合并后的笔记（优先取高亮的笔记）
-
-  _MergedHighlight({
-    required this.chapterIndex,
-    required this.pageIndex,
-    required this.text,
-    required this.startOffset,
-    required this.endOffset,
-    required this.originalHighlights,
-    required this.originalUnderlines,
-    required this.createdAt,
-    this.note,
-  });
-
-  /// 是否有高亮
-  bool get hasHighlight => originalHighlights.isNotEmpty;
-
-  /// 是否有划线
-  bool get hasUnderline => originalUnderlines.isNotEmpty;
-
-  /// 获取高亮颜色（取第一个高亮的颜色）
-  Color get highlightColor => originalHighlights.isNotEmpty
-      ? originalHighlights.first.color
-      : Colors.yellow;
-}
-
-/// 导出笔记为 Markdown 格式（在 _BookReaderPageState 类中调用）
-/// 这些方法需要在 _BookReaderPageState 类内部定义
-/// 以下是在类末尾添加的辅助方法
-
-extension _BookReaderPageExport on _BookReaderPageState {
-  /// 导出笔记为 Markdown 格式
-  Future<void> exportNotesToMarkdown() async {
-    // 获取默认文件名
-    final defaultFileName = '$_bookTitle读书笔记';
-
-    // 弹出文件名编辑对话框
-    final fileName = await showExportFileNameDialog(defaultFileName);
-    if (fileName == null || fileName.isEmpty) return;
-
-    try {
-      // 生成 Markdown 内容
-      final markdownContent = generateNotesMarkdown();
-
-      // 获取读书笔记目录路径（使用笔记功能的目录：workingDirectory/notes/读书笔记）
-      final workingDirectory = SPUtil.get<String>('workingDirectory', '');
-      if (workingDirectory.isEmpty) {
-        throw Exception('未设置工作目录，请先在设置中配置工作目录');
-      }
-      final notesDir = Directory('$workingDirectory/notes/读书笔记');
-
-      // 创建目录（如果不存在）
-      if (!await notesDir.exists()) {
-        await notesDir.create(recursive: true);
-      }
-
-      // 保存文件
-      final filePath = '${notesDir.path}${Platform.pathSeparator}$fileName';
-      final file = File(filePath);
-      await file.writeAsString(markdownContent, encoding: utf8);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('笔记已导出到: $filePath'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导出失败: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  /// 显示导出文件名编辑对话框
-  Future<String?> showExportFileNameDialog(String defaultName) async {
-    final controller = TextEditingController(text: defaultName);
-
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.download, color: Colors.green),
-            SizedBox(width: 12),
-            Text('导出笔记', style: TextStyle(fontSize: 18)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '请输入导出文件名：',
-              style: TextStyle(fontSize: 14, color: Colors.black87),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: '文件名',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                suffixText: '.md',
-              ),
-              style: const TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '将保存到笔记目录下',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              String fileName = controller.text.trim();
-              // 如果用户没有输入.md后缀，自动添加
-              if (!fileName.toLowerCase().endsWith('.md')) {
-                fileName = '$fileName.md';
-              }
-              Navigator.pop(context, fileName);
-            },
-            style: FilledButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text('导出'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 生成笔记的 Markdown 内容
-  String generateNotesMarkdown() {
-    final buffer = StringBuffer();
-
-    // 文档标题
-    buffer.writeln('# ${_bookTitle.isEmpty ? '读书笔记' : _bookTitle}');
-    buffer.writeln();
-    buffer.writeln('---');
-    buffer.writeln();
-
-    // 按章节分组
-    final groupedHighlights = _groupHighlightsByChapter(_highlights);
-
-    if (groupedHighlights.isEmpty) {
-      buffer.writeln('暂无笔记和高亮');
-      buffer.writeln();
-      return buffer.toString();
-    }
-
-    for (final group in groupedHighlights) {
-      // 章节标题
-      buffer.writeln('## ${group.chapterTitle}');
-      buffer.writeln();
-
-      // 该章节的笔记（包括有笔记和只有高亮的）
-      for (final merged in group.mergedHighlights) {
-        // 原文内容使用引用格式（处理换行，每行都加>）
-        final quotedText = formatQuotedText(merged);
-        final lines = quotedText.split('\n');
-        for (final line in lines) {
-          buffer.writeln('> $line');
-        }
-        buffer.writeln();
-
-        // 添加标记类型说明
-        final tags = <String>[];
-        if (merged.hasHighlight) tags.add('高亮');
-        if (merged.hasUnderline) tags.add('划线');
-        if (merged.note != null && merged.note!.isNotEmpty) tags.add('笔记');
-
-        if (tags.isNotEmpty) {
-          buffer.writeln('> *${tags.join('、')}*');
-          buffer.writeln();
-        }
-
-        // 用户笔记（如果有）
-        if (merged.note != null && merged.note!.isNotEmpty) {
-          buffer.writeln(merged.note);
-          buffer.writeln();
-        }
-
-        // 分隔线
-        buffer.writeln('---');
-        buffer.writeln();
-      }
-    }
-
-    return buffer.toString();
-  }
-
-  /// 格式化引用文本
-  /// 既有高亮又有划线的部分使用强调格式（**文本**）
-  String formatQuotedText(_MergedHighlight merged) {
-    final text = merged.text;
-    final hasHighlight = merged.hasHighlight;
-    final hasUnderline = merged.hasUnderline;
-
-    // 如果没有划线或没有高亮，直接返回原文
-    if (!hasHighlight || !hasUnderline) {
-      return text;
-    }
-
-    // 既有高亮又有划线，需要标记重叠部分
-    final textStartOffset = merged.startOffset;
-    final highlights = merged.originalHighlights;
-    final underlines = merged.originalUnderlines;
-
-    // 收集所有分割点
-    final Set<int> splitPoints = {0, text.length};
-    for (final h in highlights) {
-      final start = (h.startOffset - textStartOffset).clamp(0, text.length);
-      final end = (h.endOffset - textStartOffset).clamp(0, text.length);
-      if (start < end) {
-        splitPoints.add(start);
-        splitPoints.add(end);
-      }
-    }
-    for (final u in underlines) {
-      final start = (u.startOffset - textStartOffset).clamp(0, text.length);
-      final end = (u.endOffset - textStartOffset).clamp(0, text.length);
-      if (start < end) {
-        splitPoints.add(start);
-        splitPoints.add(end);
-      }
-    }
-
-    final sortedPoints = splitPoints.toList()..sort();
-
-    // 构建结果
-    final segments = <String>[];
-    for (int i = 0; i < sortedPoints.length - 1; i++) {
-      final segStart = sortedPoints[i];
-      final segEnd = sortedPoints[i + 1];
-      if (segStart >= segEnd) continue;
-
-      final segText = text.substring(segStart, segEnd);
-
-      // 检查该段是否有高亮
-      final segHasHighlight = highlights.any((h) {
-        final hStart = h.startOffset - textStartOffset;
-        final hEnd = h.endOffset - textStartOffset;
-        return segStart < hEnd && segEnd > hStart;
-      });
-
-      // 检查该段是否有划线
-      final segHasUnderline = underlines.any((u) {
-        final uStart = u.startOffset - textStartOffset;
-        final uEnd = u.endOffset - textStartOffset;
-        return segStart < uEnd && segEnd > uStart;
-      });
-
-      // 既有高亮又有划线的部分使用强调格式
-      if (segHasHighlight && segHasUnderline) {
-        segments.add('**$segText**');
-      } else {
-        segments.add(segText);
-      }
-    }
-
-    return segments.join();
-  }
-}
-
-/// 带工具栏的可选择文本组件
-/// 捕获文本选择时的位置，使工具栏贴近选择区域
-class _SelectableTextWithToolbar extends StatefulWidget {
-  final String text;
-  final TextStyle style;
-  final int textStartOffset; // 文本在章节中的起始偏移
-  final int chapterIndex;
-  final int pageIndex;
-  final List<TextSpan> spans; // 带高亮的文本片段
-  final Function(
-    String selectedText,
-    Offset position,
-    int startOffset,
-    int endOffset,
-    bool isFromDoubleTap,
-  )
-  onTextSelected;
-  final VoidCallback onSelectionCleared;
-  final Function(Offset)? onDoubleTap; // 双击回调
-
-  const _SelectableTextWithToolbar({
-    required this.text,
-    required this.style,
-    required this.textStartOffset,
-    required this.chapterIndex,
-    required this.pageIndex,
-    required this.spans,
-    required this.onTextSelected,
-    required this.onSelectionCleared,
-    this.onDoubleTap,
-  });
-
-  @override
-  State<_SelectableTextWithToolbar> createState() =>
-      _SelectableTextWithToolbarState();
-}
-
-class _SelectableTextWithToolbarState
-    extends State<_SelectableTextWithToolbar> {
-  final GlobalKey _selectableKey = GlobalKey();
-  TextRange? _doubleTapSelection;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onDoubleTapDown: (details) {
-        print('检测到双击事件'); // 调试
-        _handleDoubleTap(details.globalPosition);
-        // 同时通知父组件
-        widget.onDoubleTap?.call(details.globalPosition);
-      },
-      child: SelectableText.rich(
-        key: _selectableKey,
-        TextSpan(children: _buildSpansWithSelection(), style: widget.style),
-        onSelectionChanged: (selection, cause) {
-          // 打印 cause 用于调试
-          print('选择变化: selection=$selection, cause=$cause');
-
-          // 如果是手动拖动选择，清除双击选区
-          if (cause == SelectionChangedCause.drag ||
-              cause == SelectionChangedCause.longPress) {
-            if (_doubleTapSelection != null) {
-              setState(() {
-                _doubleTapSelection = null;
-              });
-            }
-          }
-
-          if (selection.isValid && !selection.isCollapsed) {
-            // 用户选择了文本
-            // 获取选中的原始文本
-            final selectedText = widget.text.substring(
-              selection.start.clamp(0, widget.text.length),
-              selection.end.clamp(0, widget.text.length),
-            );
-
-            if (selectedText.isNotEmpty) {
-              // 计算在章节中的实际偏移位置
-              final startOffset = widget.textStartOffset + selection.start;
-              final endOffset = widget.textStartOffset + selection.end;
-
-              // 计算选中文本的实际位置
-              final position = _calculateSelectionPosition(selection);
-              widget.onTextSelected(
-                selectedText,
-                position,
-                startOffset,
-                endOffset,
-                false, // 手动选择，不是双击
-              );
-            }
-          } else if (selection.isCollapsed) {
-            // 选择被取消
-            widget.onSelectionCleared();
-            // 同时清除双击选区
-            if (_doubleTapSelection != null) {
-              setState(() {
-                _doubleTapSelection = null;
-              });
-            }
-          }
-        },
-        // 禁用默认上下文菜单，使用自定义工具栏
-        contextMenuBuilder: (context, editableTextState) {
-          return const SizedBox.shrink();
-        },
-      ),
-    );
-  }
-
-  /// 处理双击，选中点击位置的单词
-  void _handleDoubleTap(Offset tapPosition) {
-    final RenderBox? renderBox =
-        _selectableKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-
-    // 将全局坐标转换为局部坐标
-    final localPosition = renderBox.globalToLocal(tapPosition);
-
-    // 使用 TextPainter 找到点击位置的字符偏移
-    final TextPainter textPainter = TextPainter(
-      text: TextSpan(children: widget.spans, style: widget.style),
-      textDirection: TextDirection.ltr,
-      textAlign: TextAlign.left,
-    )..layout(maxWidth: renderBox.size.width);
-
-    // 获取点击位置的偏移量
-    final offset = textPainter.getPositionForOffset(localPosition);
-    final tapOffset = offset.offset;
-
-    print('双击位置偏移: $tapOffset, 总文本长度: ${widget.text.length}'); // 调试
-
-    // 找到单词的起始和结束位置
-    final wordRange = _findWordBoundaries(tapOffset);
-
-    print('单词边界: start=${wordRange.start}, end=${wordRange.end}'); // 调试
-
-    // 创建选择
-    final selection = TextSelection(
-      baseOffset: wordRange.start,
-      extentOffset: wordRange.end,
-    );
-
-    // 设置双击选区，显示蓝色背景
-    setState(() {
-      _doubleTapSelection = wordRange;
-    });
-
-    // 获取选中的文本
-    final selectedText = widget.text.substring(
-      selection.start.clamp(0, widget.text.length),
-      selection.end.clamp(0, widget.text.length),
-    );
-
-    print('选中的文本: "$selectedText" (长度: ${selectedText.length})'); // 调试
-
-    if (selectedText.isNotEmpty) {
-      final startOffset = widget.textStartOffset + selection.start;
-      final endOffset = widget.textStartOffset + selection.end;
-      final position = _calculateSelectionPosition(selection);
-      widget.onTextSelected(
-        selectedText,
-        position,
-        startOffset,
-        endOffset,
-        true, // 来自双击
-      );
-    }
-  }
-
-  /// 构建带选中效果的 spans
-  List<TextSpan> _buildSpansWithSelection() {
-    // 如果没有双击选中，返回原始 spans
-    if (_doubleTapSelection == null) {
-      return widget.spans;
-    }
-
-    final selection = _doubleTapSelection!;
-    final result = <TextSpan>[];
-    int currentOffset = 0;
-
-    // 遍历所有原始 spans
-    for (final span in widget.spans) {
-      final text = span.text ?? '';
-      if (text.isEmpty) {
-        result.add(span);
-        continue;
-      }
-
-      final spanStart = currentOffset;
-      final spanEnd = currentOffset + text.length;
-
-      // 检查选区是否与当前 span 有交集
-      if (selection.end <= spanStart || selection.start >= spanEnd) {
-        // 无交集，直接添加
-        result.add(span);
-      } else {
-        // 有交集，需要分割
-        final overlapStart = selection.start.clamp(spanStart, spanEnd);
-        final overlapEnd = selection.end.clamp(spanStart, spanEnd);
-
-        // 选中之前的部分
-        if (overlapStart > spanStart) {
-          result.add(
-            TextSpan(
-              text: text.substring(0, overlapStart - spanStart),
-              style: span.style,
-            ),
-          );
-        }
-
-        // 选中的部分（添加粉色背景）
-        result.add(
-          TextSpan(
-            text: text.substring(
-              overlapStart - spanStart,
-              overlapEnd - spanStart,
-            ),
-            style: span.style?.copyWith(
-              backgroundColor: Colors.pink.withOpacity(0.4),
-            ),
-          ),
-        );
-
-        // 选中之后的部分
-        if (overlapEnd < spanEnd) {
-          result.add(
-            TextSpan(
-              text: text.substring(overlapEnd - spanStart),
-              style: span.style,
-            ),
-          );
-        }
-      }
-
-      currentOffset = spanEnd;
-    }
-
-    return result;
-  }
-
-  /// 查找单词的边界
-  TextRange _findWordBoundaries(int offset) {
-    final text = widget.text;
-
-    // 确保偏移在有效范围内
-    if (offset < 0) offset = 0;
-    if (offset >= text.length) offset = text.length - 1;
-
-    // 获取点击位置的字符
-    final char = text[offset];
-    print('点击位置的字符: "$char" (Unicode: ${char.codeUnitAt(0)})'); // 调试
-
-    // 使用正则表达式匹配单词
-    // 中文：连续的中文字符视为一个词，但限制长度避免选中整句
-    // 英文：字母、数字、连字符、撇号组成的单词
-    final chinesePattern = RegExp(r'[\u4e00-\u9fa5]+', unicode: true);
-    final englishPattern = RegExp(r'[a-zA-Z0-9]+');
-
-    // 先检查中文字符
-    final chineseMatches = chinesePattern.allMatches(text);
-    for (final match in chineseMatches) {
-      if (offset >= match.start && offset < match.end) {
-        final matchedText = match.group(0) ?? '';
-        // 如果中文词长度超过10，只选单个字
-        if (matchedText.length > 10) {
-          print('中文词过长，选中单个字符: $char'); // 调试
-          return TextRange(start: offset, end: offset + 1);
-        }
-        print(
-          '查找到中文词: ${match.start} - ${match.end}, 文本: "$matchedText"',
-        ); // 调试
-        return TextRange(start: match.start, end: match.end);
-      }
-    }
-
-    // 再检查英文字符
-    final englishMatches = englishPattern.allMatches(text);
-    for (final match in englishMatches) {
-      if (offset >= match.start && offset < match.end) {
-        print(
-          '查找到英文词: ${match.start} - ${match.end}, 文本: "${match.group(0)}"',
-        ); // 调试
-        return TextRange(start: match.start, end: match.end);
-      }
-    }
-
-    // 如果没有找到单词匹配，则只选中点击位置的字符
-    print('未找到单词，选中单个字符'); // 调试
-    return TextRange(start: offset, end: offset + 1);
-  }
-
-  /// 计算选中文本的位置（使用 RenderBox 获取实际边界）
-  Offset _calculateSelectionPosition(TextSelection selection) {
-    final RenderBox? renderBox =
-        _selectableKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) {
-      return _calculateCenterPosition();
-    }
-
-    // 获取文本的渲染信息
-    final TextPainter textPainter = TextPainter(
-      text: TextSpan(text: widget.text, style: widget.style),
-      textDirection: TextDirection.ltr,
-      textAlign: TextAlign.left,
-    )..layout(maxWidth: renderBox.size.width);
-
-    // 获取选中文本的坐标
-    final startRect = textPainter.getBoxesForSelection(
-      TextSelection(
-        baseOffset: selection.start,
-        extentOffset: selection.start + 1,
-      ),
-    );
-    final endRect = textPainter.getBoxesForSelection(
-      TextSelection(baseOffset: selection.end - 1, extentOffset: selection.end),
-    );
-
-    // 计算选中区域的中点
-    double top;
-    double left;
-
-    if (startRect.isNotEmpty && endRect.isNotEmpty) {
-      top = (startRect.first.toRect().top + endRect.last.toRect().bottom) / 2;
-      left = (startRect.first.toRect().left + endRect.last.toRect().right) / 2;
-    } else {
-      return _calculateCenterPosition();
-    }
-
-    // 转换为全局坐标
-    final localPosition = Offset(left, top);
-    final globalPosition = renderBox.localToGlobal(localPosition);
-
-    return globalPosition;
-  }
-
-  /// 计算屏幕中央位置（作为备选）
-  Offset _calculateCenterPosition() {
-    final screenSize = MediaQuery.of(context).size;
-    return Offset(screenSize.width / 2, screenSize.height * 0.4);
-  }
-}
-
-/// 搜索结果类
-class SearchResult {
-  final int chapterIndex; // 章节索引
-  final String chapterTitle; // 章节标题
-  final int pageIndex; // 页面索引
-  final int positionOffset; // 在章节文本中的位置
-  final String contextText; // 上下文文本
-  final String matchedText; // 匹配的文本
-
-  SearchResult({
-    required this.chapterIndex,
-    required this.chapterTitle,
-    required this.pageIndex,
-    required this.positionOffset,
-    required this.contextText,
-    required this.matchedText,
-  });
-}

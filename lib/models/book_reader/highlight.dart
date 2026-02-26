@@ -97,4 +97,34 @@ class MergedHighlight {
     required this.createdAt,
     this.note,
   });
+
+  /// 是否有高亮
+  bool get hasHighlight => originalHighlights.isNotEmpty;
+
+  /// 是否有划线
+  bool get hasUnderline => originalUnderlines.isNotEmpty;
+
+  /// 获取高亮颜色（取第一个高亮的颜色）
+  Color get highlightColor => originalHighlights.isNotEmpty
+      ? originalHighlights.first.color
+      : Colors.yellow;
+}
+
+/// 搜索结果类
+class SearchResult {
+  final int chapterIndex; // 章节索引
+  final String chapterTitle; // 章节标题
+  final int pageIndex; // 页面索引
+  final int positionOffset; // 在章节文本中的位置
+  final String contextText; // 上下文文本
+  final String matchedText; // 匹配的文本
+
+  SearchResult({
+    required this.chapterIndex,
+    required this.chapterTitle,
+    required this.pageIndex,
+    required this.positionOffset,
+    required this.contextText,
+    required this.matchedText,
+  });
 }

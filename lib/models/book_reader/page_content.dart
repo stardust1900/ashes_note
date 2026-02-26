@@ -5,15 +5,13 @@ class PageContent {
   final int chapterIndex;
   final int pageIndexInChapter;
   final List<ContentItem> contentItems;
-  final bool isChapterStart;
-  final String chapterTitle;
+  final String? title;
 
   PageContent({
     required this.chapterIndex,
     required this.pageIndexInChapter,
     required this.contentItems,
-    this.isChapterStart = false,
-    this.chapterTitle = '',
+    this.title,
   });
 
   Map<String, dynamic> toJson() {
@@ -21,8 +19,7 @@ class PageContent {
       'chapterIndex': chapterIndex,
       'pageIndexInChapter': pageIndexInChapter,
       'contentItems': contentItems.map((item) => item.toJson()).toList(),
-      'isChapterStart': isChapterStart,
-      'chapterTitle': chapterTitle,
+      'title': title,
     };
   }
 
@@ -33,8 +30,7 @@ class PageContent {
       contentItems: (json['contentItems'] as List<dynamic>)
           .map((item) => ContentItem.fromJson(item as Map<String, dynamic>))
           .toList(),
-      isChapterStart: json['isChapterStart'] as bool? ?? false,
-      chapterTitle: json['chapterTitle'] as String? ?? '',
+      title: json['title'] as String?,
     );
   }
 }
