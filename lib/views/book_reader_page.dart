@@ -1243,7 +1243,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: theme.dividerColor,
+                color: theme.cardColor,
                 border: Border(bottom: BorderSide(color: theme.dividerColor)),
               ),
               child: Row(
@@ -1274,7 +1274,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.close),
-                        color: Colors.grey[600],
+                        color: theme.iconTheme.color,
                         onPressed: () {
                           setState(() {
                             _showSearchDrawer = false;
@@ -3449,7 +3449,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 key: _contentKey,
                 width: double.infinity,
                 height: double.infinity,
-                color: Theme.of(context).colorScheme.surface,
+                color: Theme.of(context).scaffoldBackgroundColor,
                 child: Column(
                   children: [
                     Expanded(

@@ -81,7 +81,15 @@ final ThemeData ashesDarkTheme = ThemeData(
   brightness: Brightness.dark,
   primaryColor: Colors.blue,
   canvasColor: Color.fromARGB(255, 48, 48, 48),
-  scaffoldBackgroundColor: Colors.grey[800],
+  scaffoldBackgroundColor: Colors.grey[850],
+  colorScheme: ColorScheme.dark(
+    primary: Colors.blue,
+    secondary: Colors.blueGrey,
+    surface: Color.fromARGB(255, 48, 48, 48),
+    onPrimary: Colors.white,
+    onSecondary: Colors.white,
+    onSurface: Colors.white70,
+  ),
   textTheme: const TextTheme(
     headlineMedium: TextStyle(
       color: Colors.white,
@@ -101,9 +109,7 @@ final ThemeData ashesDarkTheme = ThemeData(
     ),
     bodyMedium: TextStyle(color: Colors.white, fontSize: 15),
   ),
-  dialogTheme: DialogThemeData(
-    backgroundColor: Colors.grey[800],
-  ),
+  dialogTheme: DialogThemeData(backgroundColor: Colors.grey[800]),
   buttonTheme: const ButtonThemeData(
     buttonColor: Colors.blue,
     textTheme: ButtonTextTheme.primary,
@@ -224,21 +230,9 @@ final ThemeData ashesInkModeTheme = ThemeData(
       fontWeight: FontWeight.w600,
       color: Colors.black,
     ),
-    bodyLarge: TextStyle(
-      fontSize: 18,
-      color: Colors.black,
-      height: 1.6,
-    ),
-    bodyMedium: TextStyle(
-      fontSize: 16,
-      color: Colors.black,
-      height: 1.5,
-    ),
-    bodySmall: TextStyle(
-      fontSize: 14,
-      color: Colors.black87,
-      height: 1.4,
-    ),
+    bodyLarge: TextStyle(fontSize: 18, color: Colors.black, height: 1.6),
+    bodyMedium: TextStyle(fontSize: 16, color: Colors.black, height: 1.5),
+    bodySmall: TextStyle(fontSize: 14, color: Colors.black87, height: 1.4),
     labelLarge: TextStyle(
       fontSize: 16,
       fontWeight: FontWeight.w500,
@@ -292,9 +286,7 @@ final ThemeData ashesInkModeTheme = ThemeData(
       minimumSize: const Size(100, 50),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       side: const BorderSide(color: Colors.black, width: 2),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ),
   ),
   // Card 样式
@@ -313,20 +305,11 @@ final ThemeData ashesInkModeTheme = ThemeData(
     foregroundColor: Colors.black,
     elevation: 0,
     centerTitle: true,
-    iconTheme: IconThemeData(
-      color: Colors.black,
-      size: 28,
-    ),
-    actionsIconTheme: IconThemeData(
-      color: Colors.black,
-      size: 28,
-    ),
+    iconTheme: IconThemeData(color: Colors.black, size: 28),
+    actionsIconTheme: IconThemeData(color: Colors.black, size: 28),
   ),
   // 图标主题 - 更大的图标
-  iconTheme: const IconThemeData(
-    color: Colors.black,
-    size: 28,
-  ),
+  iconTheme: const IconThemeData(color: Colors.black, size: 28),
   // 输入框样式
   inputDecorationTheme: InputDecorationTheme(
     filled: true,
@@ -385,18 +368,14 @@ final ThemeData ashesInkModeTheme = ThemeData(
     }),
     checkColor: const WidgetStatePropertyAll(Colors.white),
     side: const BorderSide(color: Colors.black, width: 2),
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(4),
-    ),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
   ),
   // Snackbar 样式
   snackBarTheme: SnackBarThemeData(
     backgroundColor: Colors.black87,
     behavior: SnackBarBehavior.floating,
     elevation: 0,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(8),
-    ),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
   ),
   // ListTile 样式
   listTileTheme: const ListTileThemeData(
@@ -485,7 +464,10 @@ final AshesTheme inkModeTheme = AshesTheme(
 // 主题管理器
 class ThemeManager {
   static AshesTheme getCurrentTheme() {
-    final themeMode = SPUtil.get<String>(PrefKeys.themeMode, ThemeModes.minimal);
+    final themeMode = SPUtil.get<String>(
+      PrefKeys.themeMode,
+      ThemeModes.minimal,
+    );
     switch (themeMode) {
       case ThemeModes.dark:
         return darkTheme;
@@ -507,6 +489,7 @@ class ThemeManager {
   }
 
   static bool isInkMode() {
-    return SPUtil.get<String>(PrefKeys.themeMode, ThemeModes.minimal) == ThemeModes.inkMode;
+    return SPUtil.get<String>(PrefKeys.themeMode, ThemeModes.minimal) ==
+        ThemeModes.inkMode;
   }
 }
