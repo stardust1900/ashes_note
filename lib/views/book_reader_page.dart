@@ -21,6 +21,7 @@ import 'book_reader/search_manager.dart';
 import 'book_reader/note_export.dart';
 import 'book_reader/storage_manager.dart';
 import 'book_reader/selectable_text_with_toolbar.dart';
+import '../ashes_theme.dart';
 
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
@@ -364,7 +365,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
           child: Material(
             elevation: 8,
             borderRadius: BorderRadius.circular(8),
-            color: const Color(0xFF2D2D2D),
+            color: Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF2D2D2D)
+                : const Color(0xFF333333),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Row(
@@ -621,7 +624,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           ),
           child: Icon(
             isCurrentColor ? Icons.close : Icons.highlight,
-            color: isCurrentColor ? Colors.red : Colors.black54,
+            color: isCurrentColor ? Colors.red : Colors.black87,
             size: 18,
           ),
         ),
@@ -928,14 +931,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
               ),
               child: Icon(
                 isEditing ? Icons.edit_note : Icons.note_add,
-                color: Colors.black87,
+                color: Theme.of(context).colorScheme.onSurface,
                 size: 18,
               ),
             ),
             const SizedBox(width: 12),
             Text(
               isEditing ? '编辑笔记' : '添加笔记',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 18, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -1002,23 +1005,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
               TextField(
                 controller: noteController,
                 maxLines: 5,
-                style: const TextStyle(
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontSize: 15,
                   height: 1.5,
-                  color: Colors.black87,
                 ),
                 decoration: InputDecoration(
                   hintText: '在此输入您的笔记...',
-                  hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
                   filled: true,
-                  fillColor: Colors.grey[50],
+                  fillColor: Theme.of(context).colorScheme.surface,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
+                    borderSide: BorderSide(color: Theme.of(context).dividerColor),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
+                    borderSide: BorderSide(color: Theme.of(context).dividerColor),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1106,19 +1107,19 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.blue.withValues(alpha: 0.1),
+                    color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.note_alt,
-                    color: Colors.blue,
+                    color: Theme.of(context).primaryColor,
                     size: 22,
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text(
+                Text(
                   '笔记',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 20, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
                 // 统计高亮和划线数量
@@ -1880,6 +1881,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   /// 显示搜索对话框
   /// 构建搜索抽屉
   Widget _buildSearchDrawer() {
+    final theme = Theme.of(context);
     return Positioned(
       left: _searchDrawerOnRight ? null : 0,
       right: _searchDrawerOnRight ? 0 : null,
@@ -1888,7 +1890,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
       child: Container(
         width: 320,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: theme.cardColor,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.1),
@@ -1903,19 +1905,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
-                border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
+                color: theme.dividerColor,
+                border: Border(bottom: BorderSide(color: theme.dividerColor)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
                     '搜索',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   Row(
                     children: [
@@ -1926,7 +1924,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               ? Icons.arrow_back
                               : Icons.arrow_forward,
                         ),
-                        color: Colors.grey[600],
+                        color: theme.iconTheme.color,
                         onPressed: () {
                           setState(() {
                             _searchDrawerOnRight = !_searchDrawerOnRight;
@@ -1957,10 +1955,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     child: TextField(
                       controller: _searchController,
                       autofocus: false,
-                      style: const TextStyle(color: Colors.black87),
+                      style: Theme.of(context).textTheme.bodyMedium,
                       decoration: InputDecoration(
                         hintText: '输入搜索词',
-                        hintStyle: const TextStyle(color: Colors.grey),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -2019,7 +2016,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 ),
                 child: Text(
                   '共 ${_displaySearchResults.length} 页 (${_searchResults.length} 条)',
-                  style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12),
                 ),
               ),
             Expanded(
@@ -2027,7 +2024,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   ? Center(
                       child: Text(
                         _searchResults.isEmpty ? '输入搜索词进行搜索' : '未找到匹配的内容',
-                        style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                        style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     )
                   : ListView.builder(
@@ -2067,8 +2064,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                       radius: 14,
                                       backgroundColor:
                                           tappedIndex == _currentSearchIndex
-                                          ? Colors.blue
-                                          : Colors.blue.shade100,
+                                          ? Theme.of(context).primaryColor
+                                          : Theme.of(context).primaryColor.withValues(alpha: 0.2),
                                       child: Text(
                                         '${tappedIndex + 1}',
                                         style: TextStyle(
@@ -2088,14 +2085,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                         children: [
                                           Text(
                                             result.chapterTitle,
-                                            style: TextStyle(
+                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                               fontWeight: FontWeight.w500,
                                               fontSize: 13,
                                               color:
                                                   tappedIndex ==
                                                       _currentSearchIndex
-                                                  ? Colors.blue
-                                                  : Colors.black87,
+                                                  ? Theme.of(context).primaryColor
+                                                  : null,
                                             ),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
@@ -2103,19 +2100,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                           if (matchCount > 1)
                                             Text(
                                               '该页 $matchCount 处匹配',
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.grey[700],
-                                              ),
+                                              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 10),
                                             ),
                                           Text(
                                             result.contextText,
                                             maxLines: matchCount > 1 ? 1 : 2,
                                             overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.black54,
-                                            ),
+                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12),
                                           ),
                                         ],
                                       ),
@@ -2125,7 +2116,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               ),
                             ),
                             if (index < _displaySearchResults.length - 1)
-                              Divider(height: 1, color: Colors.grey[200]!),
+                              Divider(height: 1, color: Theme.of(context).dividerColor),
                           ],
                         );
                       },
@@ -2327,7 +2318,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           widgets.add(
             SelectableText(
               buffer.toString().trim(),
-              style: TextStyle(fontSize: 14, height: 1.6, color: Colors.white),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 14, height: 1.6),
             ),
           );
           buffer.clear();
@@ -2336,11 +2327,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
         widgets.add(
           SelectableText(
             boldText,
-            style: TextStyle(
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               fontSize: 14,
               height: 1.6,
               fontWeight: FontWeight.bold,
-              color: Colors.blue[700],
+              color: Theme.of(context).primaryColor,
             ),
           ),
         );
@@ -2354,7 +2345,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           widgets.add(
             SelectableText(
               buffer.toString().trim(),
-              style: TextStyle(fontSize: 14, height: 1.6, color: Colors.white),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 14, height: 1.6),
             ),
           );
           buffer.clear();
@@ -2542,7 +2533,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       ),
                       Text(
                         sourceLanguageText,
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12),
                       ),
                     ],
                   ),
@@ -2550,7 +2541,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 if (phoneticDisplay?.isNotEmpty == true)
                   Text(
                     phoneticDisplay!,
-                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 14),
                   ),
               ],
             ),
@@ -3928,7 +3919,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             const SizedBox(height: 8),
                             Text(
                               '图片: ${item.source}',
-                              style: TextStyle(color: Colors.grey[600]),
+                              style: Theme.of(context).textTheme.bodySmall,
                               textAlign: TextAlign.center,
                             ),
                           ],
@@ -3994,7 +3985,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                   const SizedBox(height: 8),
                                   Text(
                                     '封面加载失败',
-                                    style: TextStyle(color: Colors.grey[600]),
+                                    style: Theme.of(context).textTheme.bodySmall,
                                   ),
                                 ],
                               ),
@@ -4376,13 +4367,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 构建字体大小滑动条
   Widget _buildFontSizeSlider() {
+    final theme = Theme.of(context);
     return Positioned(
       top: 80,
       right: 16,
       child: Material(
         elevation: 8,
         borderRadius: BorderRadius.circular(12),
-        color: Colors.white,
+        color: theme.cardColor,
         child: Container(
           width: 60,
           height: 280,
@@ -4395,7 +4387,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: Colors.blue,
+                  color: theme.primaryColor,
                 ),
               ),
               const SizedBox(height: 8),
@@ -4410,13 +4402,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
+                    color: theme.colorScheme.surface,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     Icons.text_increase,
                     size: 18,
-                    color: _tempFontSize < 32 ? Colors.blue : Colors.grey[400],
+                    color: _tempFontSize < 32 ? theme.primaryColor : Colors.grey[400],
                   ),
                 ),
               ),
@@ -4427,10 +4419,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   quarterTurns: 3, // 旋转为垂直方向
                   child: SliderTheme(
                     data: SliderTheme.of(context).copyWith(
-                      activeTrackColor: Colors.blue,
-                      inactiveTrackColor: Colors.grey[300],
-                      thumbColor: Colors.blue,
-                      overlayColor: Colors.blue.withValues(alpha: 0.2),
+                      activeTrackColor: theme.primaryColor,
+                      inactiveTrackColor: theme.colorScheme.surface,
+                      thumbColor: theme.primaryColor,
+                      overlayColor: theme.primaryColor.withValues(alpha: 0.2),
                       trackHeight: 4,
                       thumbShape: RoundSliderThumbShape(enabledThumbRadius: 8),
                       overlayShape: RoundSliderOverlayShape(overlayRadius: 16),
@@ -4461,13 +4453,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
+                    color: theme.colorScheme.surface,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     Icons.text_decrease,
                     size: 18,
-                    color: _tempFontSize > 12 ? Colors.blue : Colors.grey[400],
+                    color: _tempFontSize > 12 ? theme.primaryColor : Colors.grey[400],
                   ),
                 ),
               ),
@@ -4478,9 +4470,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 child: Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    // 与当前字体一致时蓝色，不一致时灰色
+                    // 与当前字体一致时主题色，不一致时灰色
                     color: _tempFontSize == _fontSize
-                        ? Colors.blue
+                        ? Theme.of(context).primaryColor
                         : Colors.grey[400],
                     borderRadius: BorderRadius.circular(16),
                   ),
@@ -4528,7 +4520,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 IconButton(
                   icon: Icon(
                     _isBookmarked() ? Icons.bookmark : Icons.bookmark_border,
-                    color: _isBookmarked() ? Colors.blue : null,
+                    color: _isBookmarked() ? Theme.of(context).primaryColor : null,
                   ),
                   onPressed: _addBookmark,
                   tooltip: '书签',
@@ -4546,7 +4538,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 IconButton(
                   icon: Icon(
                     Icons.list,
-                    color: _showTableOfContents ? Colors.blue : null,
+                    color: _showTableOfContents ? Theme.of(context).primaryColor : null,
                   ),
                   onPressed: () {
                     setState(() {
@@ -4563,7 +4555,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 IconButton(
                   icon: Icon(
                     Icons.search,
-                    color: _showSearchDrawer ? Colors.blue : null,
+                    color: _showSearchDrawer ? Theme.of(context).primaryColor : null,
                   ),
                   onPressed: () {
                     setState(() {
@@ -4599,7 +4591,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error, size: 64, color: Colors.red),
+                  Icon(Icons.error, size: 64, color: Theme.of(context).colorScheme.error),
                   SizedBox(height: 16),
                   Text('加载失败: $_errorMessage'),
                   SizedBox(height: 16),
@@ -4623,7 +4615,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
                         '共 ${_chapters.length} 个章节',
-                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12),
                       ),
                     ),
                 ],
@@ -4632,13 +4624,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
           }
 
           if (!_isContentLoaded || _pages.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.menu_book, size: 64, color: Colors.grey),
+                  Icon(Icons.menu_book, size: 64, color: Colors.grey[400]),
                   SizedBox(height: 16),
-                  Text('暂无内容'),
+                  Text('暂无内容', style: Theme.of(context).textTheme.bodyLarge),
                 ],
               ),
             );
@@ -4656,7 +4648,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 child: Container(
                   width: double.infinity,
                   height: double.infinity,
-                  color: Colors.white,
+                  color: Theme.of(context).scaffoldBackgroundColor,
                   child: _buildPageMode(),
                 ),
               ),
@@ -4710,6 +4702,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   Widget _buildTableOfContents() {
+    final theme = Theme.of(context);
     return Positioned(
       left: 0,
       top: 0,
@@ -4717,7 +4710,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
       child: Container(
         width: 280,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: theme.cardColor,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.1),
@@ -4732,23 +4725,19 @@ class _BookReaderPageState extends State<BookReaderPage> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
-                border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
+                color: theme.dividerColor,
+                border: Border(bottom: BorderSide(color: theme.dividerColor)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
                     '目录',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
-                    color: Colors.grey[600],
+                    color: theme.iconTheme.color,
                     onPressed: () {
                       setState(() {
                         _showTableOfContents = false;
@@ -4772,8 +4761,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     leading: CircleAvatar(
                       radius: 14,
                       backgroundColor: isCurrentChapter
-                          ? Colors.blue
-                          : Colors.grey[300],
+                          ? Theme.of(context).primaryColor
+                          : Theme.of(context).colorScheme.surface,
                       child: isBookmarked
                           ? const Icon(
                               Icons.bookmark,
@@ -4785,15 +4774,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               style: TextStyle(
                                 color: isCurrentChapter
                                     ? Colors.white
-                                    : Colors.grey[700],
+                                    : Theme.of(context).colorScheme.onSurface,
                                 fontSize: 12,
                               ),
                             ),
                     ),
                     title: Text(
                       chapter.title ?? '第 ${index + 1} 章',
-                      style: TextStyle(
-                        color: isCurrentChapter ? Colors.blue : Colors.black87,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: isCurrentChapter ? Theme.of(context).primaryColor : null,
                         fontWeight: isCurrentChapter
                             ? FontWeight.w600
                             : FontWeight.normal,
