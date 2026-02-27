@@ -21,11 +21,6 @@ final ThemeData ashesNoteMinimalTheme = ThemeData(
     backgroundColor: Colors.white,
     elevation: 0,
     iconTheme: IconThemeData(color: Colors.black54),
-    titleTextStyle: TextStyle(
-      color: Colors.black87,
-      fontSize: 18,
-      fontWeight: FontWeight.w600,
-    ),
   ),
   textTheme: const TextTheme(
     bodyMedium: TextStyle(color: Colors.black87, fontSize: 14),
@@ -108,8 +103,6 @@ final ThemeData ashesDarkTheme = ThemeData(
   ),
   dialogTheme: DialogThemeData(
     backgroundColor: Colors.grey[800],
-    titleTextStyle: const TextStyle(color: Colors.white),
-    contentTextStyle: const TextStyle(color: Colors.white),
   ),
   buttonTheme: const ButtonThemeData(
     buttonColor: Colors.blue,
@@ -279,10 +272,6 @@ final ThemeData ashesInkModeTheme = ThemeData(
       foregroundColor: Colors.white,
       minimumSize: const Size(120, 50),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      textStyle: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-      ),
       elevation: 0, // 禁用阴影
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
@@ -295,10 +284,6 @@ final ThemeData ashesInkModeTheme = ThemeData(
       foregroundColor: Colors.black,
       minimumSize: const Size(100, 50),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      textStyle: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-      ),
     ),
   ),
   outlinedButtonTheme: OutlinedButtonThemeData(
@@ -309,10 +294,6 @@ final ThemeData ashesInkModeTheme = ThemeData(
       side: const BorderSide(color: Colors.black, width: 2),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-      ),
-      textStyle: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
       ),
     ),
   ),
@@ -332,11 +313,6 @@ final ThemeData ashesInkModeTheme = ThemeData(
     foregroundColor: Colors.black,
     elevation: 0,
     centerTitle: true,
-    titleTextStyle: TextStyle(
-      fontSize: 20,
-      fontWeight: FontWeight.bold,
-      color: Colors.black,
-    ),
     iconTheme: IconThemeData(
       color: Colors.black,
       size: 28,
@@ -368,14 +344,6 @@ final ThemeData ashesInkModeTheme = ThemeData(
       borderRadius: BorderRadius.circular(8),
       borderSide: const BorderSide(color: Colors.black, width: 2),
     ),
-    labelStyle: const TextStyle(
-      fontSize: 16,
-      color: Colors.black,
-    ),
-    hintStyle: const TextStyle(
-      fontSize: 16,
-      color: Colors.black54,
-    ),
   ),
   // 对话框样式
   dialogTheme: DialogThemeData(
@@ -384,16 +352,6 @@ final ThemeData ashesInkModeTheme = ThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(12),
       side: const BorderSide(color: Colors.black87, width: 1),
-    ),
-    titleTextStyle: const TextStyle(
-      fontSize: 20,
-      fontWeight: FontWeight.bold,
-      color: Colors.black,
-    ),
-    contentTextStyle: const TextStyle(
-      fontSize: 16,
-      color: Colors.black,
-      height: 1.5,
     ),
   ),
   // 分割线
@@ -434,10 +392,6 @@ final ThemeData ashesInkModeTheme = ThemeData(
   // Snackbar 样式
   snackBarTheme: SnackBarThemeData(
     backgroundColor: Colors.black87,
-    contentTextStyle: const TextStyle(
-      fontSize: 16,
-      color: Colors.white,
-    ),
     behavior: SnackBarBehavior.floating,
     elevation: 0,
     shape: RoundedRectangleBorder(
@@ -452,15 +406,6 @@ final ThemeData ashesInkModeTheme = ThemeData(
     textColor: Colors.black,
     tileColor: Colors.transparent,
     selectedTileColor: Colors.black12,
-    titleTextStyle: TextStyle(
-      fontSize: 16,
-      fontWeight: FontWeight.w500,
-      color: Colors.black,
-    ),
-    subtitleTextStyle: TextStyle(
-      fontSize: 14,
-      color: Colors.black87,
-    ),
   ),
 );
 

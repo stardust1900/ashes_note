@@ -126,52 +126,31 @@ class _SettingsViewState extends State<SettingsView> {
           children: [
             Text('主题设置', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
-            ListTile(
+            RadioListTile<String>(
               title: const Text('极简主题'),
               subtitle: const Text('清爽明亮的界面风格'),
-              leading: Radio<String>(
-                value: ThemeModes.minimal,
-                groupValue: _selectedTheme,
-                onChanged: (value) {
-                  if (value != null) {
-                    _changeTheme(value);
-                  }
-                },
-              ),
-              onTap: () {
-                _changeTheme(ThemeModes.minimal);
+              value: ThemeModes.minimal,
+              groupValue: _selectedTheme,
+              onChanged: (value) {
+                _changeTheme(value ?? ThemeModes.minimal);
               },
             ),
-            ListTile(
+            RadioListTile<String>(
               title: const Text('暗黑主题'),
               subtitle: const Text('护眼舒适的深色界面'),
-              leading: Radio<String>(
-                value: ThemeModes.dark,
-                groupValue: _selectedTheme,
-                onChanged: (value) {
-                  if (value != null) {
-                    _changeTheme(value);
-                  }
-                },
-              ),
-              onTap: () {
-                _changeTheme(ThemeModes.dark);
+              value: ThemeModes.dark,
+              groupValue: _selectedTheme,
+              onChanged: (value) {
+                _changeTheme(value ?? ThemeModes.dark);
               },
             ),
-            ListTile(
+            RadioListTile<String>(
               title: const Text('墨水屏模式'),
               subtitle: const Text('纯黑白高对比度，适合墨水屏设备'),
-              leading: Radio<String>(
-                value: ThemeModes.inkMode,
-                groupValue: _selectedTheme,
-                onChanged: (value) {
-                  if (value != null) {
-                    _changeTheme(value);
-                  }
-                },
-              ),
-              onTap: () {
-                _changeTheme(ThemeModes.inkMode);
+              value: ThemeModes.inkMode,
+              groupValue: _selectedTheme,
+              onChanged: (value) {
+                _changeTheme(value ?? ThemeModes.inkMode);
               },
             ),
           ],
@@ -242,7 +221,6 @@ class _SettingsViewState extends State<SettingsView> {
             ),
             const SizedBox(height: 8),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
               onPressed: () {
                 _saveSettings();
                 ScaffoldMessenger.of(
@@ -354,7 +332,6 @@ class _SettingsViewState extends State<SettingsView> {
             Row(
               children: [
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                   onPressed: () async {
                     ScaffoldMessengerState messengerState =
                         ScaffoldMessenger.of(context);
@@ -419,9 +396,6 @@ class _SettingsViewState extends State<SettingsView> {
                       ? Icon(Icons.downloading)
                       : Icon(Icons.cloud_download_outlined),
                   label: Text('初始化仓库'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isLoading ? Colors.grey : Colors.orange,
-                  ),
                   onPressed: () {
                     if (_remoteUrl == null ||
                         _token == null ||
@@ -449,10 +423,8 @@ class _SettingsViewState extends State<SettingsView> {
                               _initRepo();
                               Navigator.pop(context);
                             },
-                            child: Text(
-                              '初始化',
-                              style: TextStyle(color: Colors.red),
-                            ),
+                            style: TextButton.styleFrom(foregroundColor: Colors.red),
+                            child: Text('初始化'),
                           ),
                         ],
                       ),
