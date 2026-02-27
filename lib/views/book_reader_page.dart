@@ -21,7 +21,6 @@ import 'book_reader/search_manager.dart';
 import 'book_reader/note_export.dart';
 import 'book_reader/storage_manager.dart';
 import 'book_reader/selectable_text_with_toolbar.dart';
-import '../ashes_theme.dart';
 
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
@@ -365,9 +364,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           child: Material(
             elevation: 8,
             borderRadius: BorderRadius.circular(8),
-            color: Theme.of(context).brightness == Brightness.dark
-                ? const Color(0xFF2D2D2D)
-                : const Color(0xFF333333),
+            color: Theme.of(context).colorScheme.surface,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Row(
@@ -637,7 +634,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
-    Color color = Colors.white,
+    Color? color,
   }) {
     return Tooltip(
       message: tooltip,
