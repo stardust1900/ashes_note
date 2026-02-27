@@ -2323,7 +2323,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
               style: TextStyle(
                 fontSize: 14,
                 height: 1.6,
-                color: Colors.white,
+                color:
+                    Theme.of(context).textTheme.bodyMedium?.color ??
+                    Colors.white,
                 fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
               ),
             ),
@@ -2399,7 +2401,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
               fontSize: 14,
               height: 1.6,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: Theme.of(context).primaryColor,
             ),
           ),
         );
@@ -2420,7 +2422,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
           style: TextStyle(
             fontSize: 14,
             height: 1.6,
-            color: Colors.white,
+            color:
+                Theme.of(context).textTheme.bodyMedium?.color ?? Colors.white,
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
           ),
         ),
@@ -2512,8 +2515,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
           if (currentDataSource == 'hz') {
             // Hz Dictionary 结果
-            hzDefinition = currentResult.definition;
-            hzImageUrl = currentResult.imageUrl;
+            hzDefinition = currentResult?.definition;
+            hzImageUrl = currentResult?.imageUrl;
           } else if (currentDataSource == 'free') {
             // Free Dictionary 结果
             phoneticOrPinyin = currentResult.phonetic ?? '';
@@ -2638,14 +2641,18 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                         Icon(
                                           Icons.search_off,
                                           size: 48,
-                                          color: Colors.grey[400],
+                                          color: Theme.of(
+                                            context,
+                                          ).iconTheme.color,
                                         ),
                                         SizedBox(height: 16),
                                         Text(
                                           '没有查到结果',
                                           style: TextStyle(
                                             fontSize: 16,
-                                            color: Colors.grey[600],
+                                            color: Theme.of(
+                                              context,
+                                            ).textTheme.bodySmall?.color,
                                           ),
                                         ),
                                       ],
@@ -2673,14 +2680,18 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                                 width: 120,
                                                 height: 120,
                                                 decoration: BoxDecoration(
-                                                  color: Colors.grey[200],
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).dividerColor,
                                                   borderRadius:
                                                       BorderRadius.circular(8),
                                                 ),
                                                 child: Icon(
                                                   Icons.image_not_supported,
                                                   size: 40,
-                                                  color: Colors.grey,
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).iconTheme.color,
                                                 ),
                                               );
                                             },
@@ -2693,7 +2704,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                                 width: 120,
                                                 height: 120,
                                                 decoration: BoxDecoration(
-                                                  color: Colors.grey[100],
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.surface,
                                                   borderRadius:
                                                       BorderRadius.circular(8),
                                                 ),
@@ -2842,34 +2855,61 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                   if (translation?.isNotEmpty == true) ...[
                                     Text(
                                       '翻译',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                     ),
                                     SizedBox(height: 8),
-                                    Text(translation!),
+                                    Text(
+                                      translation!,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(fontSize: 12),
+                                    ),
                                     SizedBox(height: 16),
                                   ],
                                   if (explainsText.isNotEmpty) ...[
                                     Text(
                                       '基本释义',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                     ),
                                     SizedBox(height: 8),
-                                    Text(explainsText),
+                                    Text(
+                                      explainsText,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(fontSize: 12),
+                                    ),
                                     SizedBox(height: 16),
                                   ],
                                   if (webTranslationsText.isNotEmpty) ...[
                                     Text(
                                       '网络释义',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                     ),
                                     SizedBox(height: 8),
-                                    Text(webTranslationsText),
+                                    Text(
+                                      webTranslationsText,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(fontSize: 12),
+                                    ),
                                     SizedBox(height: 16),
                                   ],
                                 ],
@@ -3846,7 +3886,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   style: TextStyle(
                     fontSize: _fontSize,
                     height: 1.5,
-                    color: Colors.black87,
+                    color:
+                        Theme.of(context).textTheme.bodyMedium?.color ??
+                        Colors.black87,
                   ),
                   textStartOffset: textStartOffset,
                   chapterIndex: page.chapterIndex,
@@ -4077,7 +4119,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 key: _contentKey,
                 width: double.infinity,
                 height: double.infinity,
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 child: Column(
                   children: [
                     Expanded(
@@ -4698,7 +4740,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.menu_book, size: 64, color: Colors.grey[400]),
+                  Icon(
+                    Icons.menu_book,
+                    size: 64,
+                    color: Theme.of(context).primaryColor,
+                  ),
                   SizedBox(height: 16),
                   Text('暂无内容', style: Theme.of(context).textTheme.bodyLarge),
                 ],
