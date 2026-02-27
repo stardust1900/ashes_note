@@ -2,6 +2,7 @@ import 'package:ashes_note/ashes_theme.dart';
 import 'package:ashes_note/l10n/app_localizations.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
+import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/views/flyme_note_view.dart';
 import 'package:ashes_note/views/settings_view.dart';
 import 'package:ashes_note/views/book_library_page.dart';
@@ -21,7 +22,7 @@ class AshesNoteApp extends StatefulWidget {
   State<AshesNoteApp> createState() => _AshesNoteAppState();
 }
 
-class _AshesNoteAppState extends State<AshesNoteApp> {
+class _AshesNoteAppState extends State<AshesNoteApp> with WidgetsBindingObserver {
   late SidebarXController _controller;
   final _key = GlobalKey<ScaffoldState>();
   static const String _lastSelectedMenuKey = 'last_selected_menu';
@@ -29,6 +30,8 @@ class _AshesNoteAppState extends State<AshesNoteApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    
     // 从本地存储加载上次选择的菜单索引
     final lastSelectedIndex = SPUtil.get<int>(_lastSelectedMenuKey, 0);
     _controller = SidebarXController(
@@ -41,8 +44,16 @@ class _AshesNoteAppState extends State<AshesNoteApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_onMenuChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    super.didChangePlatformBrightness();
+    // 当系统亮度改变时重新构建应用
+    setState(() {});
   }
 
   void _onMenuChanged() {
@@ -52,10 +63,12 @@ class _AshesNoteAppState extends State<AshesNoteApp> {
 
   @override
   Widget build(BuildContext context) {
+    final currentTheme = ThemeManager.getCurrentTheme();
+
     return MaterialApp(
       title: '草灰笔记',
       debugShowCheckedModeBanner: false,
-      theme: darkTheme.mainTheme,
+      theme: currentTheme.mainTheme,
       localizationsDelegates: const [
         ...AppLocalizations.localizationsDelegates,
       ],
@@ -128,10 +141,11 @@ class AshesNoteSidebarX extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currentTheme = ThemeManager.getCurrentTheme();
     return SidebarX(
       controller: _controller,
-      theme: darkTheme.sidebarTheme,
-      extendedTheme: darkTheme.sidebarExtendedTheme,
+      theme: currentTheme.sidebarTheme,
+      extendedTheme: currentTheme.sidebarExtendedTheme,
       footerDivider: Divider(color: Theme.of(context).dividerColor),
       // headerBuilder: (context, extended) => SizedBox(
       //   height: 100,
@@ -197,7 +211,14 @@ class AshesNoteScreens extends StatelessWidget {
         } else if (controller.selectedIndex == 2) {
           return Padding(
             padding: const EdgeInsets.all(16.0),
-            child: SettingsView(),
+            child: SettingsView(onThemeChanged: () {
+              // 通过重新构建MaterialApp来刷新主题
+              // 这里我们通过context找到最近的State对象来调用setState
+              final appState = context.findAncestorStateOfType<_AshesNoteAppState>();
+              if (appState != null) {
+                appState.setState(() {});
+              }
+            }),
           );
         } else {
           return Padding(

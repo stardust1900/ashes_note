@@ -185,6 +185,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).dialogTheme.backgroundColor,
         title: Text('删除笔记本'),
         content: Text('确定要删除这个笔记本吗？笔记本中的所有笔记也将被删除。此操作不可撤销。'),
         actions: [
@@ -371,7 +372,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       appBar: AppBar(
         title: Text('草灰笔记', style: Theme.of(context).textTheme.headlineMedium),
         backgroundColor: Theme.of(context).canvasColor,
-        foregroundColor: Theme.of(context).scaffoldBackgroundColor,
+        foregroundColor: Theme.of(context).textTheme.titleMedium?.color,
         elevation: 0,
         actions: [
           // 搜索框
@@ -383,7 +384,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 IconButton(
                   icon: Icon(
                     _isGlobalSearch ? Icons.search : Icons.folder,
-                    color: _isGlobalSearch ? Colors.blue : Colors.white54,
+                    color: _isGlobalSearch
+                        ? Theme.of(context).primaryColor
+                        : Theme.of(context).iconTheme.color?.withValues(alpha: 0.6),
                     size: 20,
                   ),
                   onPressed: () {
@@ -396,12 +399,16 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 Expanded(
                   child: TextField(
                     controller: _searchController,
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color),
                     decoration: InputDecoration(
                       hintText: _isGlobalSearch ? '搜索所有笔记本...' : '搜索当前笔记本...',
-                      hintStyle: TextStyle(color: Colors.white54),
+                      hintStyle: TextStyle(
+                        color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
+                      ),
                       border: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white),
+                        borderSide: BorderSide(
+                          color: Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey,
+                        ),
                       ),
                       contentPadding: EdgeInsets.symmetric(horizontal: 8),
                       isDense: true,
@@ -410,7 +417,11 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 ),
                 if (_currentSearchQuery.isNotEmpty)
                   IconButton(
-                    icon: Icon(Icons.clear, size: 16, color: Colors.white54),
+                    icon: Icon(
+                      Icons.clear,
+                      size: 16,
+                      color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
+                    ),
                     onPressed: () {
                       _searchController.clear();
                     },
@@ -420,7 +431,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
           ),
           IconButton(
             icon: Icon(Icons.sync),
-            color: _isSyncing ? Colors.grey : Colors.blue,
+            color: _isSyncing ? Colors.grey : Theme.of(context).primaryColor,
             onPressed: () {
               final scaffoldMessenger = ScaffoldMessenger.of(context);
               if (git == null || remoteUrl == null) {
@@ -487,7 +498,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
           ? null
           : FloatingActionButton(
               onPressed: _showCreateNoteDialog,
-              backgroundColor: Colors.blue,
+              backgroundColor: Theme.of(context).primaryColor,
               child: Icon(Icons.add),
             ),
     );
@@ -508,19 +519,25 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         // 搜索头部信息
         Container(
           padding: EdgeInsets.all(16),
-          color: Colors.grey[100],
+          color: Theme.of(context).dividerColor?.withValues(alpha: 0.2),
           child: Row(
             children: [
-              Icon(Icons.search, color: Colors.grey[600]),
+              Icon(Icons.search, color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7)),
               SizedBox(width: 8),
               Text(
                 '搜索 "$_currentSearchQuery"',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).textTheme.bodyMedium?.color,
+                ),
               ),
               Spacer(),
               Text(
                 '找到 ${_searchResults.length} 个结果',
-                style: TextStyle(color: Colors.grey[600]),
+                style: TextStyle(
+                  color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+                ),
               ),
             ],
           ),
@@ -546,16 +563,26 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.search_off, size: 64, color: Colors.grey[300]),
+          Icon(
+            Icons.search_off,
+            size: 64,
+            color: Theme.of(context).iconTheme.color?.withValues(alpha: 0.3),
+          ),
           SizedBox(height: 16),
           Text(
             '未找到相关笔记',
-            style: TextStyle(fontSize: 16, color: Colors.grey[500]),
+            style: TextStyle(
+              fontSize: 16,
+              color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+            ),
           ),
           SizedBox(height: 8),
           Text(
             '尝试使用其他关键词搜索',
-            style: TextStyle(fontSize: 14, color: Colors.grey[400]),
+            style: TextStyle(
+              fontSize: 14,
+              color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+            ),
           ),
         ],
       ),
@@ -564,10 +591,12 @@ class NotebookHomePageState extends State<NotebookHomePage> {
 
   Widget _buildSearchResultItem(GlobalSearchResult result) {
     final note = result.note;
+    final theme = Theme.of(context);
     return Card(
       margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      color: theme.cardTheme.color,
       child: ListTile(
-        leading: Icon(Icons.note, color: Colors.blue),
+        leading: Icon(Icons.note, color: theme.primaryColor),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -575,22 +604,29 @@ class NotebookHomePageState extends State<NotebookHomePage> {
             SizedBox(height: 4),
             Row(
               children: [
-                Icon(Icons.folder_open, size: 12, color: Colors.grey),
+                Icon(
+                  Icons.folder_open,
+                  size: 12,
+                  color: theme.iconTheme.color?.withValues(alpha: 0.5),
+                ),
                 SizedBox(width: 4),
                 Text(
                   result.notebookName,
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.iconTheme.color?.withValues(alpha: 0.6),
+                  ),
                 ),
                 SizedBox(width: 8),
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.blue[50],
+                    color: theme.primaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     result.matchType,
-                    style: TextStyle(fontSize: 10, color: Colors.blue),
+                    style: TextStyle(fontSize: 10, color: theme.primaryColor),
                   ),
                 ),
               ],
@@ -611,23 +647,32 @@ class NotebookHomePageState extends State<NotebookHomePage> {
             SizedBox(height: 4),
             Text(
               '修改时间: ${note.lastModified.toString().substring(0, 10)}',
-              style: TextStyle(fontSize: 10, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 10,
+                color: theme.iconTheme.color?.withValues(alpha: 0.4),
+              ),
             ),
           ],
         ),
-        trailing: Icon(Icons.chevron_right, color: Colors.grey),
+        trailing: Icon(
+          Icons.chevron_right,
+          color: theme.iconTheme.color?.withValues(alpha: 0.4),
+        ),
         onTap: () => _onSearchResultTap(result),
       ),
     );
   }
 
   Widget _buildHighlightedText(String text, String query, {int maxLines = 1}) {
+    final theme = Theme.of(context);
+    final textColor = theme.textTheme.bodyMedium?.color;
+
     if (query.isEmpty) {
       return Text(
         text,
         maxLines: maxLines,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 14),
+        style: TextStyle(fontSize: 14, color: textColor),
       );
     }
 
@@ -646,7 +691,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         text,
         maxLines: maxLines,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 14),
+        style: TextStyle(fontSize: 14, color: textColor),
       );
     }
 
@@ -656,7 +701,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         textSpans.add(
           TextSpan(
             text: text.substring(currentStart, match.start),
-            style: TextStyle(fontSize: 14, color: Colors.black87),
+            style: TextStyle(fontSize: 14, color: textColor),
           ),
         );
       }
@@ -680,7 +725,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       textSpans.add(
         TextSpan(
           text: text.substring(currentStart),
-          style: TextStyle(fontSize: 14, color: Colors.black87),
+          style: TextStyle(fontSize: 14, color: textColor),
         ),
       );
     }
@@ -845,16 +890,26 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.note_add, size: 64, color: Colors.grey[300]),
+            Icon(
+              Icons.note_add,
+              size: 64,
+              color: Theme.of(context).iconTheme.color?.withValues(alpha: 0.3),
+            ),
             SizedBox(height: 16),
             Text(
               '暂无笔记',
-              style: TextStyle(fontSize: 16, color: Colors.grey[500]),
+              style: TextStyle(
+                fontSize: 16,
+                color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+              ),
             ),
             SizedBox(height: 8),
             Text(
               '点击右下角按钮创建新笔记',
-              style: TextStyle(fontSize: 14, color: Colors.grey[400]),
+              style: TextStyle(
+                fontSize: 14,
+                color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+              ),
             ),
           ],
         ),
@@ -897,7 +952,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
           child: Card(
             color: Theme.of(context).canvasColor,
             margin: EdgeInsets.symmetric(horizontal: 0, vertical: 2),
-            elevation: 1,
+            elevation: Theme.of(context).cardTheme.elevation ?? 0,
             child: ListTile(
               title: Text(
                 note.title,
@@ -913,16 +968,25 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     note.content,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+                    ),
                   ),
                   SizedBox(height: 4),
                   Text(
                     '${note.lastModified.year}-${note.lastModified.month.toString().padLeft(2, '0')}-${note.lastModified.day.toString().padLeft(2, '0')}',
-                    style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+                    ),
                   ),
                 ],
               ),
-              trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: Theme.of(context).iconTheme.color?.withValues(alpha: 0.4),
+              ),
               onTap: () async {
                 final result = await Navigator.push<bool>(
                   context,

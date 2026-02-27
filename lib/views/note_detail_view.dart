@@ -13,6 +13,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
 import 'package:super_editor/super_editor.dart';
 import 'package:ashes_note/views/_toolbar.dart';
 
+
 // 笔记详情页面（包含查找功能）
 class NoteDetailPage extends StatefulWidget {
   final Note note;
@@ -99,13 +100,19 @@ class NoteDetailState extends State<NoteDetailPage> {
     _textController.addListener(_onTextChanged);
     _findController.addListener(_onFindTextChanged);
 
-    // 初始化高亮文本
-    _updateHighlightedText();
-
     // 初始化 SuperEditor
     _initSuperEditor();
 
     _searchResults = [];
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 在这里初始化需要context的变量
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _brightness.value = Theme.of(context).brightness;
+    });
   }
 
   @override
@@ -128,10 +135,6 @@ class NoteDetailState extends State<NoteDetailPage> {
 
   // SuperEditor 初始化
   void _initSuperEditor() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _brightness.value = Theme.of(context).brightness;
-    });
-
     _doc = deserializeMarkdownToDocument(note.content)
       ..addListener(_onSuperDocumentChange);
     _composer = MutableDocumentComposer();
@@ -290,10 +293,8 @@ class NoteDetailState extends State<NoteDetailPage> {
     });
   }
 
-  // 构建高亮文本的TextSpan列表
-  List<TextSpan> _highlightedSpans = [];
-
-  void _updateHighlightedText() {
+  // 带主题参数的高亮文本更新方法
+  void _updateHighlightedTextWithTheme(ThemeData theme, bool isDark) {
     final text = _textController.text;
     final query = _findController.text.trim();
 
@@ -301,7 +302,10 @@ class NoteDetailState extends State<NoteDetailPage> {
       _highlightedSpans = [
         TextSpan(
           text: text,
-          style: TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontSize: 14,
+            height: 1.4,
+          ),
         ),
       ];
       return;
@@ -318,7 +322,83 @@ class NoteDetailState extends State<NoteDetailPage> {
         spans.add(
           TextSpan(
             text: text.substring(currentStart, match.start),
-            style: TextStyle(color: Colors.white, fontSize: 14),
+            style: theme.textTheme.bodyMedium?.copyWith(fontSize: 14),
+          ),
+        );
+      }
+
+      // 添加匹配的文本，当前匹配项用不同颜色
+      final isCurrent = i == _currentFindIndex;
+      spans.add(
+        TextSpan(
+          text: text.substring(match.start, match.end),
+          style: TextStyle(
+            backgroundColor: isCurrent 
+              ? (isDark ? Colors.orange : Colors.yellow)
+              : (isDark ? Colors.yellow : Colors.orange),
+            color: isCurrent 
+              ? (isDark ? Colors.black : Colors.black87)
+              : (isDark ? Colors.black87 : Colors.black),
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+      );
+
+      currentStart = match.end;
+    }
+
+    // 添加剩余文本
+    if (currentStart < text.length) {
+      spans.add(
+        TextSpan(
+          text: text.substring(currentStart),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontSize: 14,
+            height: 1.4,
+          ),
+        ),
+      );
+    }
+
+    _highlightedSpans = spans;
+  }
+
+  // 构建高亮文本的TextSpan列表
+  List<TextSpan> _highlightedSpans = [];
+
+  void _updateHighlightedText() {
+    final theme = Theme.of(context);
+    final text = _textController.text;
+    final query = _findController.text.trim();
+    final textColor = theme.textTheme.bodyMedium?.color;
+
+    if (query.isEmpty || _matches.isEmpty) {
+      _highlightedSpans = [
+        TextSpan(
+          text: text,
+          style: TextStyle(
+            fontSize: 14,
+            height: 1.4,
+            color: textColor ?? Colors.black87,
+          ),
+        ),
+      ];
+      return;
+    }
+
+    final spans = <TextSpan>[];
+    int currentStart = 0;
+
+    for (int i = 0; i < _matches.length; i++) {
+      final match = _matches[i];
+
+      // 添加匹配前的文本
+      if (match.start > currentStart) {
+        spans.add(
+          TextSpan(
+            text: text.substring(currentStart, match.start),
+            style: TextStyle(fontSize: 14, color: textColor),
           ),
         );
       }
@@ -345,7 +425,7 @@ class NoteDetailState extends State<NoteDetailPage> {
       spans.add(
         TextSpan(
           text: text.substring(currentStart),
-          style: TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
+          style: TextStyle(fontSize: 14, height: 1.4, color: textColor),
         ),
       );
     }
@@ -821,6 +901,12 @@ class NoteDetailState extends State<NoteDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    // 更新高亮文本样式以匹配当前主题
+    _updateHighlightedTextWithTheme(theme, isDark);
+    
     return Shortcuts(
       shortcuts: _shortcuts,
       child: Actions(
@@ -858,7 +944,10 @@ class NoteDetailState extends State<NoteDetailPage> {
                         newTitle: _titleController.text,
                       );
                     },
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                     decoration: InputDecoration(
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.zero,
@@ -877,9 +966,9 @@ class NoteDetailState extends State<NoteDetailPage> {
                           fit: BoxFit.scaleDown,
                           child: Text(
                             '修改时间: ${note.lastModified.toString().substring(0, 16)}',
-                            style: TextStyle(
+                            style: theme.textTheme.bodySmall?.copyWith(
                               fontSize: 12,
-                              color: Colors.grey[600],
+                              color: isDark ? Colors.grey[400] : Colors.grey[600],
                             ),
                           ),
                         ),
@@ -902,7 +991,9 @@ class NoteDetailState extends State<NoteDetailPage> {
                 IconButton(
                   icon: Icon(
                     Icons.edit_note,
-                    color: _viewMode == 'edit' ? Colors.blue : Colors.grey,
+                    color: _viewMode == 'edit' 
+                      ? theme.primaryColor 
+                      : (isDark ? theme.disabledColor : Colors.grey),
                   ),
                   onPressed: () {
                     // 切换到普通编辑模式前，先保存当前内容
@@ -922,7 +1013,9 @@ class NoteDetailState extends State<NoteDetailPage> {
                 IconButton(
                   icon: Icon(
                     Icons.preview,
-                    color: _viewMode == 'preview' ? Colors.blue : Colors.grey,
+                    color: _viewMode == 'preview' 
+                      ? theme.primaryColor 
+                      : (isDark ? theme.disabledColor : Colors.grey),
                   ),
                   onPressed: () {
                     // 切换到预览模式前，先保存当前内容
@@ -941,8 +1034,8 @@ class NoteDetailState extends State<NoteDetailPage> {
                   icon: Icon(
                     Icons.format_paint,
                     color: _viewMode == 'superEditor'
-                        ? Colors.blue
-                        : Colors.grey,
+                        ? theme.primaryColor
+                        : (isDark ? theme.disabledColor : Colors.grey),
                   ),
                   onPressed: () {
                     // 切换到 SuperEditor 模式前，先保存当前内容
@@ -1022,11 +1115,13 @@ class NoteDetailState extends State<NoteDetailPage> {
   }
 
   Widget _buildFindPanel() {
+    final theme = Theme.of(context);
+
     return Container(
       padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[900],
-        border: Border(bottom: BorderSide(color: Colors.grey.shade700)),
+        color: theme.cardColor,
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
       child: Row(
         children: [
@@ -1034,11 +1129,23 @@ class NoteDetailState extends State<NoteDetailPage> {
             child: TextField(
               controller: _findController,
               focusNode: _findFocusNode,
-              style: TextStyle(color: Colors.white, fontSize: 14),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.textTheme.bodyMedium?.color,
+              ),
               decoration: InputDecoration(
                 hintText: '查找...',
-                hintStyle: TextStyle(color: Colors.white54),
-                border: OutlineInputBorder(),
+                hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5),
+                ),
+                border: OutlineInputBorder(
+                  borderSide: BorderSide(color: theme.dividerColor),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: theme.dividerColor),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: theme.primaryColor),
+                ),
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 8,
@@ -1052,25 +1159,32 @@ class NoteDetailState extends State<NoteDetailPage> {
             _totalMatches > 0
                 ? '${_currentFindIndex + 1}/$_totalMatches'
                 : '无匹配',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
+            ),
           ),
           SizedBox(width: 8),
           IconButton(
             icon: Icon(Icons.keyboard_arrow_up, size: 20),
             onPressed: _findPrevious,
             tooltip: '上一个 (Shift+F3)',
-            color: _totalMatches > 0 ? Colors.white : Colors.grey,
+            color: _totalMatches > 0
+              ? theme.iconTheme.color
+              : theme.disabledColor,
           ),
           IconButton(
             icon: Icon(Icons.keyboard_arrow_down, size: 20),
             onPressed: _findNext,
             tooltip: '下一个 (F3)',
-            color: _totalMatches > 0 ? Colors.white : Colors.grey,
+            color: _totalMatches > 0
+              ? theme.iconTheme.color
+              : theme.disabledColor,
           ),
           IconButton(
             icon: Icon(Icons.close, size: 20),
             onPressed: _closeFindPanel,
             tooltip: '关闭',
+            color: theme.iconTheme.color,
           ),
         ],
       ),
@@ -1081,12 +1195,15 @@ class NoteDetailState extends State<NoteDetailPage> {
 
   // SuperEditor 搜索栏
   Widget _buildSuperSearchBar() {
+    final theme = Theme.of(context);
+
+
     return Container(
       padding: const EdgeInsets.all(8.0),
       decoration: BoxDecoration(
-        color: Theme.of(context).appBarTheme.backgroundColor,
+        color: theme.appBarTheme.backgroundColor,
         border: Border(
-          bottom: BorderSide(color: Theme.of(context).dividerColor),
+          bottom: BorderSide(color: theme.dividerColor),
         ),
       ),
       child: Row(
@@ -1095,9 +1212,21 @@ class NoteDetailState extends State<NoteDetailPage> {
             child: TextField(
               controller: _searchController,
               focusNode: _searchFocusNode,
-              decoration: const InputDecoration(
+              style: theme.textTheme.bodyMedium,
+              decoration: InputDecoration(
                 hintText: 'Search...',
-                border: OutlineInputBorder(),
+                hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5),
+                ),
+                border: OutlineInputBorder(
+                  borderSide: BorderSide(color: theme.dividerColor),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: theme.dividerColor),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: theme.primaryColor),
+                ),
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 8,
@@ -1120,7 +1249,7 @@ class NoteDetailState extends State<NoteDetailPage> {
             _searchResults.isEmpty || _currentSearchIndex == -1
                 ? '0/0'
                 : '${_currentSearchIndex + 1}/${_searchResults.length}',
-            style: Theme.of(context).textTheme.bodyMedium,
+            style: theme.textTheme.bodyMedium,
           ),
           const SizedBox(width: 8),
           IconButton(
@@ -1159,6 +1288,8 @@ class NoteDetailState extends State<NoteDetailPage> {
   }
 
   Widget _buildEditor() {
+    final theme = Theme.of(context);
+
     return Stack(
       children: [
         SingleChildScrollView(
@@ -1170,7 +1301,10 @@ class NoteDetailState extends State<NoteDetailPage> {
                     return SelectableText.rich(
                       key: _selectableTextKey,
                       TextSpan(children: _highlightedSpans),
-                      style: TextStyle(fontSize: 14, height: 1.4),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontSize: 14,
+                        height: 1.4,
+                      ),
                     );
                   },
                 )
@@ -1180,11 +1314,12 @@ class NoteDetailState extends State<NoteDetailPage> {
                   decoration: InputDecoration(
                     border: InputBorder.none,
                     hintText: '开始输入内容...',
-                    hintStyle: TextStyle(color: Colors.white30),
+                    hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.textTheme.bodyMedium?.color?.withOpacity(0.3),
+                    ),
                   ),
-                  style: TextStyle(
+                  style: theme.textTheme.bodyMedium?.copyWith(
                     fontSize: 14,
-                    color: Colors.white,
                     height: 1.4,
                   ),
                 ),
@@ -1197,12 +1332,15 @@ class NoteDetailState extends State<NoteDetailPage> {
             child: Container(
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.black54,
+                color: theme.primaryColor.withOpacity(0.7),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
                 '${_currentFindIndex + 1}/$_totalMatches',
-                style: TextStyle(color: Colors.white, fontSize: 12),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.white,
+                  fontSize: 12,
+                ),
               ),
             ),
           ),
@@ -1302,6 +1440,9 @@ class NoteDetailState extends State<NoteDetailPage> {
   }
 
   Widget _buildPreview() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
     // 使用flutter_markdown包实现真正的Markdown预览
     return fm.Markdown(
       data: note.content,
@@ -1319,40 +1460,45 @@ class NoteDetailState extends State<NoteDetailPage> {
         return _buildLocalImage(path);
       },
       styleSheet: fm.MarkdownStyleSheet(
-        p: TextStyle(fontSize: 14, color: Colors.white70, height: 1.6),
-        h1: TextStyle(
+        p: theme.textTheme.bodyMedium?.copyWith(
+          fontSize: 14,
+          height: 1.6,
+        ),
+        h1: theme.textTheme.headlineMedium?.copyWith(
           fontSize: 26,
           fontWeight: FontWeight.bold,
-          color: Colors.white,
         ),
-        h2: TextStyle(
+        h2: theme.textTheme.headlineSmall?.copyWith(
           fontSize: 22,
           fontWeight: FontWeight.bold,
-          color: Colors.white,
         ),
-        h3: TextStyle(
+        h3: theme.textTheme.titleMedium?.copyWith(
           fontSize: 18,
           fontWeight: FontWeight.w700,
-          color: Colors.white,
         ),
-        code: TextStyle(
-          backgroundColor: Colors.grey[850],
-          color: Colors.orangeAccent,
+        code: theme.textTheme.bodyMedium?.copyWith(
+          backgroundColor: isDark ? Colors.grey[850] : Colors.grey[100],
+          color: isDark ? Colors.orangeAccent : Colors.deepOrange,
           fontFamily: 'Monospace',
           fontSize: 13,
         ),
         codeblockPadding: EdgeInsets.all(12),
         codeblockDecoration: BoxDecoration(
-          color: Colors.grey[900],
+          color: isDark ? Colors.grey[900] : Colors.grey[50],
           borderRadius: BorderRadius.circular(8),
         ),
-        blockquote: TextStyle(
-          color: Colors.grey[300],
+        blockquote: theme.textTheme.bodyMedium?.copyWith(
+          color: isDark ? Colors.grey[300] : Colors.grey[600],
           fontStyle: FontStyle.italic,
         ),
         blockquoteDecoration: BoxDecoration(
-          color: Colors.grey[900],
-          border: Border(left: BorderSide(color: Colors.blueAccent, width: 4)),
+          color: isDark ? Colors.grey[900] : Colors.grey[50],
+          border: Border(
+            left: BorderSide(
+              color: isDark ? Colors.blueAccent : theme.primaryColor,
+              width: 4,
+            ),
+          ),
           borderRadius: BorderRadius.circular(4),
         ),
       ),
@@ -1447,25 +1593,37 @@ class NoteDetailState extends State<NoteDetailPage> {
 
   // 统一的错误显示组件
   Widget _buildErrorWidget(String message, String path) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
     return Container(
       padding: EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.grey[850],
+        color: isDark ? Colors.grey[850] : Colors.grey[100],
         borderRadius: BorderRadius.circular(4),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.broken_image, color: Colors.grey[600], size: 48),
+          Icon(
+            Icons.broken_image, 
+            color: isDark ? Colors.grey[600] : Colors.grey[400], 
+            size: 48
+          ),
           SizedBox(height: 8),
           Text(
             message,
-            style: TextStyle(color: Colors.grey[500], fontSize: 12),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: isDark ? Colors.grey[500] : Colors.grey[600],
+            ),
           ),
           SizedBox(height: 4),
           Text(
             path,
-            style: TextStyle(color: Colors.grey[600], fontSize: 10),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: isDark ? Colors.grey[600] : Colors.grey[500],
+              fontSize: 10,
+            ),
             textAlign: TextAlign.center,
           ),
         ],

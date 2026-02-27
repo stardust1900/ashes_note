@@ -5,9 +5,12 @@ import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
+import 'package:ashes_note/ashes_theme.dart';
 
 class SettingsView extends StatefulWidget {
-  const SettingsView({super.key});
+  final VoidCallback? onThemeChanged;
+  
+  const SettingsView({super.key, this.onThemeChanged});
 
   @override
   State<SettingsView> createState() => _SettingsViewState();
@@ -25,6 +28,8 @@ class _SettingsViewState extends State<SettingsView> {
 
   String? _token;
   String? _remoteUrl;
+
+  String _selectedTheme = ThemeModes.minimal; // 默认极简主题
 
   bool _isObscure = true;
 
@@ -45,6 +50,7 @@ class _SettingsViewState extends State<SettingsView> {
     _giteeRemoteUrl = SPUtil.get<String>(PrefKeys.giteeRemoteUrl, '');
     _githubToken = SPUtil.get<String>(PrefKeys.githubToken, '');
     _githubRemoteUrl = SPUtil.get<String>(PrefKeys.githubRemoteUrl, '');
+    _selectedTheme = SPUtil.get<String>(PrefKeys.themeMode, ThemeModes.minimal);
 
     setState(() {
       if (_gitPlatform == GitPlatforms.gitee) {
@@ -77,6 +83,15 @@ class _SettingsViewState extends State<SettingsView> {
     }
   }
 
+  void _changeTheme(String themeMode) {
+    setState(() {
+      _selectedTheme = themeMode;
+    });
+    ThemeManager.setTheme(themeMode);
+    // 通知父组件主题已更改
+    widget.onThemeChanged?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -89,11 +104,76 @@ class _SettingsViewState extends State<SettingsView> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _buildThemeSection(),
+            const SizedBox(height: 24),
             _buildWorkingDirectorySection(),
             const SizedBox(height: 24),
             _buildGitConfigSection(),
             const SizedBox(height: 24),
             // _buildActionButtons(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThemeSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('主题设置', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 16),
+            ListTile(
+              title: const Text('极简主题'),
+              subtitle: const Text('清爽明亮的界面风格'),
+              leading: Radio<String>(
+                value: ThemeModes.minimal,
+                groupValue: _selectedTheme,
+                onChanged: (value) {
+                  if (value != null) {
+                    _changeTheme(value);
+                  }
+                },
+              ),
+              onTap: () {
+                _changeTheme(ThemeModes.minimal);
+              },
+            ),
+            ListTile(
+              title: const Text('暗黑主题'),
+              subtitle: const Text('护眼舒适的深色界面'),
+              leading: Radio<String>(
+                value: ThemeModes.dark,
+                groupValue: _selectedTheme,
+                onChanged: (value) {
+                  if (value != null) {
+                    _changeTheme(value);
+                  }
+                },
+              ),
+              onTap: () {
+                _changeTheme(ThemeModes.dark);
+              },
+            ),
+            ListTile(
+              title: const Text('墨水屏模式'),
+              subtitle: const Text('纯黑白高对比度，适合墨水屏设备'),
+              leading: Radio<String>(
+                value: ThemeModes.inkMode,
+                groupValue: _selectedTheme,
+                onChanged: (value) {
+                  if (value != null) {
+                    _changeTheme(value);
+                  }
+                },
+              ),
+              onTap: () {
+                _changeTheme(ThemeModes.inkMode);
+              },
+            ),
           ],
         ),
       ),
