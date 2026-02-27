@@ -326,12 +326,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
   Widget _buildTextToolbarOverlay() {
     final screenSize = MediaQuery.of(context).size;
 
-    // 打印调试信息
-    // print('构建工具栏 - 原始位置: $_toolbarPosition');
-
     // 计算工具栏位置（始终贴在所选文字上方，除了最上面几行）
     double left = _toolbarPosition.dx - 130; // 工具栏宽度约260，居中
-    double top = _toolbarPosition.dy - 50; // 贴在选中区域上方
+    double top = _toolbarPosition.dy - 80; // 贴在选中区域上方
 
     // print('计算后 - left: $left, top: $top');
 
@@ -3071,7 +3068,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 加载保存的字体大小
   Future<void> _loadFontSize() async {
-    final savedFontSize = await StorageManager.loadFontSize();
+    final savedFontSize = await StorageManager.loadFontSize(widget.bookPath);
     if (savedFontSize != null && savedFontSize >= 12 && savedFontSize <= 32) {
       setState(() {
         _fontSize = savedFontSize;
@@ -3082,7 +3079,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 保存字体大小
   Future<void> _saveFontSize() async {
-    await StorageManager.saveFontSize(_fontSize);
+    await StorageManager.saveFontSize(widget.bookPath, _fontSize);
     print('保存字体大小: $_fontSize');
   }
 
@@ -4784,7 +4781,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         vertical: 10,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.7),
+                        // color: Colors.black.withValues(alpha: 0.7),
+                        color: Theme.of(
+                          context,
+                        ).scaffoldBackgroundColor.withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -4796,14 +4796,17 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
                               valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.white,
+                                Theme.of(context).primaryColor,
                               ),
                             ),
                           ),
                           const SizedBox(width: 10),
                           Text(
                             '处理中...',
-                            style: TextStyle(color: Colors.white, fontSize: 14),
+                            style: TextStyle(
+                              color: Theme.of(context).primaryColor,
+                              fontSize: 14,
+                            ),
                           ),
                         ],
                       ),

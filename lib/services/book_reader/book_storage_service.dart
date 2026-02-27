@@ -13,7 +13,6 @@ class BookStorageService {
   static const String _lastReadBookKey = 'last_read_book';
   static const String _bookmarksPrefix = 'bookmarks_';
   static const String _highlightsPrefix = 'book_highlights_';
-  static const String _fontSizeKey = 'reader_font_size';
 
   SharedPreferences? _prefs;
 
@@ -147,20 +146,22 @@ class BookStorageService {
   // ==================== 字体大小 ====================
 
   /// 保存字体大小
-  Future<void> saveFontSize(double fontSize) async {
+  Future<void> saveFontSize(String bookPath, double fontSize) async {
     try {
       final prefs = await _preferences;
-      await prefs.setDouble(_fontSizeKey, fontSize);
+      final bookKey = 'book_font_size_${bookPath.hashCode}';
+      await prefs.setDouble(bookKey, fontSize);
     } catch (e) {
       print('保存字体大小失败: $e');
     }
   }
 
   /// 加载字体大小
-  Future<double?> loadFontSize() async {
+  Future<double?> loadFontSize(String bookPath) async {
     try {
       final prefs = await _preferences;
-      return prefs.getDouble(_fontSizeKey);
+      final bookKey = 'book_font_size_${bookPath.hashCode}';
+      return prefs.getDouble(bookKey);
     } catch (e) {
       return null;
     }
@@ -201,6 +202,15 @@ class BookStorageService {
       if (highlights != null) {
         await prefs.setString(newHighlightsKey, highlights);
         await prefs.remove(oldHighlightsKey);
+      }
+
+      // 迁移字体大小
+      final oldFontSizeKey = 'book_font_size_${oldBookPath.hashCode}';
+      final newFontSizeKey = 'book_font_size_${newBookPath.hashCode}';
+      final fontSize = prefs.getDouble(oldFontSizeKey);
+      if (fontSize != null) {
+        await prefs.setDouble(newFontSizeKey, fontSize);
+        await prefs.remove(oldFontSizeKey);
       }
 
       // 更新最后阅读书籍

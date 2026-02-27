@@ -199,20 +199,22 @@ class StorageManager {
   }
 
   /// 保存字体大小
-  static Future<void> saveFontSize(double fontSize) async {
+  static Future<void> saveFontSize(String bookPath, double fontSize) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('reader_font_size', fontSize);
+      final bookKey = 'book_font_size_${bookPath.hashCode}';
+      await prefs.setDouble(bookKey, fontSize);
     } catch (e) {
       print('保存字体大小失败: $e');
     }
   }
 
   /// 加载保存的字体大小
-  static Future<double?> loadFontSize() async {
+  static Future<double?> loadFontSize(String bookPath) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getDouble('reader_font_size');
+      final bookKey = 'book_font_size_${bookPath.hashCode}';
+      return prefs.getDouble(bookKey);
     } catch (e) {
       print('加载字体大小失败: $e');
       return null;
