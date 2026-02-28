@@ -12,7 +12,8 @@ class NoteExport {
     String bookTitle,
     List<Highlight> highlights,
     String Function(int chapterIndex) getChapterTitle,
-    String Function(int chapterIndex, int startOffset, int endOffset) getTextForRange,
+    String Function(int chapterIndex, int startOffset, int endOffset)
+    getTextForRange,
     BuildContext context,
   ) async {
     // 获取默认文件名
@@ -60,10 +61,7 @@ class NoteExport {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('导出失败: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('导出失败: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -145,7 +143,8 @@ class NoteExport {
     String bookTitle,
     List<Highlight> highlights,
     String Function(int chapterIndex) getChapterTitle,
-    String Function(int chapterIndex, int startOffset, int endOffset) getTextForRange,
+    String Function(int chapterIndex, int startOffset, int endOffset)
+    getTextForRange,
   ) {
     final buffer = StringBuffer();
 
@@ -178,22 +177,12 @@ class NoteExport {
         }
         buffer.writeln();
 
-        final tags = <String>[];
-        if (merged.hasHighlight) tags.add('高亮');
-        if (merged.hasUnderline) tags.add('划线');
-        if (merged.note != null && merged.note!.isNotEmpty) tags.add('笔记');
-
-        if (tags.isNotEmpty) {
-          buffer.writeln('> *${tags.join('、')}*');
-          buffer.writeln();
-        }
-
         if (merged.note != null && merged.note!.isNotEmpty) {
           buffer.writeln(merged.note);
           buffer.writeln();
         }
 
-        buffer.writeln('---');
+        // buffer.writeln('---');
         buffer.writeln();
       }
     }

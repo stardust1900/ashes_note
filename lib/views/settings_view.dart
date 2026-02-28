@@ -225,9 +225,21 @@ class _SettingsViewState extends State<SettingsView> {
                 _saveSettings();
                 ScaffoldMessenger.of(
                   context,
-                ).showSnackBar(SnackBar(content: Text('设置已保存')));
+                ).showSnackBar(const SnackBar(content: Text('设置已保存')));
               },
-              child: Text('保存设置'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).primaryColor,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                elevation: 2,
+              ),
+              child: const Text(
+                '保存设置',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
             ),
           ],
         ),
@@ -390,7 +402,19 @@ class _SettingsViewState extends State<SettingsView> {
                             );
                           });
                     },
-                    child: const Text('保存配置'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      elevation: 2,
+                    ),
+                    child: const Text(
+                      '保存配置',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton.icon(
@@ -418,20 +442,35 @@ class _SettingsViewState extends State<SettingsView> {
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context),
-                              child: const Text('取消'),
+                              child: const Text(
+                                '取消',
+                                style: TextStyle(fontWeight: FontWeight.w500),
+                              ),
                             ),
                             TextButton(
                               onPressed: () {
                                 _initRepo();
                                 Navigator.pop(context);
                               },
-                              style: TextButton.styleFrom(foregroundColor: Colors.red),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.red,
+                                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
                               child: const Text('初始化'),
                             ),
                           ],
                         ),
                       );
                     },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade600,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      elevation: 2,
+                    ),
                   ),
                 ],
               ),

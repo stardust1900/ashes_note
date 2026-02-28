@@ -1021,9 +1021,23 @@ class _BookReaderPageState extends State<BookReaderPage> {
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
               foregroundColor: Colors.grey[600],
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(
+                  color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
+                  width: 1,
+                ),
+              ),
             ),
-            child: const Text('取消', style: TextStyle(fontSize: 14)),
+            child: Text(
+              '取消',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[700],
+              ),
+            ),
           ),
           FilledButton(
             onPressed: () async {
@@ -1048,14 +1062,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
             style: FilledButton.styleFrom(
               backgroundColor: highlight.color,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(10),
               ),
+              elevation: 3,
             ),
             child: Text(
               isEditing ? '更新' : '保存',
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.3),
             ),
           ),
         ],
