@@ -329,109 +329,112 @@ class _SettingsViewState extends State<SettingsView> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                ElevatedButton(
-                  onPressed: () async {
-                    ScaffoldMessengerState messengerState =
-                        ScaffoldMessenger.of(context);
-                    if (_remoteUrl == null || _token == null) {
-                      messengerState.showSnackBar(
-                        const SnackBar(content: Text('请填写完整的Git配置')),
-                      );
-                      return;
-                    }
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  ElevatedButton(
+                    onPressed: () async {
+                      ScaffoldMessengerState messengerState =
+                          ScaffoldMessenger.of(context);
+                      if (_remoteUrl == null || _token == null) {
+                        messengerState.showSnackBar(
+                          const SnackBar(content: Text('请填写完整的Git配置')),
+                        );
+                        return;
+                      }
 
-                    String owner = _remoteUrl!
-                        .split('/')
-                        .reversed
-                        .toList()[1]; // 获取倒数第二部分作为owner
-                    String repo = _remoteUrl!
-                        .split('/')
-                        .reversed
-                        .toList()[0]; // 获取最后一部分作为repo
-                    if (repo.endsWith('.git')) {
-                      repo = repo.substring(0, repo.length - 4);
-                    }
+                      String owner = _remoteUrl!
+                          .split('/')
+                          .reversed
+                          .toList()[1]; // 获取倒数第二部分作为owner
+                      String repo = _remoteUrl!
+                          .split('/')
+                          .reversed
+                          .toList()[0]; // 获取最后一部分作为repo
+                      if (repo.endsWith('.git')) {
+                        repo = repo.substring(0, repo.length - 4);
+                      }
 
-                    print('Owner: $owner, Repo: $repo');
+                      print('Owner: $owner, Repo: $repo');
 
-                    GitFactory.getGitService(_gitPlatform, _token!)
-                        .getRepoInfo(owner, repo)
-                        .then((repoInfo) {
-                          print('Repo Info: $repoInfo');
-                          SPUtil.set<String>(
-                            PrefKeys.gitPlatform,
-                            _gitPlatform,
-                          );
-                          if (_gitPlatform == GitPlatforms.github) {
-                            SPUtil.set<String>(PrefKeys.githubToken, _token!);
+                      GitFactory.getGitService(_gitPlatform, _token!)
+                          .getRepoInfo(owner, repo)
+                          .then((repoInfo) {
+                            print('Repo Info: $repoInfo');
                             SPUtil.set<String>(
-                              PrefKeys.githubRemoteUrl,
-                              _remoteUrl!,
+                              PrefKeys.gitPlatform,
+                              _gitPlatform,
                             );
-                          } else if (_gitPlatform == GitPlatforms.gitee) {
-                            SPUtil.set<String>(PrefKeys.giteeToken, _token!);
-                            SPUtil.set<String>(
-                              PrefKeys.giteeRemoteUrl,
-                              _remoteUrl!,
+                            if (_gitPlatform == GitPlatforms.github) {
+                              SPUtil.set<String>(PrefKeys.githubToken, _token!);
+                              SPUtil.set<String>(
+                                PrefKeys.githubRemoteUrl,
+                                _remoteUrl!,
+                              );
+                            } else if (_gitPlatform == GitPlatforms.gitee) {
+                              SPUtil.set<String>(PrefKeys.giteeToken, _token!);
+                              SPUtil.set<String>(
+                                PrefKeys.giteeRemoteUrl,
+                                _remoteUrl!,
+                              );
+                            }
+                            messengerState.showSnackBar(
+                              const SnackBar(content: Text('配置已保存')),
                             );
-                          }
-                          messengerState.showSnackBar(
-                            const SnackBar(content: Text('配置已保存')),
-                          );
-                        })
-                        .catchError((error) {
-                          print('Error fetching repo info: $error');
-                          messengerState.showSnackBar(
-                            SnackBar(content: Text('获取仓库信息失败: $error')),
-                          );
-                        });
-                  },
-                  child: Text('保存配置'),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton.icon(
-                  icon: _isLoading
-                      ? Icon(Icons.downloading)
-                      : Icon(Icons.cloud_download_outlined),
-                  label: Text('初始化仓库'),
-                  onPressed: () {
-                    if (_remoteUrl == null ||
-                        _token == null ||
-                        _workingDirectory == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('请填写完整的Git配置和工作目录')),
+                          })
+                          .catchError((error) {
+                            print('Error fetching repo info: $error');
+                            messengerState.showSnackBar(
+                              SnackBar(content: Text('获取仓库信息失败: $error')),
+                            );
+                          });
+                    },
+                    child: const Text('保存配置'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    icon: _isLoading
+                        ? const Icon(Icons.downloading)
+                        : const Icon(Icons.cloud_download_outlined),
+                    label: const Text('初始化仓库'),
+                    onPressed: () {
+                      if (_remoteUrl == null ||
+                          _token == null ||
+                          _workingDirectory == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('请填写完整的Git配置和工作目录')),
+                        );
+                        return;
+                      }
+                      if (_isLoading) {
+                        return;
+                      }
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('初始化仓库'),
+                          content: const Text('该操作会删除未保存的本地文件，确定要初始化仓库吗？'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('取消'),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                _initRepo();
+                                Navigator.pop(context);
+                              },
+                              style: TextButton.styleFrom(foregroundColor: Colors.red),
+                              child: const Text('初始化'),
+                            ),
+                          ],
+                        ),
                       );
-                      return;
-                    }
-                    if (_isLoading) {
-                      return;
-                    }
-                    showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: Text('初始化仓库'),
-                        content: Text('该操作会删除未保存的本地文件，确定要初始化仓库吗？'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: Text('取消'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              _initRepo();
-                              Navigator.pop(context);
-                            },
-                            style: TextButton.styleFrom(foregroundColor: Colors.red),
-                            child: Text('初始化'),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ],
+                    },
+                  ),
+                ],
+              ),
             ),
           ],
         ),

@@ -64,7 +64,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   TextPainter? _textPainterCache;
 
   // 控制栏显示状态
-  bool _showControls = true;
+  bool _showControls = false;
 
   // 阅读位置保存相关
   Timer? _savePositionTimer;
@@ -1555,7 +1555,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
       if (isEnglish) {
         // 英文默认使用 Free Dictionary
         dataSource = 'free';
-        final freeFrom = DictionaryDialog.convertToFreeDictionaryLanguageCode(from);
+        final freeFrom = DictionaryDialog.convertToFreeDictionaryLanguageCode(
+          from,
+        );
         final freeTo = DictionaryDialog.convertToFreeDictionaryLanguageCode(to);
         result = await _freeDictionaryService.lookup(
           selectedWord,
@@ -1642,7 +1644,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
       Navigator.of(context).pop();
     }
   }
-
 
   /// 生成书籍缓存键（基于文件内容MD5）
   Future<String> _generateBookCacheKey() async {
@@ -2282,7 +2283,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     final lineHeight = _textPainterCache!.height;
 
     // 每页可用高度（减去 padding）
-    final usableHeight = availableHeight - 96;
+    final usableHeight = availableHeight - 140 - kToolbarHeight;
 
     List<ContentItem> currentPageItems = [];
     double currentPageHeight = 0;
@@ -2834,17 +2835,19 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 color: Theme.of(context).scaffoldBackgroundColor,
                 child: Column(
                   children: [
+                    // 顶部占位区域（AppBar隐藏时显示）
+                    if (!_showControls) const SizedBox(height: kToolbarHeight),
                     Expanded(
                       child: _pages.isNotEmpty
                           ? _buildPageContent(
                               _pages[_currentPageIndex],
                               // 预留顶部/底部工具栏高度，保证分页计算一致
-                              constraints.maxHeight - 120,
+                              constraints.maxHeight - 120 - kToolbarHeight,
                             )
                           : const Center(child: Text('暂无内容')),
                     ),
                     // 底部占位区域（控制栏会覆盖在这里）
-                    const SizedBox(height: 50),
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
@@ -2857,6 +2860,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   final tapX = details.globalPosition.dx;
                   final tapY = details.globalPosition.dy;
 
+                  // 如果控制栏显示，点击任何位置都隐藏控制栏
+                  if (_showControls) {
+                    setState(() {
+                      _showControls = false;
+                    });
+                    return;
+                  }
+
                   // 点击左右区域翻页
                   if (tapX < screenWidth * 0.2) {
                     _previousPage();
@@ -2864,9 +2875,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     _nextPage();
                   } else if (tapY > screenHeight * 0.2 &&
                       tapY < screenHeight * 0.8) {
-                    // 点击中间区域切换控制栏显示
+                    // 点击中间区域显示控制栏
                     setState(() {
-                      _showControls = !_showControls;
+                      _showControls = true;
                     });
                   }
                 },
@@ -3492,35 +3503,49 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   child: Center(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 10,
+                        horizontal: 24,
+                        vertical: 12,
                       ),
                       decoration: BoxDecoration(
-                        // color: Colors.black.withValues(alpha: 0.7),
-                        color: Theme.of(
-                          context,
-                        ).scaffoldBackgroundColor.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(20),
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.black.withValues(alpha: 0.85)
+                            : Colors.white.withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.15),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                          width: 1,
+                        ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           SizedBox(
-                            width: 16,
-                            height: 16,
+                            width: 20,
+                            height: 20,
                             child: CircularProgressIndicator(
-                              strokeWidth: 2,
+                              strokeWidth: 2.5,
                               valueColor: AlwaysStoppedAnimation<Color>(
                                 Theme.of(context).primaryColor,
                               ),
                             ),
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 12),
                           Text(
                             '处理中...',
                             style: TextStyle(
-                              color: Theme.of(context).primaryColor,
-                              fontSize: 14,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.white
+                                  : Colors.black87,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.3,
                             ),
                           ),
                         ],
