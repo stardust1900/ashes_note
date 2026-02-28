@@ -37,16 +37,21 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     final files = await booksDir.list().toList();
     final bookInfos = files
         .whereType<File>()
-        .where((f) => f.path.endsWith('.epub') ||
-                    f.path.endsWith('.mobi') ||
-                    f.path.endsWith('.azw3') ||
-                    f.path.endsWith('.kfx') ||
-                    f.path.endsWith('.pdf'))
+        .where(
+          (f) =>
+              f.path.endsWith('.epub') ||
+              f.path.endsWith('.mobi') ||
+              f.path.endsWith('.azw3') ||
+              f.path.endsWith('.kfx') ||
+              f.path.endsWith('.pdf'),
+        )
         .map((f) => BookInfo.fromFile(f))
         .toList();
 
     // 为 EPUB 文件提取封面（使用 Future.wait 并行处理）
-    final epubBooks = bookInfos.where((b) => b.file.path.endsWith('.epub')).toList();
+    final epubBooks = bookInfos
+        .where((b) => b.file.path.endsWith('.epub'))
+        .toList();
     final coverFutures = epubBooks.map((book) async {
       final coverFile = await _extractEpubCover(book.file);
       if (coverFile != null) {
@@ -79,9 +84,9 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       print('[BookLibrary] 工作目录: $workingDir');
       if (workingDir.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('请先设置工作目录')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('请先设置工作目录')));
         }
         return;
       }
@@ -113,24 +118,24 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       if (importedCount > 0) {
         await _loadBooks();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('成功导入 $importedCount 本书籍')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('成功导入 $importedCount 本书籍')));
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('选择的书籍已存在')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('选择的书籍已存在')));
         }
       }
     } catch (e, stackTrace) {
       print('[BookLibrary] 导入失败: $e');
       print('[BookLibrary] 堆栈: $stackTrace');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导入失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('导入失败: $e')));
       }
     }
   }
@@ -142,30 +147,30 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       final oldFile = book.file;
       final oldCoverFile = book.coverFile;
       final oldTitle = book.title;
-      
+
       // 获取文件扩展名
       final ext = oldFile.path.split('.').last;
       final dir = oldFile.parent.path;
-      
+
       // 生成新文件名（去除特殊字符）
       final safeNewTitle = newTitle.replaceAll(RegExp(r'[<>"/\\|?*]'), '_');
       final newFileName = '$safeNewTitle.$ext';
       final newFilePath = '$dir${Platform.pathSeparator}$newFileName';
-      
+
       // 检查新文件名是否已存在
       final newFile = File(newFilePath);
       if (await newFile.exists()) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('该名称的书籍已存在')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('该名称的书籍已存在')));
         }
         return;
       }
-      
+
       // 重命名书籍文件
       await oldFile.rename(newFilePath);
-      
+
       // 更新书籍列表中的信息
       setState(() {
         book.title = newTitle;
@@ -189,8 +194,9 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
       // 迁移页面缓存
       try {
-        final appDir = await getApplicationDocumentsDirectory();
-        final cacheDir = Directory('${appDir.path}/book_cache');
+        // final appDir = await getApplicationDocumentsDirectory();
+        final workingDir = SPUtil.get<String>('workingDirectory', '');
+        final cacheDir = Directory('$workingDir/books/.cache');
         if (await cacheDir.exists()) {
           final oldCacheKey = oldFile.path.hashCode.toString();
           final newCacheKey = newFile.path.hashCode.toString();
@@ -207,10 +213,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
       // 迁移高亮和笔记数据（使用新的存储服务）
       try {
-        await BookStorageService().migrateBookData(
-          oldFile.path,
-          newFile.path,
-        );
+        await BookStorageService().migrateBookData(oldFile.path, newFile.path);
         print('[BookLibrary] 书籍数据已迁移');
       } catch (e) {
         // 数据迁移失败不影响主流程
@@ -222,8 +225,9 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         final coverDir = oldCoverFile.parent.path;
         final coverExt = oldCoverFile.path.split('.').last;
         final newCoverFileName = '$safeNewTitle.$coverExt';
-        final newCoverPath = '$coverDir${Platform.pathSeparator}$newCoverFileName';
-        
+        final newCoverPath =
+            '$coverDir${Platform.pathSeparator}$newCoverFileName';
+
         // 只有当旧封面文件名包含旧标题时才重命名
         if (oldCoverFile.path.contains(oldTitle)) {
           await oldCoverFile.rename(newCoverPath);
@@ -234,15 +238,15 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已重命名为《$newTitle》')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('已重命名为《$newTitle》')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('重命名失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('重命名失败: $e')));
       }
     }
   }
@@ -292,8 +296,9 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
       // 删除页面缓存（使用缓存键直接删除，避免遍历所有文件）
       try {
-        final appDir = await getApplicationDocumentsDirectory();
-        final cacheDir = Directory('${appDir.path}/book_cache');
+        // final appDir = await getApplicationDocumentsDirectory();
+        final workingDir = SPUtil.get<String>('workingDirectory', '');
+        final cacheDir = Directory('$workingDir/books/.cache');
         if (await cacheDir.exists()) {
           // 根据书籍路径生成缓存键（与阅读器页面逻辑一致）
           final cacheKey = book.file.path.hashCode.toString();
@@ -311,15 +316,15 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       await _loadBooks();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('《${book.title}》已删除')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('《${book.title}》已删除')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('删除失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
       }
     }
   }
@@ -337,7 +342,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           ),
         ],
       ),
-            body: _books.isEmpty
+      body: _books.isEmpty
           ? _buildEmptyState()
           : GridView.builder(
               padding: const EdgeInsets.all(8),
@@ -393,8 +398,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       // 首先尝试查找名称中包含 cover 或 front 的图片
       for (var file in archive) {
         final name = file.name.toLowerCase();
-        if (name.endsWith('.jpg') || name.endsWith('.jpeg') ||
-            name.endsWith('.png') || name.endsWith('.webp')) {
+        if (name.endsWith('.jpg') ||
+            name.endsWith('.jpeg') ||
+            name.endsWith('.png') ||
+            name.endsWith('.webp')) {
           if (name.contains('cover') || name.contains('front')) {
             final content = file.content as List<int>;
             coverData = Uint8List.fromList(content);
@@ -407,8 +414,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       if (coverData == null) {
         for (var file in archive) {
           final name = file.name.toLowerCase();
-          if (name.endsWith('.jpg') || name.endsWith('.jpeg') ||
-              name.endsWith('.png') || name.endsWith('.webp')) {
+          if (name.endsWith('.jpg') ||
+              name.endsWith('.jpeg') ||
+              name.endsWith('.png') ||
+              name.endsWith('.webp')) {
             final content = file.content as List<int>;
             coverData = Uint8List.fromList(content);
             break;
@@ -423,8 +432,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           await cacheDir.create(recursive: true);
         }
         // 使用安全的文件名（去除特殊字符）
-        final safeFileName = epubFile.uri.pathSegments.last
-            .replaceAll(RegExp(r'[<>"/\\|?*]'), '_');
+        final safeFileName = epubFile.uri.pathSegments.last.replaceAll(
+          RegExp(r'[<>"/\\|?*]'),
+          '_',
+        );
         final coverFile = File('${cacheDir.path}/$safeFileName.jpg');
         await coverFile.writeAsBytes(coverData);
         return coverFile;
@@ -463,7 +474,10 @@ class BookInfo {
   factory BookInfo.fromFile(File file) {
     final filename = file.uri.pathSegments.last;
     // 简单的文件名作为标题
-    String title = filename.replaceAll(RegExp(r'\.(epub|mobi|azw3|kfx|pdf)$'), '');
+    String title = filename.replaceAll(
+      RegExp(r'\.(epub|mobi|azw3|kfx|pdf)$'),
+      '',
+    );
     String author = '未知作者';
     File? coverFile;
 
@@ -526,9 +540,7 @@ class _BookCardState extends State<_BookCard> {
       child: Card(
         elevation: 2,
         clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         child: InkWell(
           onTap: widget.onTap,
           onLongPress: () => _showActionMenu(context),
@@ -749,7 +761,7 @@ class _BookCardState extends State<_BookCard> {
   /// 显示重命名对话框
   void _showRenameDialog(BuildContext context) {
     final controller = TextEditingController(text: widget.book.title);
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -778,7 +790,10 @@ class _BookCardState extends State<_BookCard> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               style: const TextStyle(fontSize: 14),
             ),
@@ -797,9 +812,7 @@ class _BookCardState extends State<_BookCard> {
                 widget.onRename(newTitle);
               }
             },
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.blue,
-            ),
+            style: FilledButton.styleFrom(backgroundColor: Colors.blue),
             child: const Text('保存'),
           ),
         ],

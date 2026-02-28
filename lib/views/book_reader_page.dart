@@ -16,6 +16,7 @@ import '../models/book_reader/bookmark.dart';
 import '../models/book_reader/highlight.dart';
 import '../models/book_reader/content_item.dart'
     show ContentItem, TextContent, ImageContent, CoverContent;
+import '../utils/prefs_util.dart';
 import 'book_reader/highlight_operations.dart';
 import 'book_reader/search_manager.dart';
 import 'book_reader/note_export.dart';
@@ -1070,7 +1071,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
             ),
             child: Text(
               isEditing ? '更新' : '保存',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.3),
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
             ),
           ),
         ],
@@ -1331,7 +1336,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Theme.of(context).primaryColor,
-                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                          foregroundColor: Theme.of(
+                            context,
+                          ).colorScheme.onPrimary,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 10,
@@ -1343,7 +1350,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             borderRadius: BorderRadius.circular(6),
                           ),
                         ),
-                        child: const Text('搜索', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                        child: const Text(
+                          '搜索',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -1666,8 +1679,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 获取缓存目录路径
   Future<String> _getCacheDirectory() async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final cacheDir = Directory('${appDir.path}/book_cache');
+    // final appDir = await getApplicationDocumentsDirectory();
+    final workingDir = SPUtil.get<String>('workingDirectory', '');
+    final cacheDir = Directory('$workingDir/books/.cache');
     if (!await cacheDir.exists()) {
       await cacheDir.create(recursive: true);
     }
@@ -3523,7 +3537,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           ),
                         ],
                         border: Border.all(
-                          color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.outline.withOpacity(0.3),
                           width: 1,
                         ),
                       ),
@@ -3544,7 +3560,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           Text(
                             '处理中...',
                             style: TextStyle(
-                              color: Theme.of(context).brightness == Brightness.dark
+                              color:
+                                  Theme.of(context).brightness ==
+                                      Brightness.dark
                                   ? Colors.white
                                   : Colors.black87,
                               fontSize: 15,

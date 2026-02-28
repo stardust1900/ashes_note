@@ -46,6 +46,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
     String gitPlatform = SPUtil.get<String>(PrefKeys.gitPlatform, '');
 
     print('notes 目录: $workingDirectory/notes');
+    final notesDir = Directory('$workingDirectory/notes');
 
     if (gitPlatform.isNotEmpty) {
       if (gitPlatform == GitPlatforms.gitee) {
@@ -62,7 +63,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       print('lastPullTime: $lastPullTime');
       var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
       if (lastPullTime == '') {
-        git!.pull(owner, repo, workingDirectory).then((_) {
+        git!.pull(owner, repo, notesDir.path).then((_) {
           SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
         });
         _loadNotebookList();
@@ -72,7 +73,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
           List<Map<String, dynamic>> commits,
         ) {
           if (commits.isNotEmpty) {
-            git!.pull(owner, repo, workingDirectory).then((_) {
+            git!.pull(owner, repo, notesDir.path).then((_) {
               SPUtil.set(
                 PrefKeys.lastPullTime,
                 DateTime.now().toIso8601String(),
@@ -386,7 +387,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     _isGlobalSearch ? Icons.search : Icons.folder,
                     color: _isGlobalSearch
                         ? Theme.of(context).primaryColor
-                        : Theme.of(context).iconTheme.color?.withValues(alpha: 0.6),
+                        : Theme.of(
+                            context,
+                          ).iconTheme.color?.withValues(alpha: 0.6),
                     size: 20,
                   ),
                   onPressed: () {
@@ -399,15 +402,21 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 Expanded(
                   child: TextField(
                     controller: _searchController,
-                    style: TextStyle(color: Theme.of(context).textTheme.bodyMedium?.color),
+                    style: TextStyle(
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
                     decoration: InputDecoration(
                       hintText: _isGlobalSearch ? '搜索所有笔记本...' : '搜索当前笔记本...',
                       hintStyle: TextStyle(
-                        color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
+                        color: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
                       ),
                       border: OutlineInputBorder(
                         borderSide: BorderSide(
-                          color: Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey,
+                          color:
+                              Theme.of(context).textTheme.bodyMedium?.color ??
+                              Colors.grey,
                         ),
                       ),
                       contentPadding: EdgeInsets.symmetric(horizontal: 8),
@@ -420,7 +429,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     icon: Icon(
                       Icons.clear,
                       size: 16,
-                      color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
+                      color: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
                     ),
                     onPressed: () {
                       _searchController.clear();
@@ -522,7 +533,12 @@ class NotebookHomePageState extends State<NotebookHomePage> {
           color: Theme.of(context).dividerColor?.withValues(alpha: 0.2),
           child: Row(
             children: [
-              Icon(Icons.search, color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7)),
+              Icon(
+                Icons.search,
+                color: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+              ),
               SizedBox(width: 8),
               Text(
                 '搜索 "$_currentSearchQuery"',
@@ -536,7 +552,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
               Text(
                 '找到 ${_searchResults.length} 个结果',
                 style: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+                  color: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
                 ),
               ),
             ],
@@ -573,7 +591,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
             '未找到相关笔记',
             style: TextStyle(
               fontSize: 16,
-              color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+              color: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
             ),
           ),
           SizedBox(height: 8),
@@ -581,7 +601,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
             '尝试使用其他关键词搜索',
             style: TextStyle(
               fontSize: 14,
-              color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+              color: Theme.of(
+                context,
+              ).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
             ),
           ),
         ],
@@ -900,7 +922,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
               '暂无笔记',
               style: TextStyle(
                 fontSize: 16,
-                color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+                color: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
               ),
             ),
             SizedBox(height: 8),
@@ -908,7 +932,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
               '点击右下角按钮创建新笔记',
               style: TextStyle(
                 fontSize: 14,
-                color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+                color: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
               ),
             ),
           ],
@@ -970,7 +996,9 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+                      color: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
                     ),
                   ),
                   SizedBox(height: 4),
@@ -978,14 +1006,18 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     '${note.lastModified.year}-${note.lastModified.month.toString().padLeft(2, '0')}-${note.lastModified.day.toString().padLeft(2, '0')}',
                     style: TextStyle(
                       fontSize: 10,
-                      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+                      color: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
                     ),
                   ),
                 ],
               ),
               trailing: Icon(
                 Icons.chevron_right,
-                color: Theme.of(context).iconTheme.color?.withValues(alpha: 0.4),
+                color: Theme.of(
+                  context,
+                ).iconTheme.color?.withValues(alpha: 0.4),
               ),
               onTap: () async {
                 final result = await Navigator.push<bool>(
