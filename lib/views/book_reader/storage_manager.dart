@@ -1,7 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/book_reader/bookmark.dart';
 import '../../models/book_reader/highlight.dart';
@@ -132,7 +130,7 @@ class StorageManager {
       final prefs = await SharedPreferences.getInstance();
       final key = _getBookmarksKey(bookPath);
       final bookmarksJson = prefs.getStringList(key);
-      
+
       if (bookmarksJson != null && bookmarksJson.isNotEmpty) {
         final bookmarks = <Bookmark>[];
         for (var json in bookmarksJson) {
@@ -187,9 +185,7 @@ class StorageManager {
       if (highlightsString != null) {
         final highlightsList = jsonDecode(highlightsString) as List<dynamic>;
         return highlightsList
-            .map(
-              (json) => Highlight.fromJson(json as Map<String, dynamic>),
-            )
+            .map((json) => Highlight.fromJson(json as Map<String, dynamic>))
             .toList();
       }
     } catch (e) {
@@ -264,15 +260,5 @@ class StorageManager {
       print('加载词典翻译目标语言失败: $e');
       return null;
     }
-  }
-
-  /// 获取缓存目录路径
-  static Future<String> getCacheDirectory() async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final cacheDir = Directory('${appDir.path}/book_cache');
-    if (!await cacheDir.exists()) {
-      await cacheDir.create(recursive: true);
-    }
-    return cacheDir.path;
   }
 }
