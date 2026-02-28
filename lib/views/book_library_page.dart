@@ -5,7 +5,6 @@ import 'package:ashes_note/services/book_reader/book_reader_services.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'book_reader_page.dart';
 
 /// 书籍库页面 - 展示所有导入的书籍
@@ -431,12 +430,15 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         if (!await cacheDir.exists()) {
           await cacheDir.create(recursive: true);
         }
-        // 使用安全的文件名（去除特殊字符）
-        final safeFileName = epubFile.uri.pathSegments.last.replaceAll(
-          RegExp(r'[<>"/\\|?*]'),
-          '_',
+        // 使用书籍文件路径的哈希值作为封面图片名，避免重名和特殊字符问题
+        final coverFile = File(
+          '${cacheDir.path}/${epubFile.path.hashCode}.jpg',
         );
-        final coverFile = File('${cacheDir.path}/$safeFileName.jpg');
+        // final safeFileName = epubFile.uri.pathSegments.last.replaceAll(
+        //   RegExp(r'[<>"/\\|?*]'),
+        //   '_',
+        // );
+        // final coverFile = File('${cacheDir.path}/$safeFileName.jpg');
         await coverFile.writeAsBytes(coverData);
         return coverFile;
       }

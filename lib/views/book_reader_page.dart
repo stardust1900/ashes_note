@@ -7,7 +7,6 @@ import 'package:flutter/material.dart' hide Image;
 import 'package:flutter/material.dart' as material show Image;
 import 'package:image/image.dart' as img;
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 import '../services/book_reader/youdao_dictionary_service.dart';
 import '../services/book_reader/free_dictionary_service.dart';
 import '../services/book_reader/hz_dictionary_service.dart';
@@ -1893,8 +1892,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
         _epubBook = epub;
         _chapters.addAll(_flattenChapters(epub.chapters));
       });
-
-      await _loadCoverImage(epub);
+      //根据 widget.bookPath 的哈希 判断封面图片是否已经存在，如果存在直接用
+      final cacheDir = Directory('${file.parent.path}/.cache');
+      final coverFile = File(
+        '${cacheDir.path}/${widget.bookPath.hashCode}.jpg',
+      );
+      if (await coverFile.exists()) {
+      } else {
+        await _loadCoverImage(epub);
+      }
 
       // 加载上次阅读位置
       final savedPosition = await _loadReadingPosition();
