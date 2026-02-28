@@ -1278,70 +1278,59 @@ class _BookReaderPageState extends State<BookReaderPage> {
             ),
             Container(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      autofocus: false,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      decoration: InputDecoration(
-                        hintText: '输入搜索词',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        isDense: true,
+                  TextField(
+                    controller: _searchController,
+                    autofocus: false,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    decoration: InputDecoration(
+                      hintText: '输入搜索词',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      onSubmitted: (value) {
-                        final searchText = value.trim();
-                        if (searchText.isNotEmpty) {
-                          _performSearch(searchText);
-                        }
-                      },
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      isDense: true,
                     ),
-                  ),
-                  const SizedBox(width: 2),
-                  ElevatedButton(
-                    onPressed: () {
-                      final searchText = _searchController.text.trim();
+                    onSubmitted: (value) {
+                      final searchText = value.trim();
                       if (searchText.isNotEmpty) {
                         _performSearch(searchText);
                       }
                     },
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      iconColor: Theme.of(context).colorScheme.onPrimary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                    child: const Text('搜索', style: TextStyle(fontSize: 14)),
                   ),
-                  const SizedBox(width: 2),
-                  IconButton(
-                    icon: const Icon(Icons.clear),
-                    color: Theme.of(context).colorScheme.onPrimary,
-                    onPressed: () {
-                      setState(() {
-                        _searchController.clear();
-                        _searchResults.clear();
-                        _displaySearchResults.clear();
-                        _currentSearchIndex = 0;
-                        _highlightSearchResults = false;
-                      });
-                    },
-                    tooltip: '清除',
-                    padding: const EdgeInsets.all(4),
-                    constraints: const BoxConstraints(),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () {
+                          final searchText = _searchController.text.trim();
+                          if (searchText.isNotEmpty) {
+                            _performSearch(searchText);
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Theme.of(context).primaryColor,
+                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                        ),
+                        child: const Text('搜索', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                      ),
+                    ],
                   ),
                 ],
               ),
