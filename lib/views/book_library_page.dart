@@ -52,7 +52,13 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         .where((b) => b.file.path.endsWith('.epub'))
         .toList();
     final coverFutures = epubBooks.map((book) async {
-      final coverFile = await _extractEpubCover(book.file);
+      File? coverFile = File(
+        '${booksDir.path}/.cache/${book.file.path.hashCode}.jpg',
+      );
+      //已经提取的不要重复提取
+      if (!coverFile.existsSync()) {
+        coverFile = await _extractEpubCover(book.file);
+      }
       if (coverFile != null) {
         book.coverFile = coverFile;
       }
