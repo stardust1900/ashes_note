@@ -22,6 +22,7 @@ import 'book_reader/note_export.dart';
 import 'book_reader/storage_manager.dart';
 import 'book_reader/selectable_text_with_toolbar.dart';
 import 'book_reader/notes_list_dialog.dart';
+import 'book_reader/dictionary_dialog.dart';
 
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
@@ -81,26 +82,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   // 字体大小保存相关
   bool _showFontSizeSlider = false;
   double _tempFontSize = 16;
-
-  // 词典翻译目标语言保存相关
-  // 语言代码映射（有道词典 -> Free Dictionary API）
-  // Free Dictionary API 使用 cmn 表示普通话（中文翻译）
-  static const Map<String, String> _languageCodeMap = {
-    'zh-CHS': 'cmn', // 简体中文 -> Chinese Mandarin
-    'zh': 'cmn',
-    'cmn': 'cmn',
-    'en': 'en',
-    'ja': 'ja',
-    'ko': 'ko',
-    'fr': 'fr',
-    'de': 'de',
-    'es': 'es',
-  };
-
-  /// 转换语言代码到 Free Dictionary API 格式
-  String _convertToFreeDictionaryLanguageCode(String code) {
-    return _languageCodeMap[code] ?? code;
-  }
 
   // 文本选择和气泡工具栏相关
   String? _selectedText;
@@ -1226,7 +1207,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
       top: 0,
       bottom: 0,
       child: Container(
-        width: 320,
+        width: MediaQuery.of(context).size.width * 0.5,
         decoration: BoxDecoration(
           color: theme.cardColor,
           boxShadow: [
@@ -1241,7 +1222,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
               decoration: BoxDecoration(
                 color: theme.cardColor,
                 border: Border(bottom: BorderSide(color: theme.dividerColor)),
@@ -1249,10 +1230,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '搜索',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+                  const Flexible(
+                    child: Text(
+                      '搜索',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
                     ),
                   ),
                   Row(
@@ -1263,6 +1247,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           _searchDrawerOnRight
                               ? Icons.arrow_back
                               : Icons.arrow_forward,
+                          size: 20,
                         ),
                         color: theme.iconTheme.color,
                         onPressed: () {
@@ -1271,9 +1256,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           });
                         },
                         tooltip: '切换位置',
+                        padding: const EdgeInsets.all(6),
+                        constraints: const BoxConstraints(),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.close),
+                        icon: const Icon(Icons.close, size: 20),
                         color: theme.iconTheme.color,
                         onPressed: () {
                           setState(() {
@@ -1281,6 +1268,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             _highlightSearchResults = false; // 关闭时取消高亮
                           });
                         },
+                        padding: const EdgeInsets.all(6),
+                        constraints: const BoxConstraints(),
                       ),
                     ],
                   ),
@@ -1288,7 +1277,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
               ),
             ),
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
               child: Row(
                 children: [
                   Expanded(
@@ -1305,6 +1294,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           horizontal: 12,
                           vertical: 8,
                         ),
+                        isDense: true,
                       ),
                       onSubmitted: (value) {
                         final searchText = value.trim();
@@ -1314,7 +1304,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       },
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 2),
                   ElevatedButton(
                     onPressed: () {
                       final searchText = _searchController.text.trim();
@@ -1324,15 +1314,22 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
+                        horizontal: 12,
                         vertical: 8,
                       ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      iconColor: Theme.of(context).colorScheme.onPrimary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
                     ),
-                    child: const Text('搜索'),
+                    child: const Text('搜索', style: TextStyle(fontSize: 14)),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 2),
                   IconButton(
                     icon: const Icon(Icons.clear),
+                    color: Theme.of(context).colorScheme.onPrimary,
                     onPressed: () {
                       setState(() {
                         _searchController.clear();
@@ -1343,6 +1340,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       });
                     },
                     tooltip: '清除',
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
                   ),
                 ],
               ),
@@ -1556,8 +1555,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
       if (isEnglish) {
         // 英文默认使用 Free Dictionary
         dataSource = 'free';
-        final freeFrom = _convertToFreeDictionaryLanguageCode(from);
-        final freeTo = _convertToFreeDictionaryLanguageCode(to);
+        final freeFrom = DictionaryDialog.convertToFreeDictionaryLanguageCode(from);
+        final freeTo = DictionaryDialog.convertToFreeDictionaryLanguageCode(to);
         result = await _freeDictionaryService.lookup(
           selectedWord,
           from: freeFrom,
@@ -1578,28 +1577,38 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
       // 无论 result 是否为 null，都显示词典结果对话框
       // 如果为 null，对话框会显示"没有查到"信息
-      _showDictionaryResultDialog(
-        selectedWord,
-        result,
+      DictionaryDialog.show(
+        context,
+        word: selectedWord,
+        result: result,
         from: from,
         to: to,
         dataSource: dataSource,
+        youdaoService: _youdaoService,
+        freeDictionaryService: _freeDictionaryService,
+        hzService: _hzService,
+        saveDictionaryTargetLanguage: _saveDictionaryTargetLanguage,
       );
     } catch (e) {
       print('词典查询异常: $e'); // 调试信息
       _hideLoadingDialog();
       if (mounted) {
         _hideTextToolbar();
-        _showDictionaryResultDialog(
-          selectedWord,
-          null,
+        DictionaryDialog.show(
+          context,
+          word: selectedWord,
+          result: null,
           from: from,
           to: to,
           dataSource: dataSource,
+          youdaoService: _youdaoService,
+          freeDictionaryService: _freeDictionaryService,
+          hzService: _hzService,
+          saveDictionaryTargetLanguage: _saveDictionaryTargetLanguage,
         );
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('网络请求失败')));
+        ).showSnackBar(const SnackBar(content: Text('网络请求失败')));
       }
     }
   }
@@ -1634,633 +1643,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
-  /// 解析简单的 Markdown 格式文本为 Widget 列表
-  List<Widget> _parseMarkdown(String markdown) {
-    final widgets = <Widget>[];
-    final lines = markdown.split('\n');
-    final buffer = StringBuffer();
-    bool isBold = false;
-
-    for (int i = 0; i < lines.length; i++) {
-      final line = lines[i];
-
-      if (line.isEmpty) {
-        // 空行，如果 buffer 有内容则添加
-        if (buffer.isNotEmpty) {
-          widgets.add(
-            SelectableText(
-              buffer.toString().trim(),
-              style: TextStyle(
-                fontSize: 14,
-                height: 1.6,
-                color:
-                    Theme.of(context).textTheme.bodyMedium?.color ??
-                    Colors.white,
-                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          );
-          widgets.add(SizedBox(height: 8));
-          buffer.clear();
-          isBold = false;
-        } else {
-          // 连续的空行
-          widgets.add(SizedBox(height: 8));
-        }
-        continue;
-      }
-
-      // 检查是否是粗体标记 **文本**
-      if (line.startsWith('**') && line.endsWith('**')) {
-        // 处理单行粗体
-        if (buffer.isNotEmpty) {
-          widgets.add(
-            SelectableText(
-              buffer.toString().trim(),
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(fontSize: 14, height: 1.6),
-            ),
-          );
-          buffer.clear();
-        }
-        final boldText = line.substring(2, line.length - 2);
-        widgets.add(
-          SelectableText(
-            boldText,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontSize: 14,
-              height: 1.6,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).primaryColor,
-            ),
-          ),
-        );
-        widgets.add(SizedBox(height: 4));
-        continue;
-      }
-
-      // 检查是否是粗体开始标记 **
-      if (line.startsWith('**')) {
-        if (buffer.isNotEmpty) {
-          widgets.add(
-            SelectableText(
-              buffer.toString().trim(),
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(fontSize: 14, height: 1.6),
-            ),
-          );
-          buffer.clear();
-        }
-        final boldPart = line.substring(2);
-        buffer.writeln(boldPart);
-        isBold = true;
-        continue;
-      }
-
-      // 检查是否是粗体结束标记 **
-      if (line.endsWith('**')) {
-        final boldPart = line.substring(0, line.length - 2);
-        buffer.writeln(boldPart);
-        isBold = false;
-        widgets.add(
-          SelectableText(
-            buffer.toString().trim(),
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.6,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).primaryColor,
-            ),
-          ),
-        );
-        widgets.add(SizedBox(height: 8));
-        buffer.clear();
-        continue;
-      }
-
-      // 普通文本行
-      buffer.writeln(line);
-    }
-
-    // 处理剩余的 buffer
-    if (buffer.isNotEmpty) {
-      widgets.add(
-        SelectableText(
-          buffer.toString().trim(),
-          style: TextStyle(
-            fontSize: 14,
-            height: 1.6,
-            color:
-                Theme.of(context).textTheme.bodyMedium?.color ?? Colors.white,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      );
-    }
-
-    return widgets;
-  }
-
-  /// 显示词典结果对话框
-  void _showDictionaryResultDialog(
-    String word,
-    dynamic result, {
-    String from = 'en',
-    String to = 'zh-CHS',
-    String dataSource = 'hz',
-  }) {
-    // 检测所选文字是否为中文
-    final isSourceChinese = word.contains(RegExp(r'[\u4e00-\u9fa5]'));
-    final sourceLanguageText = isSourceChinese ? '中文' : '英文';
-
-    // Free Dictionary 只支持英文
-    final canUseFreeDictionary = !isSourceChinese;
-
-    StateSetter? setState;
-    String currentWord = word;
-    dynamic currentResult = result;
-    bool isLoading = false;
-    String currentFrom = from;
-    String currentTo = to;
-    String currentDataSource = dataSource;
-
-    void fetchDictionary(
-      String dataSource,
-      String newFrom,
-      String newTo,
-    ) async {
-      if (!mounted) return;
-      setState?.call(() {
-        isLoading = true;
-      });
-
-      dynamic newResult;
-      if (dataSource == 'hz') {
-        // Hz Dictionary API
-        newResult = await _hzService.lookup(currentWord);
-      } else if (dataSource == 'free') {
-        // Free Dictionary API 需要转换语言代码
-        final freeFrom = _convertToFreeDictionaryLanguageCode(newFrom);
-        final freeTo = _convertToFreeDictionaryLanguageCode(newTo);
-        newResult = await _freeDictionaryService.lookup(
-          currentWord,
-          from: freeFrom,
-          to: freeTo,
-        );
-      } else {
-        newResult = await _youdaoService.lookup(
-          currentWord,
-          from: newFrom,
-          to: newTo,
-        );
-      }
-
-      if (!mounted) return;
-      setState?.call(() {
-        currentResult = newResult;
-        currentDataSource = dataSource;
-        currentFrom = newFrom;
-        currentTo = newTo;
-        isLoading = false;
-      });
-    }
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setStateBuilder) {
-          setState = setStateBuilder;
-
-          // 根据结果类型解析数据
-          String? phoneticOrPinyin;
-          String? phoneticDisplay;
-          List<String>? explains;
-          List<dynamic>? webTranslations;
-          String? translation;
-          String? formInfo; // 变形信息
-          String? hzDefinition; // Hz 词典的完整解释
-          String? hzImageUrl; // Hz 词典的图片 URL
-
-          if (currentDataSource == 'hz') {
-            // Hz Dictionary 结果
-            hzDefinition = currentResult?.definition;
-            hzImageUrl = currentResult?.imageUrl;
-          } else if (currentDataSource == 'free') {
-            // Free Dictionary 结果
-            phoneticOrPinyin = currentResult.phonetic ?? '';
-            explains = currentResult.explains;
-            webTranslations = currentResult.web?.cast<dynamic>();
-            translation = currentResult.translation;
-            formInfo = currentResult.formInfo;
-            phoneticDisplay = phoneticOrPinyin?.isNotEmpty == true
-                ? '[$phoneticOrPinyin]'
-                : '';
-          } else if (currentResult is YoudaoDictionaryResult) {
-            // 有道词典结果
-            final basic = currentResult.basic;
-            phoneticOrPinyin = currentFrom == 'en'
-                ? (basic?.phonetic ?? '')
-                : (currentResult.basic?.phonetic ?? '');
-            phoneticDisplay =
-                currentFrom == 'en' && (phoneticOrPinyin?.isNotEmpty ?? false)
-                ? '[$phoneticOrPinyin]'
-                : (phoneticOrPinyin ?? '');
-            explains = basic?.explains?.map((e) => '$e').toList();
-            webTranslations = currentResult.web?.cast<dynamic>();
-            translation = currentResult.translation ?? '';
-          }
-
-          final explainsText = explains?.join('; ') ?? '';
-          final webTranslationsText =
-              webTranslations
-                  ?.map((w) => '${w.key}: ${(w.value as List).join('; ')}')
-                  .join('\n') ??
-              '';
-
-          return AlertDialog(
-            title: Row(
-              children: [
-                Icon(Icons.menu_book, size: 28),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        currentWord,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      Text(
-                        sourceLanguageText,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.copyWith(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                if (phoneticDisplay?.isNotEmpty == true)
-                  Text(
-                    phoneticDisplay!,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(fontSize: 14),
-                  ),
-              ],
-            ),
-            content: isLoading
-                ? Center(child: CircularProgressIndicator())
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // 词典源选择下拉框（不在滚动区域内）
-                      DropdownButtonFormField<String>(
-                        value: currentDataSource,
-                        decoration: InputDecoration(
-                          labelText: '词典源',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                        ),
-                        items: [
-                          DropdownMenuItem(value: 'hz', child: Text('Hz 词典')),
-                          DropdownMenuItem(
-                            value: 'youdao',
-                            child: Text('有道词典'),
-                          ),
-                          if (canUseFreeDictionary)
-                            DropdownMenuItem(
-                              value: 'free',
-                              child: Text('Free Dictionary'),
-                            ),
-                        ],
-                        onChanged: (value) {
-                          if (value != null && value != currentDataSource) {
-                            fetchDictionary(value, currentFrom, currentTo);
-                          }
-                        },
-                      ),
-                      SizedBox(height: 12),
-                      // 内容区域（可滚动）
-                      Flexible(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // 检查是否有结果
-                              if ((currentDataSource == 'hz' &&
-                                      hzDefinition == null) ||
-                                  (currentDataSource != 'hz' &&
-                                      explainsText.isEmpty &&
-                                      translation?.isEmpty != false)) ...[
-                                // 没有查到结果
-                                Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(24),
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.search_off,
-                                          size: 48,
-                                          color: Theme.of(
-                                            context,
-                                          ).iconTheme.color,
-                                        ),
-                                        SizedBox(height: 16),
-                                        Text(
-                                          '没有查到结果',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            color: Theme.of(
-                                              context,
-                                            ).textTheme.bodySmall?.color,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ] else ...[
-                                // Hz 词典显示完整解释（使用 Markdown 渲染）
-                                if (currentDataSource == 'hz' &&
-                                    hzDefinition != null &&
-                                    hzDefinition.isNotEmpty) ...[
-                                  // 显示汉字图片
-                                  if (hzImageUrl != null &&
-                                      hzImageUrl.isNotEmpty) ...[
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: material.Image.network(
-                                        hzImageUrl,
-                                        width: 120,
-                                        height: 120,
-                                        fit: BoxFit.contain,
-                                        errorBuilder:
-                                            (context, error, stackTrace) {
-                                              return Container(
-                                                width: 120,
-                                                height: 120,
-                                                decoration: BoxDecoration(
-                                                  color: Theme.of(
-                                                    context,
-                                                  ).dividerColor,
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                child: Icon(
-                                                  Icons.image_not_supported,
-                                                  size: 40,
-                                                  color: Theme.of(
-                                                    context,
-                                                  ).iconTheme.color,
-                                                ),
-                                              );
-                                            },
-                                        loadingBuilder:
-                                            (context, child, loadingProgress) {
-                                              if (loadingProgress == null) {
-                                                return child;
-                                              }
-                                              return Container(
-                                                width: 120,
-                                                height: 120,
-                                                decoration: BoxDecoration(
-                                                  color: Theme.of(
-                                                    context,
-                                                  ).colorScheme.surface,
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                child: Center(
-                                                  child:
-                                                      CircularProgressIndicator(),
-                                                ),
-                                              );
-                                            },
-                                      ),
-                                    ),
-                                    SizedBox(height: 12),
-                                  ],
-                                  // 显示详细解释
-                                  Container(
-                                    padding: EdgeInsets.all(12),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: _parseMarkdown(hzDefinition),
-                                    ),
-                                  ),
-                                ] else ...[
-                                  // 翻译方向切换按钮
-                                  if (currentDataSource == 'youdao') ...[
-                                    // 有道词典支持中文
-                                    Wrap(
-                                      spacing: 8,
-                                      children: [
-                                        if (isSourceChinese) ...[
-                                          ChoiceChip(
-                                            label: Text('中→英'),
-                                            selected: currentTo == 'en',
-                                            onSelected: (selected) {
-                                              if (selected) {
-                                                fetchDictionary(
-                                                  'youdao',
-                                                  'zh-CHS',
-                                                  'en',
-                                                );
-                                              }
-                                            },
-                                          ),
-                                          ChoiceChip(
-                                            label: Text('中→中'),
-                                            selected: currentTo == 'zh-CHS',
-                                            onSelected: (selected) {
-                                              if (selected) {
-                                                fetchDictionary(
-                                                  'youdao',
-                                                  'zh-CHS',
-                                                  'zh-CHS',
-                                                );
-                                              }
-                                            },
-                                          ),
-                                        ] else ...[
-                                          ChoiceChip(
-                                            label: Text('英→中'),
-                                            selected: currentTo == 'zh-CHS',
-                                            onSelected: (selected) {
-                                              if (selected) {
-                                                _saveDictionaryTargetLanguage(
-                                                  'zh-CHS',
-                                                );
-                                                fetchDictionary(
-                                                  'youdao',
-                                                  'en',
-                                                  'zh-CHS',
-                                                );
-                                              }
-                                            },
-                                          ),
-                                          ChoiceChip(
-                                            label: Text('英→英'),
-                                            selected: currentTo == 'en',
-                                            onSelected: (selected) {
-                                              if (selected) {
-                                                _saveDictionaryTargetLanguage(
-                                                  'en',
-                                                );
-                                                fetchDictionary(
-                                                  'youdao',
-                                                  'en',
-                                                  'en',
-                                                );
-                                              }
-                                            },
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                    SizedBox(height: 12),
-                                  ] else if (currentDataSource == 'free') ...[
-                                    // Free Dictionary 支持英文翻译方向
-                                    Wrap(
-                                      spacing: 8,
-                                      children: [
-                                        ChoiceChip(
-                                          label: Text('英→中'),
-                                          selected: currentTo == 'zh-CHS',
-                                          onSelected: (selected) {
-                                            if (selected) {
-                                              _saveDictionaryTargetLanguage(
-                                                'zh-CHS',
-                                              );
-                                              fetchDictionary(
-                                                'free',
-                                                'en',
-                                                'zh-CHS',
-                                              );
-                                            }
-                                          },
-                                        ),
-                                        ChoiceChip(
-                                          label: Text('英→英'),
-                                          selected: currentTo == 'en',
-                                          onSelected: (selected) {
-                                            if (selected) {
-                                              _saveDictionaryTargetLanguage(
-                                                'en',
-                                              );
-                                              fetchDictionary(
-                                                'free',
-                                                'en',
-                                                'en',
-                                              );
-                                            }
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                    SizedBox(height: 12),
-                                  ],
-                                  if (formInfo?.isNotEmpty == true) ...[
-                                    Text(
-                                      formInfo!,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.orange[700],
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                    ),
-                                    SizedBox(height: 16),
-                                  ],
-                                  if (translation?.isNotEmpty == true) ...[
-                                    Text(
-                                      '翻译',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                    SizedBox(height: 8),
-                                    Text(
-                                      translation!,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(fontSize: 12),
-                                    ),
-                                    SizedBox(height: 16),
-                                  ],
-                                  if (explainsText.isNotEmpty) ...[
-                                    Text(
-                                      '基本释义',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                    SizedBox(height: 8),
-                                    Text(
-                                      explainsText,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(fontSize: 12),
-                                    ),
-                                    SizedBox(height: 16),
-                                  ],
-                                  if (webTranslationsText.isNotEmpty) ...[
-                                    Text(
-                                      '网络释义',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                    SizedBox(height: 8),
-                                    Text(
-                                      webTranslationsText,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(fontSize: 12),
-                                    ),
-                                    SizedBox(height: 16),
-                                  ],
-                                ],
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: Text('关闭'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
 
   /// 生成书籍缓存键（基于文件内容MD5）
   Future<String> _generateBookCacheKey() async {

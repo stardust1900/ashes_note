@@ -81,7 +81,7 @@ final ThemeData ashesDarkTheme = ThemeData(
   brightness: Brightness.dark,
   primaryColor: Colors.blue,
   canvasColor: Color.fromARGB(255, 48, 48, 48),
-  scaffoldBackgroundColor: Colors.grey[850],
+  scaffoldBackgroundColor: Colors.grey[800],
   colorScheme: ColorScheme.dark(
     primary: Colors.blue,
     secondary: Colors.blueGrey,

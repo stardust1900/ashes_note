@@ -27,6 +27,10 @@ class _AshesNoteAppState extends State<AshesNoteApp>
   final _key = GlobalKey<ScaffoldState>();
   static const String _lastSelectedMenuKey = 'last_selected_menu';
 
+  void _handleThemeChanged() {
+    setState(() {});
+  }
+
   @override
   void initState() {
     super.initState();
@@ -213,12 +217,11 @@ class AshesNoteScreens extends StatelessWidget {
             padding: const EdgeInsets.all(16.0),
             child: SettingsView(
               onThemeChanged: () {
-                // 通过重新构建MaterialApp来刷新主题
-                // 这里我们通过context找到最近的State对象来调用setState
+                // 通过回调通知父组件刷新主题
                 final appState = context
                     .findAncestorStateOfType<_AshesNoteAppState>();
                 if (appState != null) {
-                  appState.setState(() {});
+                  appState._handleThemeChanged();
                 }
               },
             ),
