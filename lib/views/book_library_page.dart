@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:ashes_note/services/book_reader/book_reader_services.dart';
@@ -8,6 +9,39 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'book_reader_page.dart';
+
+/// 书籍元数据模型（用于缓存）
+class BookMetadata {
+  final String filePath;
+  final String title;
+  final String author;
+  final String? coverPath;
+
+  BookMetadata({
+    required this.filePath,
+    required this.title,
+    required this.author,
+    this.coverPath,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'filePath': filePath,
+      'title': title,
+      'author': author,
+      'coverPath': coverPath,
+    };
+  }
+
+  factory BookMetadata.fromJson(Map<String, dynamic> json) {
+    return BookMetadata(
+      filePath: json['filePath'] as String,
+      title: json['title'] as String,
+      author: json['author'] as String,
+      coverPath: json['coverPath'] as String?,
+    );
+  }
+}
 
 /// 书籍库页面 - 展示所有导入的书籍
 class BookLibraryPage extends StatefulWidget {
@@ -24,6 +58,132 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   void initState() {
     super.initState();
     _loadBooks();
+    // 异步清理无效的元数据缓存
+    _cleanMetadataCache();
+  }
+
+  /// 获取元数据缓存文件路径
+  Future<File> _getMetadataCacheFile() async {
+    final workingDir = SPUtil.get<String>('workingDirectory', '');
+    final cacheDir = Directory('$workingDir/books/.cache');
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
+    }
+    return File('${cacheDir.path}/books_metadata.json');
+  }
+
+  /// 从缓存加载书籍元数据
+  Future<Map<String, BookMetadata>> _loadMetadataCache() async {
+    try {
+      final cacheFile = await _getMetadataCacheFile();
+      if (!await cacheFile.exists()) return {};
+
+      final jsonString = await cacheFile.readAsString();
+      final jsonData = jsonDecode(jsonString) as List<dynamic>;
+      
+      final metadataMap = <String, BookMetadata>{};
+      for (final item in jsonData) {
+        final metadata = BookMetadata.fromJson(item as Map<String, dynamic>);
+        metadataMap[metadata.filePath] = metadata;
+      }
+      
+      return metadataMap;
+    } catch (e) {
+      print('[BookLibrary] 加载元数据缓存失败: $e');
+      return {};
+    }
+  }
+
+  /// 保存书籍元数据到缓存
+  Future<void> _saveMetadataCache(Map<String, BookMetadata> metadataMap) async {
+    try {
+      final cacheFile = await _getMetadataCacheFile();
+      final jsonData = metadataMap.values.map((m) => m.toJson()).toList();
+      final jsonString = jsonEncode(jsonData);
+      await cacheFile.writeAsString(jsonString);
+      print('[BookLibrary] 元数据缓存已保存 (${metadataMap.length} 本书)');
+    } catch (e) {
+      print('[BookLibrary] 保存元数据缓存失败: $e');
+    }
+  }
+
+  /// 更新单本书籍的元数据缓存
+  Future<void> _updateBookMetadata(BookMetadata metadata) async {
+    final metadataMap = await _loadMetadataCache();
+    metadataMap[metadata.filePath] = metadata;
+    await _saveMetadataCache(metadataMap);
+  }
+
+  /// 解析书籍元数据（带缓存）
+  Future<BookMetadata> _parseBookMetadata(File file) async {
+    // 先检查缓存
+    final metadataMap = await _loadMetadataCache();
+    
+    if (metadataMap.containsKey(file.path)) {
+      // 检查文件是否仍然存在
+      final cached = metadataMap[file.path]!;
+      final coverFile = cached.coverPath != null ? File(cached.coverPath!) : null;
+      
+      return BookMetadata(
+        filePath: file.path,
+        title: cached.title,
+        author: cached.author,
+        coverPath: coverFile?.path,
+      );
+    }
+
+    // 缓存中没有，需要解析
+    final filename = file.uri.pathSegments.last;
+    String title = filename.replaceAll(
+      RegExp(r'\.(epub|mobi|azw3|kfx|pdf)$'),
+      '',
+    );
+    String author = '未知作者';
+    File? coverFile;
+
+    // 尝试使用 epub_plus 解析书籍元数据
+    if (filename.toLowerCase().endsWith('.epub')) {
+      try {
+        final bytes = await file.readAsBytes();
+        final epub = await EpubReader.readBook(bytes);
+        
+        if (epub.title != null && epub.title!.isNotEmpty) {
+          title = epub.title!;
+        }
+        if (epub.author != null && epub.author!.isNotEmpty) {
+          author = epub.author!;
+        }
+
+        // 提取封面
+        if (epub.coverImage != null) {
+          final workingDir = SPUtil.get<String>('workingDirectory', '');
+          final cacheDir = Directory('$workingDir/books/.cache');
+          if (!await cacheDir.exists()) {
+            await cacheDir.create(recursive: true);
+          }
+          final coverFilePath = '${cacheDir.path}/cover_${file.path.hashCode}.jpg';
+          final coverData = Uint8List.fromList(img.encodeJpg(epub.coverImage!));
+          await File(coverFilePath).writeAsBytes(coverData);
+          coverFile = File(coverFilePath);
+        }
+        
+        print('[BookLibrary] 解析 EPUB 元数据成功: $title, $author');
+      } catch (e) {
+        print('[BookLibrary] 解析 EPUB 元数据失败: $e');
+      }
+    }
+
+    final metadata = BookMetadata(
+      filePath: file.path,
+      title: title,
+      author: author,
+      coverPath: coverFile?.path,
+    );
+
+    // 保存到缓存
+    await _updateBookMetadata(metadata);
+
+    return metadata;
   }
 
   Future<void> _loadBooks() async {
@@ -50,32 +210,19 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         )
         .toList();
 
-    // 异步创建 BookInfo 对象（使用 epub_plus 解析元数据）
-    final List<Future<BookInfo>> bookInfoFutures = supportedFiles
-        .map((f) => BookInfo.fromFile(f))
-        .toList();
-    final bookInfos = await Future.wait(bookInfoFutures, eagerError: true);
-
-    // 为 EPUB 文件提取封面（使用 Future.wait 并行处理）
-    final epubBooks = bookInfos
-        .where((b) => b.file.path.endsWith('.epub'))
-        .toList();
-    final List<Future<void>> coverFutures = epubBooks.map((book) async {
-      File? coverFile;
-      final existingCoverFile = File(
-        '${booksDir.path}/.cache/cover_${book.file.path.hashCode}.jpg',
-      );
-      //已经提取的不要重复提取
-      if (await existingCoverFile.exists()) {
-        coverFile = existingCoverFile;
-      } else {
-        coverFile = await _extractEpubCover(book.file);
-      }
-      if (coverFile != null) {
-        book.coverFile = coverFile;
-      }
-    }).toList();
-    await Future.wait(coverFutures, eagerError: false);
+    // 从缓存加载元数据，快速创建 BookInfo 对象
+    final List<BookInfo> bookInfos = [];
+    for (final file in supportedFiles) {
+      final metadata = await _parseBookMetadata(file);
+      final coverFile = metadata.coverPath != null ? File(metadata.coverPath!) : null;
+      
+      bookInfos.add(BookInfo(
+        file: file,
+        title: metadata.title,
+        author: metadata.author,
+        coverFile: coverFile,
+      ));
+    }
 
     setState(() {
       _books = bookInfos;
@@ -126,6 +273,14 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
             await sourceFile.copy(destFile.path);
             importedCount++;
             print('[BookLibrary] 导入成功: ${file.name}');
+
+            // 立即解析并缓存元数据
+            try {
+              final metadata = await _parseBookMetadata(destFile);
+              print('[BookLibrary] 元数据已缓存: ${metadata.title}');
+            } catch (e) {
+              print('[BookLibrary] 缓存元数据失败: $e');
+            }
           } else {
             print('[BookLibrary] 文件已存在: ${file.name}');
           }
@@ -254,6 +409,24 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         }
       }
 
+      // 更新元数据缓存
+      try {
+        final metadataMap = await _loadMetadataCache();
+        if (metadataMap.containsKey(oldFile.path)) {
+          final metadata = metadataMap[oldFile.path]!;
+          metadataMap.remove(oldFile.path);
+          metadataMap[newFile.path] = BookMetadata(
+            filePath: newFile.path,
+            title: newTitle,
+            author: metadata.author,
+            coverPath: book.coverFile?.path,
+          );
+          await _saveMetadataCache(metadataMap);
+        }
+      } catch (e) {
+        print('[BookLibrary] 更新元数据缓存失败: $e');
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -352,6 +525,17 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       // 删除字体大小缓存
       final fontSizeKey = 'book_font_size_${book.file.path.hashCode}';
       await SPUtil.remove(fontSizeKey);
+
+      // 从元数据缓存中移除
+      try {
+        final metadataMap = await _loadMetadataCache();
+        if (metadataMap.containsKey(book.file.path)) {
+          metadataMap.remove(book.file.path);
+          await _saveMetadataCache(metadataMap);
+        }
+      } catch (e) {
+        print('[BookLibrary] 删除元数据缓存失败: $e');
+      }
 
       // 检查并清理 last_read_book（如果删除的是最后阅读的书籍）
       final lastReadBook = SPUtil.get<String>('last_read_book', '');
@@ -457,6 +641,43 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       print('[BookLibrary] 提取 EPUB 封面失败: $e');
     }
     return null;
+  }
+
+  /// 检查并清理无效的元数据缓存（文件已被删除）
+  Future<void> _cleanMetadataCache() async {
+    try {
+      final metadataMap = await _loadMetadataCache();
+      if (metadataMap.isEmpty) return;
+
+      final workingDir = SPUtil.get<String>('workingDirectory', '');
+      if (workingDir.isEmpty) return;
+
+      final booksDir = Directory('$workingDir/books');
+      if (!await booksDir.exists()) return;
+
+      final files = await booksDir.list().toList();
+      final validFilePaths = files
+          .whereType<File>()
+          .map((f) => f.path)
+          .toSet();
+
+      bool hasInvalid = false;
+      final invalidKeys = metadataMap.keys
+          .where((filePath) => !validFilePaths.contains(filePath))
+          .toList();
+
+      for (final invalidKey in invalidKeys) {
+        metadataMap.remove(invalidKey);
+        hasInvalid = true;
+      }
+
+      if (hasInvalid) {
+        await _saveMetadataCache(metadataMap);
+        print('[BookLibrary] 清理了 ${invalidKeys.length} 条无效的元数据缓存');
+      }
+    } catch (e) {
+      print('[BookLibrary] 清理元数据缓存失败: $e');
+    }
   }
 
   void _openBook(BookInfo book) {
