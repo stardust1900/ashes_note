@@ -56,16 +56,18 @@ class ImageContent extends ContentItem {
 
 /// 封面内容项
 class CoverContent extends ContentItem {
-  final Uint8List imageData;
+  final String? imagePath; // 封面图片文件路径
 
-  CoverContent({required this.imageData});
+  CoverContent({this.imagePath});
 
   @override
   Map<String, dynamic> toJson() {
-    return {'type': 'cover', 'imageData': imageData};
+    return {'type': 'cover', 'imagePath': imagePath};
   }
 
   factory CoverContent.fromJson(Map<String, dynamic> json) {
-    return CoverContent(imageData: Uint8List.fromList((json['imageData'] as List<dynamic>).cast<int>()));
+    return CoverContent(
+      imagePath: json['imagePath'] as String?,
+    );
   }
 }

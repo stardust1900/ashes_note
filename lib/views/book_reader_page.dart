@@ -2,10 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
-import 'package:epub_plus/epub_plus.dart';
-import 'package:flutter/material.dart' hide Image;
-import 'package:flutter/material.dart' as material show Image;
-import 'package:image/image.dart' as img;
+import 'package:epub_plus/epub_plus.dart' hide Image;
+import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img show encodeJpg;
 import 'package:flutter/services.dart';
 import '../services/book_reader/youdao_dictionary_service.dart';
 import '../services/book_reader/free_dictionary_service.dart';
@@ -52,7 +51,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   EpubBook? _epubBook;
   List<PageContent> _pages = [];
   int _totalPages = 0;
-  Uint8List? _coverImage;
   Size? _windowSize;
   final GlobalKey _contentKey = GlobalKey();
 
@@ -1687,6 +1685,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
     return cacheDir.path;
   }
 
+  /// 获取封面图片文件路径
+  String _getCoverImagePath() {
+    // 使用同步方法获取缓存目录路径
+    final workingDir = SPUtil.get<String>('workingDirectory', '');
+    final cacheDir = '$workingDir/books/.cache';
+    return '$cacheDir/cover_${widget.bookPath.hashCode}.jpg';
+  }
+
   /// 获取缓存文件路径
   Future<String> _getCacheFilePath() async {
     if (_bookCacheKey == null) return '';
@@ -1893,14 +1899,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
         _chapters.addAll(_flattenChapters(epub.chapters));
       });
       //根据 widget.bookPath 的哈希 判断封面图片是否已经存在，如果存在直接用
-      final cacheDir = Directory('${file.parent.path}/.cache');
-      final coverFile = File(
-        '${cacheDir.path}/${widget.bookPath.hashCode}.jpg',
-      );
-      if (await coverFile.exists()) {
-      } else {
-        await _loadCoverImage(epub);
-      }
+      await _loadCoverImage(epub);
 
       // 加载上次阅读位置
       final savedPosition = await _loadReadingPosition();
@@ -1996,12 +1995,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
       final pages = <PageContent>[];
 
       // 添加封面页
-      if (_coverImage != null) {
+      final coverImagePath = _getCoverImagePath();
+      final coverFile = File(coverImagePath);
+      if (await coverFile.exists()) {
         pages.add(
           PageContent(
             chapterIndex: -1,
             pageIndexInChapter: 0,
-            contentItems: [CoverContent(imageData: _coverImage!)],
+            contentItems: [CoverContent(imagePath: coverImagePath)],
             title: '封面',
           ),
         );
@@ -2167,11 +2168,26 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   Future<void> _loadCoverImage(EpubBook epub) async {
     try {
+      final coverImagePath = _getCoverImagePath();
+      final coverFile = File(coverImagePath);
+
+      // 检查封面图片文件是否已存在
+      if (await coverFile.exists()) {
+        // 文件存在，直接使用路径
+        print('封面图片已存在: $coverImagePath');
+        return;
+      }
+
+      // 文件不存在，从 epub 中提取并保存
       if (epub.coverImage != null) {
-        final bytes = Uint8List.fromList(img.encodePng(epub.coverImage!));
-        setState(() {
-          _coverImage = bytes;
-        });
+        final bytes = Uint8List.fromList(img.encodeJpg(epub.coverImage!));
+
+        // 确保缓存目录存在
+        await coverFile.parent.create(recursive: true);
+
+        // 保存图片文件
+        await coverFile.writeAsBytes(bytes);
+        print('封面图片已保存: $coverImagePath');
       }
     } catch (e) {
       print('加载封面图片失败: $e');
@@ -2190,12 +2206,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
     final pages = <PageContent>[];
 
-    if (_coverImage != null) {
+    // 添加封面页
+    final coverImagePath = _getCoverImagePath();
+    final coverFile = File(coverImagePath);
+    if (await coverFile.exists()) {
       pages.add(
         PageContent(
           chapterIndex: -1,
           pageIndexInChapter: 0,
-          contentItems: [CoverContent(imageData: _coverImage!)],
+          contentItems: [CoverContent(imagePath: coverImagePath)],
           title: '封面',
         ),
       );
@@ -2684,7 +2703,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               maxWidth: constraints.maxWidth,
                               maxHeight: maxHeight,
                             ),
-                            child: material.Image.memory(
+                            child: Image.memory(
                               snapshot.data!,
                               fit: BoxFit.contain,
                               width: double.infinity,
@@ -2760,31 +2779,27 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: (MediaQuery.of(context).size.width * 0.7)
-                              .clamp(200.0, 500.0),
-                          maxHeight: (availableHeight * 0.7).clamp(
-                            300.0,
-                            700.0,
-                          ),
-                        ),
-                        child: material.Image.memory(
-                          item.imageData,
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) {
-                            final coverWidth =
-                                (MediaQuery.of(context).size.width * 0.7).clamp(
-                                  200.0,
-                                  500.0,
-                                );
-                            final coverHeight = (availableHeight * 0.7).clamp(
+                    if (item.imagePath != null)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: (MediaQuery.of(context).size.width * 0.7)
+                                .clamp(200.0, 500.0),
+                            maxHeight: (availableHeight * 0.7).clamp(
                               300.0,
                               700.0,
-                            );
-                            return Container(
+                            ),
+                          ),
+                          child: Image.file(
+                            File(item.imagePath!),
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              final coverWidth = (MediaQuery.of(context).size.width * 0.7)
+                                  .clamp(200.0, 500.0);
+                              final coverHeight = (availableHeight * 0.7)
+                                  .clamp(300.0, 700.0);
+                              return Container(
                               width: coverWidth,
                               height: coverHeight,
                               color: Colors.grey[200],

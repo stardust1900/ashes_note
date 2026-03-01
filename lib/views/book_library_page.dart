@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:ashes_note/services/book_reader/book_reader_services.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'book_reader_page.dart';
@@ -289,9 +290,35 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         await book.coverFile!.delete();
       }
 
+      // 删除封面图片文件（保存在缓存目录）
+      try {
+        final workingDir = SPUtil.get<String>('workingDirectory', '');
+        final coverImagePath = '$workingDir/books/.cache/cover_${book.file.path.hashCode}.jpg';
+        final coverImageFile = File(coverImagePath);
+        if (await coverImageFile.exists()) {
+          await coverImageFile.delete();
+          print('[BookLibrary] 封面图片已删除: $coverImagePath');
+        }
+      } catch (e) {
+        // 封面图片删除失败不影响主流程
+        print('[BookLibrary] 删除封面图片失败: $e');
+      }
+
       // 删除阅读进度缓存
       final bookKey = 'reading_position_${book.file.path.hashCode}';
       await SPUtil.remove(bookKey);
+
+      // 删除书签缓存
+      final bookmarksKey = 'bookmarks_${book.file.path.hashCode}';
+      await SPUtil.remove(bookmarksKey);
+
+      // 删除高亮缓存
+      final highlightsKey = 'book_highlights_${book.file.path.hashCode}';
+      await SPUtil.remove(highlightsKey);
+
+      // 删除字体大小缓存
+      final fontSizeKey = 'book_font_size_${book.file.path.hashCode}';
+      await SPUtil.remove(fontSizeKey);
 
       // 检查并清理 last_read_book（如果删除的是最后阅读的书籍）
       final lastReadBook = SPUtil.get<String>('last_read_book', '');
@@ -306,10 +333,30 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         final cacheDir = Directory('$workingDir/books/.cache');
         if (await cacheDir.exists()) {
           // 根据书籍路径生成缓存键（与阅读器页面逻辑一致）
-          final cacheKey = book.file.path.hashCode.toString();
+          // 先尝试使用 MD5 作为缓存键
+          String cacheKey = book.file.path.hashCode.toString();
+          try {
+            final file = File(book.file.path);
+            if (await file.exists()) {
+              final bytes = await file.readAsBytes();
+              final digest = crypto.md5.convert(bytes);
+              cacheKey = digest.toString();
+            }
+          } catch (e) {
+            // 如果读取失败，使用路径和修改时间
+            try {
+              final file = File(book.file.path);
+              final stat = await file.stat();
+              cacheKey = '${book.file.path.hashCode}_${stat.modified.millisecondsSinceEpoch}';
+            } catch (e2) {
+              print('[BookLibrary] 获取缓存键失败: $e2');
+            }
+          }
+
           final cacheFile = File('${cacheDir.path}/$cacheKey.json');
           if (await cacheFile.exists()) {
             await cacheFile.delete();
+            print('[BookLibrary] 页面缓存已删除: $cacheKey');
           }
         }
       } catch (e) {
@@ -438,7 +485,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         }
         // 使用书籍文件路径的哈希值作为封面图片名，避免重名和特殊字符问题
         final coverFile = File(
-          '${cacheDir.path}/${epubFile.path.hashCode}.jpg',
+          '${cacheDir.path}/cover_${epubFile.path.hashCode}.jpg',
         );
         // final safeFileName = epubFile.uri.pathSegments.last.replaceAll(
         //   RegExp(r'[<>"/\\|?*]'),
