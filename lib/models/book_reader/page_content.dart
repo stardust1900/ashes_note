@@ -7,12 +7,57 @@ class PageContent {
   final List<ContentItem> contentItems;
   final String? title;
 
+  // 章节纯文本（用于从 TextContentRef 提取文本）
+  String? chapterPlainText;
+
   PageContent({
     required this.chapterIndex,
     required this.pageIndexInChapter,
     required this.contentItems,
     this.title,
+    this.chapterPlainText,
   });
+
+  /// 将所有 TextContentRef 转换为 TextContent
+  PageContent resolveTextRefs() {
+    if (chapterPlainText == null) return this;
+
+    final resolvedItems = contentItems.map((item) {
+      if (item is TextContentRef) {
+        return item.toTextContent(chapterPlainText!);
+      }
+      return item;
+    }).toList();
+
+    return PageContent(
+      chapterIndex: chapterIndex,
+      pageIndexInChapter: pageIndexInChapter,
+      contentItems: resolvedItems,
+      title: title,
+      chapterPlainText: null, // 解析后不再需要纯文本
+    );
+  }
+
+  /// 将所有 TextContent 转换为 TextContentRef（用于缓存）
+  PageContent optimizeForCache() {
+    final optimizedItems = contentItems.map((item) {
+      if (item is TextContent) {
+        return TextContentRef(
+          offset: item.startOffset,
+          length: item.text.length,
+        );
+      }
+      return item;
+    }).toList();
+
+    return PageContent(
+      chapterIndex: chapterIndex,
+      pageIndexInChapter: pageIndexInChapter,
+      contentItems: optimizedItems,
+      title: title,
+      chapterPlainText: chapterPlainText,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -20,6 +65,7 @@ class PageContent {
       'pageIndexInChapter': pageIndexInChapter,
       'contentItems': contentItems.map((item) => item.toJson()).toList(),
       'title': title,
+      // 不缓存 chapterPlainText，会在加载时重建
     };
   }
 

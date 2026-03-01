@@ -1,20 +1,16 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'package:crypto/crypto.dart';
 import 'package:epub_plus/epub_plus.dart' hide Image;
 import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img show encodeJpg;
 import 'package:flutter/services.dart';
 import '../services/book_reader/youdao_dictionary_service.dart';
 import '../services/book_reader/free_dictionary_service.dart';
 import '../services/book_reader/hz_dictionary_service.dart';
 import '../models/book_reader/page_content.dart';
+import '../models/book_reader/content_item.dart'
+    show TextContent, ImageContent, CoverContent;
 import '../models/book_reader/bookmark.dart';
 import '../models/book_reader/highlight.dart';
-import '../models/book_reader/content_item.dart'
-    show ContentItem, TextContent, ImageContent, CoverContent;
-import '../utils/prefs_util.dart';
 import 'book_reader/highlight_operations.dart';
 import 'book_reader/search_manager.dart';
 import 'book_reader/note_export.dart';
@@ -22,6 +18,7 @@ import 'book_reader/storage_manager.dart';
 import 'book_reader/selectable_text_with_toolbar.dart';
 import 'book_reader/notes_list_dialog.dart';
 import 'book_reader/dictionary_dialog.dart';
+import 'book_reader/book_loader.dart';
 
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
@@ -54,13 +51,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   Size? _windowSize;
   final GlobalKey _contentKey = GlobalKey();
 
-  // 窗口大小变化防抖控制
-  Timer? _resizeDebounceTimer;
-  static const Duration _resizeDebounceDuration = Duration(milliseconds: 300);
-
-  // TextPainter 缓存，避免重复创建
-  TextPainter? _textPainterCache;
-
   // 控制栏显示状态
   bool _showControls = false;
 
@@ -68,14 +58,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   Timer? _savePositionTimer;
   static const Duration _savePositionDebounceDuration = Duration(seconds: 2);
 
-  // ===== 优化相关变量 =====
-  // 优先加载的章节数
-  static const int _priorityChapterCount = 3;
-  // 后台处理状态
-  bool _isBackgroundProcessing = false;
-  int _processedChaptersCount = 0;
-  // 缓存相关
-  String? _bookCacheKey;
+  // 图书加载器
+  late final BookLoader _bookLoader;
 
   // 字体大小保存相关
   bool _showFontSizeSlider = false;
@@ -122,6 +106,35 @@ class _BookReaderPageState extends State<BookReaderPage> {
   @override
   void initState() {
     super.initState();
+    // 初始化图书加载器
+    _bookLoader = BookLoader(
+      bookPath: widget.bookPath,
+      onLoadingStateChanged: (isLoading, isContentLoaded, errorMessage) {
+        setState(() {
+          _isLoading = isLoading;
+          _isContentLoaded = isContentLoaded;
+          _hasError = errorMessage != null;
+          _errorMessage = errorMessage ?? '';
+        });
+      },
+      onPagesUpdated:
+          (pages, totalPages, currentPageIndex, currentChapterIndex) {
+            setState(() {
+              _pages = pages;
+              _totalPages = totalPages;
+              if (currentPageIndex >= 0 && currentPageIndex < pages.length) {
+                _currentPageIndex = currentPageIndex;
+                _currentChapterIndex = pages[currentPageIndex].chapterIndex;
+              }
+            });
+          },
+      onChaptersUpdated: (chapters) {
+        setState(() {
+          _chapters.clear();
+          _chapters.addAll(chapters);
+        });
+      },
+    );
     _loadBook();
     _loadDefaultHighlightColor();
     _loadDictionaryTargetLanguage();
@@ -143,9 +156,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   @override
   void dispose() {
     _saveReadingPosition(); // 退出前保存阅读位置
-    _resizeDebounceTimer?.cancel();
+    _bookLoader.dispose();
     _savePositionTimer?.cancel();
-    _textPainterCache?.dispose();
     _noteController.dispose();
     _scrollController.dispose();
     _searchController.dispose(); // 清理搜索控制器
@@ -649,8 +661,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (startOffset == null ||
         endOffset == null ||
         chapterIndex == null ||
-        selectedText.isEmpty)
+        selectedText.isEmpty) {
       return;
+    }
 
     // 保存默认高亮颜色
     await _saveDefaultHighlightColor(color);
@@ -1659,123 +1672,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
   }
 
-  /// 生成书籍缓存键（基于文件内容MD5）
-  Future<String> _generateBookCacheKey() async {
-    try {
-      final file = File(widget.bookPath);
-      final bytes = await file.readAsBytes();
-      final digest = md5.convert(bytes);
-      return digest.toString();
-    } catch (e) {
-      // 如果读取失败，使用路径和修改时间
-      final file = File(widget.bookPath);
-      final stat = await file.stat();
-      return '${widget.bookPath.hashCode}_${stat.modified.millisecondsSinceEpoch}';
-    }
-  }
-
-  /// 获取缓存目录路径
-  Future<String> _getCacheDirectory() async {
-    // final appDir = await getApplicationDocumentsDirectory();
-    final workingDir = SPUtil.get<String>('workingDirectory', '');
-    final cacheDir = Directory('$workingDir/books/.cache');
-    if (!await cacheDir.exists()) {
-      await cacheDir.create(recursive: true);
-    }
-    return cacheDir.path;
-  }
-
-  /// 获取封面图片文件路径
-  String _getCoverImagePath() {
-    // 使用同步方法获取缓存目录路径
-    final workingDir = SPUtil.get<String>('workingDirectory', '');
-    final cacheDir = '$workingDir/books/.cache';
-    return '$cacheDir/cover_${widget.bookPath.hashCode}.jpg';
-  }
-
-  /// 获取缓存文件路径
-  Future<String> _getCacheFilePath() async {
-    if (_bookCacheKey == null) return '';
-    final cacheDir = await _getCacheDirectory();
-    return '$cacheDir/$_bookCacheKey.json';
-  }
-
-  /// 检查缓存是否存在且有效
-  Future<bool> _checkCacheValid() async {
-    if (_bookCacheKey == null) return false;
-    final cacheFilePath = await _getCacheFilePath();
-    final cacheFile = File(cacheFilePath);
-    return await cacheFile.exists();
-  }
-
-  /// 保存页面数据到缓存
-  Future<void> _savePagesToCache() async {
-    try {
-      if (_bookCacheKey == null || _pages.isEmpty) return;
-
-      final cacheFilePath = await _getCacheFilePath();
-      final cacheData = {
-        'bookKey': _bookCacheKey,
-        'bookPath': widget.bookPath,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'windowWidth': _windowSize?.width ?? 0,
-        'windowHeight': _windowSize?.height ?? 0,
-        'fontSize': _fontSize,
-        'pages': _pages.map((p) => p.toJson()).toList(),
-      };
-
-      final cacheFile = File(cacheFilePath);
-      await cacheFile.writeAsString(jsonEncode(cacheData));
-      print('页面缓存已保存: $cacheFilePath');
-    } catch (e) {
-      print('保存页面缓存失败: $e');
-    }
-  }
-
-  /// 从缓存加载页面数据
-  Future<List<PageContent>?> _loadPagesFromCache() async {
-    try {
-      if (!await _checkCacheValid()) return null;
-
-      final cacheFilePath = await _getCacheFilePath();
-      final cacheFile = File(cacheFilePath);
-      final jsonString = await cacheFile.readAsString();
-      final cacheData = jsonDecode(jsonString) as Map<String, dynamic>;
-
-      // 验证缓存数据完整性
-      final pagesJson = cacheData['pages'] as List<dynamic>?;
-      if (pagesJson == null || pagesJson.isEmpty) return null;
-
-      // 检查窗口大小是否匹配（如果窗口大小变化太大，缓存失效）
-      final cachedWidth = (cacheData['windowWidth'] as num?)?.toDouble() ?? 0;
-      final cachedHeight = (cacheData['windowHeight'] as num?)?.toDouble() ?? 0;
-      final cachedFontSize = (cacheData['fontSize'] as num?)?.toDouble() ?? 16;
-
-      if (_windowSize != null) {
-        final widthDiff = (_windowSize!.width - cachedWidth).abs();
-        final heightDiff = (_windowSize!.height - cachedHeight).abs();
-        final fontSizeDiff = (_fontSize - cachedFontSize).abs();
-
-        // 如果窗口大小变化超过10%或字体大小变化，认为缓存失效
-        if (widthDiff / _windowSize!.width > 0.1 ||
-            heightDiff / _windowSize!.height > 0.1 ||
-            fontSizeDiff > 0.5) {
-          print('缓存窗口大小不匹配，重新生成页面');
-          return null;
-        }
-      }
-
-      final pages = pagesJson
-          .map((json) => PageContent.fromJson(json))
-          .toList();
-      print('从缓存加载了 ${pages.length} 页');
-      return pages;
-    } catch (e) {
-      print('从缓存加载页面失败: $e');
-      return null;
-    }
-  }
-
   /// 保存阅读位置到本地
   Future<void> _saveReadingPosition() async {
     if (_epubBook == null) return;
@@ -1811,6 +1707,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (savedFontSize != null && savedFontSize >= 12 && savedFontSize <= 32) {
       setState(() {
         _fontSize = savedFontSize;
+        _bookLoader.fontSize = _fontSize;
       });
       print('加载字体大小: $_fontSize');
     }
@@ -1818,6 +1715,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 保存字体大小
   Future<void> _saveFontSize() async {
+    _bookLoader.fontSize = _fontSize;
     await StorageManager.saveFontSize(widget.bookPath, _fontSize);
     print('保存字体大小: $_fontSize');
   }
@@ -1863,13 +1761,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             newSize.height != _windowSize!.height)) {
       _windowSize = newSize;
       if (_epubBook != null && _chapters.isNotEmpty) {
-        // 防抖处理：取消之前的定时器，避免频繁重绘
-        _resizeDebounceTimer?.cancel();
-        _resizeDebounceTimer = Timer(_resizeDebounceDuration, () {
-          if (mounted) {
-            _processPages();
-          }
-        });
+        _bookLoader.onWindowResize(newSize, _chapters, context);
       }
     }
   }
@@ -1885,9 +1777,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
       // 加载保存的字体大小
       await _loadFontSize();
+      _bookLoader.fontSize = _fontSize;
 
       // 生成缓存键
-      _bookCacheKey = await _generateBookCacheKey();
+      _bookLoader.bookCacheKey = await _bookLoader.generateBookCacheKey();
 
       final file = File(widget.bookPath);
       final bytes = await file.readAsBytes();
@@ -1896,10 +1789,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
       setState(() {
         _bookTitle = epub.title ?? '未知书籍';
         _epubBook = epub;
-        _chapters.addAll(_flattenChapters(epub.chapters));
+        _chapters.addAll(_bookLoader.flattenChapters(epub.chapters));
       });
       //根据 widget.bookPath 的哈希 判断封面图片是否已经存在，如果存在直接用
-      await _loadCoverImage(epub);
+      await _bookLoader.loadCoverImage(epub);
 
       // 加载上次阅读位置
       final savedPosition = await _loadReadingPosition();
@@ -1913,10 +1806,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
       // 获取窗口大小用于检查缓存有效性
       if (mounted) {
         _windowSize = MediaQuery.of(context).size;
+        _bookLoader.windowSize = _windowSize;
       }
 
       // 尝试从缓存加载
-      final cachedPages = await _loadPagesFromCache();
+      final cachedPages = await _bookLoader.loadPagesFromCache();
 
       if (cachedPages != null && cachedPages.isNotEmpty) {
         // 从缓存加载成功
@@ -1976,596 +1870,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
     setState(() {
       _isProcessingPages = true;
       _isContentLoaded = false;
-      _processedChaptersCount = 0;
     });
 
-    try {
-      // 分步骤处理，避免阻塞UI
-      await Future.delayed(const Duration(milliseconds: 50));
-
-      // 获取窗口大小
-      final BuildContext? contentContext = _contentKey.currentContext;
-      final BuildContext useContext = contentContext ?? this.context;
-      final size = MediaQuery.of(useContext).size;
-      _windowSize = size;
-
-      final availableHeight = size.height - 20;
-      final availableWidth = size.width - 48;
-
-      final pages = <PageContent>[];
-
-      // 添加封面页
-      final coverImagePath = _getCoverImagePath();
-      final coverFile = File(coverImagePath);
-      if (await coverFile.exists()) {
-        pages.add(
-          PageContent(
-            chapterIndex: -1,
-            pageIndexInChapter: 0,
-            contentItems: [CoverContent(imagePath: coverImagePath)],
-            title: '封面',
-          ),
-        );
-      }
-
-      // ===== 第一步：优先处理前几个章节，让用户可以立即开始阅读 =====
-      final priorityCount = _chapters.length < _priorityChapterCount
-          ? _chapters.length
-          : _priorityChapterCount;
-
-      print('开始优先处理前 $priorityCount 个章节...');
-
-      for (int i = 0; i < priorityCount; i++) {
-        final chapter = _chapters[i];
-        final chapterPages = _splitChapterIntoPages(
-          chapter,
-          i,
-          availableHeight,
-          availableWidth,
-        );
-        pages.addAll(chapterPages);
-        _processedChaptersCount++;
-
-        // 每处理完一个章节，让出时间片给UI
-        if (i < priorityCount - 1) {
-          await Future.delayed(const Duration(milliseconds: 10));
-        }
-      }
-
-      // 优先章节处理完成，立即显示内容
-      if (mounted) {
-        setState(() {
-          _pages = List.from(pages);
-          _totalPages = pages.length;
-          _isContentLoaded = true;
-          _isProcessingPages = false;
-          if (_totalPages > 0) {
-            _currentPageIndex = 0;
-            _currentChapterIndex = pages[0].chapterIndex;
-          }
-        });
-        print('优先章节处理完成，已加载 $_totalPages 页，用户可以开始阅读');
-      }
-
-      // ===== 第二步：后台处理剩余章节 =====
-      if (_chapters.length > priorityCount) {
-        _isBackgroundProcessing = true;
-        _processRemainingChaptersInBackground(
-          pages,
-          priorityCount,
-          availableHeight,
-          availableWidth,
-        );
-      } else {
-        // 所有章节处理完成，保存缓存
-        await _savePagesToCache();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isProcessingPages = false;
-          _hasError = true;
-          _errorMessage = e.toString();
-          _isContentLoaded = _pages.isNotEmpty;
-        });
-
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('页面处理失败: $e')));
-      }
-    }
-  }
-
-  /// 后台处理剩余章节
-  Future<void> _processRemainingChaptersInBackground(
-    List<PageContent> existingPages,
-    int startIndex,
-    double availableHeight,
-    double availableWidth,
-  ) async {
-    print('开始后台处理剩余 ${_chapters.length - startIndex} 个章节...');
-
-    try {
-      final pages = List<PageContent>.from(existingPages);
-      final totalChapters = _chapters.length;
-
-      for (int i = startIndex; i < totalChapters; i++) {
-        if (!mounted) break;
-
-        final chapter = _chapters[i];
-
-        // 使用 Isolate 在后台处理单个章节
-        final chapterPages = await _processChapterInIsolate(
-          chapter,
-          i,
-          availableHeight,
-          availableWidth,
-        );
-
-        pages.addAll(chapterPages);
-        _processedChaptersCount++;
-
-        // 每处理完几个章节，更新UI并保存进度
-        if (i % 3 == 0 || i == totalChapters - 1) {
-          if (mounted) {
-            setState(() {
-              _pages = List.from(pages);
-              _totalPages = pages.length;
-            });
-          }
-          print('后台处理进度: $_processedChaptersCount/$totalChapters 章节');
-        }
-
-        // 让出时间片，避免阻塞UI
-        await Future.delayed(const Duration(milliseconds: 5));
-      }
-
-      // 所有章节处理完成
-      _isBackgroundProcessing = false;
-
-      if (mounted) {
-        setState(() {
-          _pages = pages;
-          _totalPages = pages.length;
-        });
-        print('所有章节处理完成，共 $_totalPages 页');
-
-        // 显示完成提示
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('书籍加载完成，共 $_totalPages 页'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-
-      // 保存到缓存
-      await _savePagesToCache();
-    } catch (e) {
-      print('后台处理章节失败: $e');
-      _isBackgroundProcessing = false;
-    }
-  }
-
-  /// 在 Isolate 中处理单个章节
-  Future<List<PageContent>> _processChapterInIsolate(
-    EpubChapter chapter,
-    int chapterIndex,
-    double availableHeight,
-    double availableWidth,
-  ) async {
-    // 由于 TextPainter 依赖于 Flutter 的渲染层，不能在 Isolate 中使用
-    // 这里使用微任务来模拟后台处理
-    return await Future.microtask(() {
-      return _splitChapterIntoPages(
-        chapter,
-        chapterIndex,
-        availableHeight,
-        availableWidth,
-      );
-    });
-  }
-
-  Future<void> _loadCoverImage(EpubBook epub) async {
-    try {
-      final coverImagePath = _getCoverImagePath();
-      final coverFile = File(coverImagePath);
-
-      // 检查封面图片文件是否已存在
-      if (await coverFile.exists()) {
-        // 文件存在，直接使用路径
-        print('封面图片已存在: $coverImagePath');
-        return;
-      }
-
-      // 文件不存在，从 epub 中提取并保存
-      if (epub.coverImage != null) {
-        final bytes = Uint8List.fromList(img.encodeJpg(epub.coverImage!));
-
-        // 确保缓存目录存在
-        await coverFile.parent.create(recursive: true);
-
-        // 保存图片文件
-        await coverFile.writeAsBytes(bytes);
-        print('封面图片已保存: $coverImagePath');
-      }
-    } catch (e) {
-      print('加载封面图片失败: $e');
-    }
-  }
-
-  /// 重新处理所有页面（用于窗口大小变化等情况）
-  Future<void> _processPages() async {
-    final BuildContext? contentContext = _contentKey.currentContext;
-    final BuildContext useContext = contentContext ?? this.context;
-    final size = MediaQuery.of(useContext).size;
-    _windowSize = size;
-
-    final availableHeight = size.height - 20;
-    final availableWidth = size.width - 48;
-
-    final pages = <PageContent>[];
-
-    // 添加封面页
-    final coverImagePath = _getCoverImagePath();
-    final coverFile = File(coverImagePath);
-    if (await coverFile.exists()) {
-      pages.add(
-        PageContent(
-          chapterIndex: -1,
-          pageIndexInChapter: 0,
-          contentItems: [CoverContent(imagePath: coverImagePath)],
-          title: '封面',
-        ),
-      );
-    }
-
-    // 重新处理所有章节
-    for (int i = 0; i < _chapters.length; i++) {
-      final chapter = _chapters[i];
-      final chapterPages = _splitChapterIntoPages(
-        chapter,
-        i,
-        availableHeight,
-        availableWidth,
-      );
-      pages.addAll(chapterPages);
-
-      // 每处理几个章节让出时间片
-      if (i % 5 == 0) {
-        await Future.delayed(const Duration(milliseconds: 5));
-      }
-    }
+    await _bookLoader.processPagesAsync(_chapters, context);
 
     setState(() {
-      _pages = pages;
-      _totalPages = pages.length;
-      if (_totalPages > 0) {
-        _currentPageIndex = _currentPageIndex.clamp(0, _totalPages - 1);
-        _currentChapterIndex = _pages[_currentPageIndex].chapterIndex;
-      }
+      _isProcessingPages = false;
     });
-
-    // 窗口大小变化后，清除旧缓存，保存新布局
-    await _savePagesToCache();
-  }
-
-  /// 使用 TextPainter 计算文本在指定宽度下的实际行数
-  int _calculateTextLines(String text, double maxWidth, TextStyle style) {
-    _textPainterCache ??= TextPainter(textDirection: TextDirection.ltr);
-
-    _textPainterCache!.text = TextSpan(text: text, style: style);
-    _textPainterCache!.layout(maxWidth: maxWidth);
-
-    final lineMetrics = _textPainterCache!.computeLineMetrics();
-    return lineMetrics.length;
-  }
-
-  /// 使用 TextPainter 计算文本在指定宽度下能容纳的最大字符数
-  int _calculateFitChars(
-    String text,
-    double maxWidth,
-    int maxLines,
-    TextStyle style,
-  ) {
-    if (text.isEmpty) return 0;
-
-    _textPainterCache ??= TextPainter(textDirection: TextDirection.ltr);
-
-    // 二分查找找到最合适的字符数
-    int left = 0;
-    int right = text.length;
-    int bestFit = 0;
-
-    while (left <= right) {
-      final mid = (left + right) ~/ 2;
-      final substring = text.substring(0, mid);
-
-      _textPainterCache!.text = TextSpan(text: substring, style: style);
-      _textPainterCache!.layout(maxWidth: maxWidth);
-
-      final lineMetrics = _textPainterCache!.computeLineMetrics();
-
-      if (lineMetrics.length <= maxLines) {
-        bestFit = mid;
-        left = mid + 1;
-      } else {
-        right = mid - 1;
-      }
-    }
-
-    return bestFit;
-  }
-
-  List<PageContent> _splitChapterIntoPages(
-    EpubChapter chapter,
-    int chapterIndex,
-    double availableHeight,
-    double availableWidth,
-  ) {
-    final pages = <PageContent>[];
-    final htmlContent = chapter.htmlContent ?? '';
-
-    final contentItems = _parseHtmlContent(htmlContent);
-
-    if (contentItems.isEmpty) {
-      return pages;
-    }
-
-    // 使用 TextPainter 精确计算行高
-    final textStyle = TextStyle(
-      fontSize: _fontSize,
-      height: 1.5,
-      color: Colors.black87,
-    );
-
-    // 计算实际行高
-    _textPainterCache ??= TextPainter(textDirection: TextDirection.ltr);
-    _textPainterCache!.text = TextSpan(text: '中', style: textStyle);
-    _textPainterCache!.layout();
-    final lineHeight = _textPainterCache!.height;
-
-    // 每页可用高度（减去 padding）
-    final usableHeight = availableHeight - 140 - kToolbarHeight;
-
-    List<ContentItem> currentPageItems = [];
-    double currentPageHeight = 0;
-    int chapterLocalPageIndex = 0;
-
-    void flushCurrentPage() {
-      if (currentPageItems.isNotEmpty) {
-        pages.add(
-          PageContent(
-            chapterIndex: chapterIndex,
-            pageIndexInChapter: chapterLocalPageIndex,
-            contentItems: List.from(currentPageItems),
-            title: chapter.title,
-          ),
-        );
-        chapterLocalPageIndex++;
-        currentPageItems = [];
-        currentPageHeight = 0;
-      }
-    }
-
-    for (final item in contentItems) {
-      if (item is TextContent) {
-        String remaining = item.text.trim();
-        while (remaining.isNotEmpty) {
-          final remainingHeight = usableHeight - currentPageHeight;
-          final remainingLines = (remainingHeight / lineHeight).floor();
-
-          if (remainingLines <= 0) {
-            flushCurrentPage();
-            continue;
-          }
-
-          // 使用 TextPainter 精确计算能容纳的字符数
-          final fitChars = _calculateFitChars(
-            remaining,
-            availableWidth,
-            remainingLines,
-            textStyle,
-          );
-
-          if (fitChars >= remaining.length) {
-            // 剩余内容可以全部放入当前页
-            currentPageItems.add(TextContent(text: remaining));
-            final actualLines = _calculateTextLines(
-              remaining,
-              availableWidth,
-              textStyle,
-            );
-            currentPageHeight += actualLines * lineHeight;
-            remaining = '';
-          } else {
-            // 需要分割文本
-            // 尝试在单词边界处截断
-            int cut = fitChars;
-            if (cut > 0) {
-              final sub = remaining.substring(0, cut);
-              final lastSpace = sub.lastIndexOf(' ');
-              if (lastSpace > (cut * 0.6).floor()) {
-                cut = lastSpace;
-              }
-            }
-
-            // 确保至少截取一个字符
-            cut = cut.clamp(1, remaining.length);
-
-            String part = remaining.substring(0, cut).trimRight();
-            if (part.isEmpty) {
-              part = remaining.substring(0, cut);
-            }
-
-            currentPageItems.add(TextContent(text: part));
-            final partLines = _calculateTextLines(
-              part,
-              availableWidth,
-              textStyle,
-            );
-            currentPageHeight += partLines * lineHeight;
-            remaining = remaining.substring(cut).trimLeft();
-
-            // current page is full now
-            flushCurrentPage();
-          }
-        }
-      } else if (item is ImageContent) {
-        // 图片高度估算（基于可用高度的 40%），额外增加 4 行空间作为边距
-        final extraLines = 4;
-        final extraHeight = extraLines * lineHeight;
-        final imageHeight = usableHeight * 0.4 + extraHeight;
-        if (currentPageItems.isNotEmpty &&
-            currentPageHeight + imageHeight > usableHeight) {
-          flushCurrentPage();
-        }
-        currentPageItems.add(item);
-        currentPageHeight += imageHeight;
-
-        // If image itself larger than one page, place it on its own page
-        if (imageHeight >= usableHeight) {
-          flushCurrentPage();
-        }
-      } else if (item is CoverContent) {
-        // cover always occupies a full page
-        if (currentPageItems.isNotEmpty) {
-          flushCurrentPage();
-        }
-        currentPageItems.add(item);
-        currentPageHeight = usableHeight;
-        flushCurrentPage();
-      }
-    }
-
-    if (currentPageItems.isNotEmpty) {
-      flushCurrentPage();
-    }
-
-    return pages;
-  }
-
-  List<ContentItem> _parseHtmlContent(String html) {
-    final List<ContentItem> items = <ContentItem>[];
-
-    String cleanedHtml = html.replaceAll(RegExp(r'\s+'), ' ').trim();
-
-    const String imgTag = '<img';
-    const String srcAttr = 'src=';
-
-    int currentIndex = 0;
-    while (currentIndex < cleanedHtml.length) {
-      int imgStart = cleanedHtml.indexOf(imgTag, currentIndex);
-      if (imgStart == -1) {
-        String remainingText = cleanedHtml.substring(currentIndex);
-        String cleanText = _stripHtmlTags(remainingText);
-        if (cleanText.trim().isNotEmpty) {
-          items.add(TextContent(text: cleanText));
-        }
-        break;
-      }
-
-      if (imgStart > currentIndex) {
-        String textBeforeImg = cleanedHtml.substring(currentIndex, imgStart);
-        String cleanText = _stripHtmlTags(textBeforeImg);
-        if (cleanText.trim().isNotEmpty) {
-          items.add(TextContent(text: cleanText));
-        }
-      }
-
-      int srcStart = cleanedHtml.indexOf(srcAttr, imgStart);
-      if (srcStart != -1) {
-        int srcValueStart = srcStart + srcAttr.length;
-        while (srcValueStart < cleanedHtml.length &&
-            (cleanedHtml[srcValueStart] == ' ' ||
-                cleanedHtml[srcValueStart] == '=')) {
-          srcValueStart++;
-        }
-
-        String quote = '';
-        if (srcValueStart < cleanedHtml.length) {
-          if (cleanedHtml[srcValueStart] == '"' ||
-              cleanedHtml[srcValueStart] == "'") {
-            quote = cleanedHtml[srcValueStart];
-            srcValueStart++;
-          }
-        }
-
-        int srcValueEnd = srcValueStart;
-        while (srcValueEnd < cleanedHtml.length) {
-          if (quote.isNotEmpty) {
-            if (cleanedHtml[srcValueEnd] == quote) {
-              break;
-            }
-          } else {
-            if (cleanedHtml[srcValueEnd] == ' ' ||
-                cleanedHtml[srcValueEnd] == '>' ||
-                cleanedHtml[srcValueEnd] == '/') {
-              break;
-            }
-          }
-          srcValueEnd++;
-        }
-
-        if (srcValueEnd > srcValueStart) {
-          String srcValue = cleanedHtml.substring(srcValueStart, srcValueEnd);
-          if (srcValue.isNotEmpty) {
-            items.add(ImageContent(source: srcValue));
-          }
-        }
-
-        int imgEnd = cleanedHtml.indexOf('>', imgStart);
-        currentIndex = imgEnd != -1 ? imgEnd + 1 : imgStart + 1;
-      } else {
-        int imgEnd = cleanedHtml.indexOf('>', imgStart);
-        currentIndex = imgEnd != -1 ? imgEnd + 1 : imgStart + 1;
-      }
-    }
-
-    return items;
-  }
-
-  List<EpubChapter> _flattenChapters(List<EpubChapter> chapters) {
-    final result = <EpubChapter>[];
-    for (var chapter in chapters) {
-      if (chapter.htmlContent != null && chapter.htmlContent!.isNotEmpty) {
-        result.add(chapter);
-      }
-      if (chapter.subChapters.isNotEmpty) {
-        result.addAll(_flattenChapters(chapter.subChapters));
-      }
-    }
-    return result;
-  }
-
-  String _stripHtmlTags(String html) {
-    String result = html
-        .replaceAll(RegExp('<br\\s*/?>', caseSensitive: false), '\n')
-        .replaceAll(RegExp('<p[^>]*>', caseSensitive: false), '\n')
-        .replaceAll(RegExp('</p>', caseSensitive: false), '\n')
-        .replaceAll(RegExp('<div[^>]*>', caseSensitive: false), '\n')
-        .replaceAll(RegExp('</div>', caseSensitive: false), '\n')
-        .replaceAll(
-          RegExp(
-            '<h[1-6][^>]*>.*?</h[1-6]>',
-            caseSensitive: false,
-            multiLine: true,
-            dotAll: true,
-          ),
-          '\n',
-        )
-        .replaceAll(RegExp('<[^>]*>', multiLine: true, dotAll: true), '')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll(RegExp('[ \\t]+'), ' ')
-        .trim();
-
-    result = result.replaceAll(RegExp('\n+'), '\n');
-    return result.trim();
   }
 
   Future<Uint8List?> _getImageData(String imagePath) async {
@@ -2795,36 +2106,39 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             File(item.imagePath!),
                             fit: BoxFit.contain,
                             errorBuilder: (context, error, stackTrace) {
-                              final coverWidth = (MediaQuery.of(context).size.width * 0.7)
-                                  .clamp(200.0, 500.0);
-                              final coverHeight = (availableHeight * 0.7)
-                                  .clamp(300.0, 700.0);
+                              final coverWidth =
+                                  (MediaQuery.of(context).size.width * 0.7)
+                                      .clamp(200.0, 500.0);
+                              final coverHeight = (availableHeight * 0.7).clamp(
+                                300.0,
+                                700.0,
+                              );
                               return Container(
-                              width: coverWidth,
-                              height: coverHeight,
-                              color: Colors.grey[200],
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.broken_image,
-                                    size: 48,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    '封面加载失败',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
+                                width: coverWidth,
+                                height: coverHeight,
+                                color: Colors.grey[200],
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.broken_image,
+                                      size: 48,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '封面加载失败',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               );
@@ -2981,21 +2295,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                       fontSize: 14,
                                     ),
                                   ),
-                                  if (_isBackgroundProcessing)
-                                    Padding(
-                                      padding: const EdgeInsets.only(left: 8),
-                                      child: SizedBox(
-                                        width: 12,
-                                        height: 12,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                Colors.blue,
-                                              ),
-                                        ),
-                                      ),
-                                    ),
                                   if (_pages.isNotEmpty &&
                                       _pages[_currentPageIndex].title != null &&
                                       _pages[_currentPageIndex].chapterIndex >=
@@ -3113,8 +2412,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
   /// 清除当前书籍的缓存
   Future<void> _clearBookCache() async {
     try {
-      if (_bookCacheKey == null) return;
-      final cacheFilePath = await _getCacheFilePath();
+      if (_bookLoader.bookCacheKey == null) return;
+      final cacheFilePath = await _bookLoader.getCacheFilePath();
       final cacheFile = File(cacheFilePath);
       if (await cacheFile.exists()) {
         await cacheFile.delete();
@@ -3192,7 +2491,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
     // 重新计算分页
     if (_chapters.isNotEmpty) {
-      await _processPages();
+      await _processPagesAsync();
 
       // 恢复阅读位置
       if (mounted) {
@@ -3481,7 +2780,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
                   Text('正在处理页面内容...'),
-                  Text('优先加载前 $_priorityChapterCount 个章节，请稍候'),
+                  Text('优先加载前 ${BookLoader.priorityChapterCount} 个章节，请稍候'),
                   if (_chapters.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),

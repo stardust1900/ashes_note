@@ -8,6 +8,8 @@ abstract class ContentItem {
     switch (type) {
       case 'text':
         return TextContent.fromJson(json);
+      case 'text_ref':
+        return TextContentRef.fromJson(json);
       case 'image':
         return ImageContent.fromJson(json);
       case 'cover':
@@ -18,7 +20,7 @@ abstract class ContentItem {
   }
 }
 
-/// 文本内容项
+/// 文本内容项（完整文本，用于内存和渲染）
 class TextContent extends ContentItem {
   final String text;
   final int startOffset; // 文本在章节中的起始偏移量
@@ -35,6 +37,38 @@ class TextContent extends ContentItem {
       text: json['text'] as String,
       startOffset: json['startOffset'] as int? ?? 0,
     );
+  }
+}
+
+/// 文本引用内容项（只存储偏移量，用于缓存）
+class TextContentRef extends ContentItem {
+  final int offset; // 文本在章节中的起始偏移量
+  final int length; // 文本长度
+
+  TextContentRef({required this.offset, required this.length});
+
+  @override
+  Map<String, dynamic> toJson() {
+    return {'type': 'text_ref', 'offset': offset, 'length': length};
+  }
+
+  factory TextContentRef.fromJson(Map<String, dynamic> json) {
+    return TextContentRef(
+      offset: json['offset'] as int,
+      length: json['length'] as int,
+    );
+  }
+
+  /// 从章节纯文本中提取完整文本
+  TextContent toTextContent(String chapterPlainText) {
+    final endOffset = offset + length;
+    final text = offset < chapterPlainText.length
+        ? chapterPlainText.substring(
+            offset,
+            endOffset.clamp(0, chapterPlainText.length),
+          )
+        : '';
+    return TextContent(text: text, startOffset: offset);
   }
 }
 
