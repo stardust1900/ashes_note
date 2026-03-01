@@ -1,11 +1,12 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:archive/archive.dart';
 import 'package:ashes_note/services/book_reader/book_reader_services.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:crypto/crypto.dart' as crypto;
+import 'package:epub_plus/epub_plus.dart' hide Image;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
 import 'book_reader_page.dart';
 
 /// 书籍库页面 - 展示所有导入的书籍
@@ -35,7 +36,9 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     }
 
     final files = await booksDir.list().toList();
-    final bookInfos = files
+
+    // 过滤出支持的电子书格式
+    final supportedFiles = files
         .whereType<File>()
         .where(
           (f) =>
@@ -45,19 +48,27 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
               f.path.endsWith('.kfx') ||
               f.path.endsWith('.pdf'),
         )
+        .toList();
+
+    // 异步创建 BookInfo 对象（使用 epub_plus 解析元数据）
+    final List<Future<BookInfo>> bookInfoFutures = supportedFiles
         .map((f) => BookInfo.fromFile(f))
         .toList();
+    final bookInfos = await Future.wait(bookInfoFutures, eagerError: true);
 
     // 为 EPUB 文件提取封面（使用 Future.wait 并行处理）
     final epubBooks = bookInfos
         .where((b) => b.file.path.endsWith('.epub'))
         .toList();
-    final coverFutures = epubBooks.map((book) async {
-      File? coverFile = File(
-        '${booksDir.path}/.cache/${book.file.path.hashCode}.jpg',
+    final List<Future<void>> coverFutures = epubBooks.map((book) async {
+      File? coverFile;
+      final existingCoverFile = File(
+        '${booksDir.path}/.cache/cover_${book.file.path.hashCode}.jpg',
       );
       //已经提取的不要重复提取
-      if (!coverFile.existsSync()) {
+      if (await existingCoverFile.exists()) {
+        coverFile = existingCoverFile;
+      } else {
         coverFile = await _extractEpubCover(book.file);
       }
       if (coverFile != null) {
@@ -280,28 +291,50 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     if (confirm != true) return;
 
     try {
+      // 在删除书籍文件之前，先计算缓存键并删除页面缓存
+      String cacheKey;
+      try {
+        final bytes = await book.file.readAsBytes();
+        final digest = crypto.md5.convert(bytes);
+        cacheKey = digest.toString();
+        print('[BookLibrary] 缓存键: $cacheKey');
+      } catch (e) {
+        // 如果读取失败，使用路径和修改时间
+        try {
+          final stat = await book.file.stat();
+          cacheKey =
+              '${book.file.path.hashCode}_${stat.modified.millisecondsSinceEpoch}';
+        } catch (e2) {
+          print('[BookLibrary] 获取缓存键失败: $e2');
+          cacheKey = book.file.path.hashCode.toString();
+        }
+      }
+
+      // 删除页面缓存（在删除书籍文件之前）
+      try {
+        final workingDir = SPUtil.get<String>('workingDirectory', '');
+        final cacheDir = Directory('$workingDir/books/.cache');
+        if (await cacheDir.exists()) {
+          final cacheFile = File('${cacheDir.path}/$cacheKey.json');
+          if (await cacheFile.exists()) {
+            await cacheFile.delete();
+            print('[BookLibrary] 页面缓存已删除: $cacheKey');
+          } else {
+            print('[BookLibrary] 页面缓存文件不存在: $cacheKey.json');
+          }
+        }
+      } catch (e) {
+        print('[BookLibrary] 删除页面缓存失败: $e');
+      }
+
       // 删除书籍文件
       if (await book.file.exists()) {
         await book.file.delete();
       }
 
-      // 删除封面缓存
+      // 删除封面缓存（book.coverFile 应该已经指向缓存目录中的封面文件）
       if (book.coverFile != null && await book.coverFile!.exists()) {
         await book.coverFile!.delete();
-      }
-
-      // 删除封面图片文件（保存在缓存目录）
-      try {
-        final workingDir = SPUtil.get<String>('workingDirectory', '');
-        final coverImagePath = '$workingDir/books/.cache/cover_${book.file.path.hashCode}.jpg';
-        final coverImageFile = File(coverImagePath);
-        if (await coverImageFile.exists()) {
-          await coverImageFile.delete();
-          print('[BookLibrary] 封面图片已删除: $coverImagePath');
-        }
-      } catch (e) {
-        // 封面图片删除失败不影响主流程
-        print('[BookLibrary] 删除封面图片失败: $e');
       }
 
       // 删除阅读进度缓存
@@ -324,44 +357,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       final lastReadBook = SPUtil.get<String>('last_read_book', '');
       if (lastReadBook == book.file.path) {
         await SPUtil.remove('last_read_book');
-      }
-
-      // 删除页面缓存（使用缓存键直接删除，避免遍历所有文件）
-      try {
-        // final appDir = await getApplicationDocumentsDirectory();
-        final workingDir = SPUtil.get<String>('workingDirectory', '');
-        final cacheDir = Directory('$workingDir/books/.cache');
-        if (await cacheDir.exists()) {
-          // 根据书籍路径生成缓存键（与阅读器页面逻辑一致）
-          // 先尝试使用 MD5 作为缓存键
-          String cacheKey = book.file.path.hashCode.toString();
-          try {
-            final file = File(book.file.path);
-            if (await file.exists()) {
-              final bytes = await file.readAsBytes();
-              final digest = crypto.md5.convert(bytes);
-              cacheKey = digest.toString();
-            }
-          } catch (e) {
-            // 如果读取失败，使用路径和修改时间
-            try {
-              final file = File(book.file.path);
-              final stat = await file.stat();
-              cacheKey = '${book.file.path.hashCode}_${stat.modified.millisecondsSinceEpoch}';
-            } catch (e2) {
-              print('[BookLibrary] 获取缓存键失败: $e2');
-            }
-          }
-
-          final cacheFile = File('${cacheDir.path}/$cacheKey.json');
-          if (await cacheFile.exists()) {
-            await cacheFile.delete();
-            print('[BookLibrary] 页面缓存已删除: $cacheKey');
-          }
-        }
-      } catch (e) {
-        // 缓存删除失败不影响主流程
-        print('[BookLibrary] 删除页面缓存失败: $e');
       }
 
       // 刷新书籍列表
@@ -442,42 +437,9 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   Future<File?> _extractEpubCover(File epubFile) async {
     try {
       final bytes = await epubFile.readAsBytes();
-      final archive = ZipDecoder().decodeBytes(bytes);
+      final epub = await EpubReader.readBook(bytes);
 
-      // 查找封面图片
-      Uint8List? coverData;
-
-      // 首先尝试查找名称中包含 cover 或 front 的图片
-      for (var file in archive) {
-        final name = file.name.toLowerCase();
-        if (name.endsWith('.jpg') ||
-            name.endsWith('.jpeg') ||
-            name.endsWith('.png') ||
-            name.endsWith('.webp')) {
-          if (name.contains('cover') || name.contains('front')) {
-            final content = file.content as List<int>;
-            coverData = Uint8List.fromList(content);
-            break;
-          }
-        }
-      }
-
-      // 如果没找到，尝试第一张图片
-      if (coverData == null) {
-        for (var file in archive) {
-          final name = file.name.toLowerCase();
-          if (name.endsWith('.jpg') ||
-              name.endsWith('.jpeg') ||
-              name.endsWith('.png') ||
-              name.endsWith('.webp')) {
-            final content = file.content as List<int>;
-            coverData = Uint8List.fromList(content);
-            break;
-          }
-        }
-      }
-
-      if (coverData != null && coverData.isNotEmpty) {
+      if (epub.coverImage != null) {
         // 保存封面到缓存目录
         final cacheDir = Directory('${epubFile.parent.path}/.cache');
         if (!await cacheDir.exists()) {
@@ -487,11 +449,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         final coverFile = File(
           '${cacheDir.path}/cover_${epubFile.path.hashCode}.jpg',
         );
-        // final safeFileName = epubFile.uri.pathSegments.last.replaceAll(
-        //   RegExp(r'[<>"/\\|?*]'),
-        //   '_',
-        // );
-        // final coverFile = File('${cacheDir.path}/$safeFileName.jpg');
+        final coverData = Uint8List.fromList(img.encodeJpg(epub.coverImage!));
         await coverFile.writeAsBytes(coverData);
         return coverFile;
       }
@@ -526,18 +484,35 @@ class BookInfo {
     this.coverFile,
   });
 
-  factory BookInfo.fromFile(File file) {
+  static Future<BookInfo> fromFile(File file) async {
     final filename = file.uri.pathSegments.last;
-    // 简单的文件名作为标题
+    // 默认使用文件名作为标题
     String title = filename.replaceAll(
       RegExp(r'\.(epub|mobi|azw3|kfx|pdf)$'),
       '',
     );
     String author = '未知作者';
-    File? coverFile;
+
+    // 尝试使用 epub_plus 解析书籍元数据
+    if (filename.toLowerCase().endsWith('.epub')) {
+      try {
+        final bytes = await file.readAsBytes();
+        final epub = await EpubReader.readBook(bytes);
+        print('[BookLibrary] 解析 EPUB 元数据成功: ${epub.title}, ${epub.author}');
+        if (epub.title != null && epub.title!.isNotEmpty) {
+          title = epub.title!;
+        }
+        if (epub.author != null && epub.author!.isNotEmpty) {
+          author = epub.author!;
+        }
+      } catch (e) {
+        print('[BookLibrary] 解析 EPUB 元数据失败: $e');
+      }
+    }
 
     // 尝试查找对应的封面图片
     final bookDir = file.parent;
+    File? coverFile;
     final possibleCoverNames = [
       '${title}.jpg',
       '${title}.png',
@@ -549,13 +524,11 @@ class BookInfo {
 
     for (var coverName in possibleCoverNames) {
       final coverFileCandidate = File('${bookDir.path}/$coverName');
-      if (coverFileCandidate.existsSync()) {
+      if (await coverFileCandidate.exists()) {
         coverFile = coverFileCandidate;
         break;
       }
     }
-
-    // TODO: 解析书籍元数据获取真实标题、作者和封面
 
     return BookInfo(
       file: file,
