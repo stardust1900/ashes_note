@@ -80,13 +80,13 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
       final jsonString = await cacheFile.readAsString();
       final jsonData = jsonDecode(jsonString) as List<dynamic>;
-      
+
       final metadataMap = <String, BookMetadata>{};
       for (final item in jsonData) {
         final metadata = BookMetadata.fromJson(item as Map<String, dynamic>);
         metadataMap[metadata.filePath] = metadata;
       }
-      
+
       return metadataMap;
     } catch (e) {
       print('[BookLibrary] 加载元数据缓存失败: $e');
@@ -118,12 +118,14 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   Future<BookMetadata> _parseBookMetadata(File file) async {
     // 先检查缓存
     final metadataMap = await _loadMetadataCache();
-    
+
     if (metadataMap.containsKey(file.path)) {
       // 检查文件是否仍然存在
       final cached = metadataMap[file.path]!;
-      final coverFile = cached.coverPath != null ? File(cached.coverPath!) : null;
-      
+      final coverFile = cached.coverPath != null
+          ? File(cached.coverPath!)
+          : null;
+
       return BookMetadata(
         filePath: file.path,
         title: cached.title,
@@ -146,7 +148,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       try {
         final bytes = await file.readAsBytes();
         final epub = await EpubReader.readBook(bytes);
-        
+
         if (epub.title != null && epub.title!.isNotEmpty) {
           title = epub.title!;
         }
@@ -161,12 +163,13 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           if (!await cacheDir.exists()) {
             await cacheDir.create(recursive: true);
           }
-          final coverFilePath = '${cacheDir.path}/cover_${file.path.hashCode}.jpg';
+          final coverFilePath =
+              '${cacheDir.path}/cover_${file.path.hashCode}.jpg';
           final coverData = Uint8List.fromList(img.encodeJpg(epub.coverImage!));
           await File(coverFilePath).writeAsBytes(coverData);
           coverFile = File(coverFilePath);
         }
-        
+
         print('[BookLibrary] 解析 EPUB 元数据成功: $title, $author');
       } catch (e) {
         print('[BookLibrary] 解析 EPUB 元数据失败: $e');
@@ -214,14 +217,18 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     final List<BookInfo> bookInfos = [];
     for (final file in supportedFiles) {
       final metadata = await _parseBookMetadata(file);
-      final coverFile = metadata.coverPath != null ? File(metadata.coverPath!) : null;
-      
-      bookInfos.add(BookInfo(
-        file: file,
-        title: metadata.title,
-        author: metadata.author,
-        coverFile: coverFile,
-      ));
+      final coverFile = metadata.coverPath != null
+          ? File(metadata.coverPath!)
+          : null;
+
+      bookInfos.add(
+        BookInfo(
+          file: file,
+          title: metadata.title,
+          author: metadata.author,
+          coverFile: coverFile,
+        ),
+      );
     }
 
     setState(() {
@@ -618,31 +625,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     );
   }
 
-  Future<File?> _extractEpubCover(File epubFile) async {
-    try {
-      final bytes = await epubFile.readAsBytes();
-      final epub = await EpubReader.readBook(bytes);
-
-      if (epub.coverImage != null) {
-        // 保存封面到缓存目录
-        final cacheDir = Directory('${epubFile.parent.path}/.cache');
-        if (!await cacheDir.exists()) {
-          await cacheDir.create(recursive: true);
-        }
-        // 使用书籍文件路径的哈希值作为封面图片名，避免重名和特殊字符问题
-        final coverFile = File(
-          '${cacheDir.path}/cover_${epubFile.path.hashCode}.jpg',
-        );
-        final coverData = Uint8List.fromList(img.encodeJpg(epub.coverImage!));
-        await coverFile.writeAsBytes(coverData);
-        return coverFile;
-      }
-    } catch (e) {
-      print('[BookLibrary] 提取 EPUB 封面失败: $e');
-    }
-    return null;
-  }
-
   /// 检查并清理无效的元数据缓存（文件已被删除）
   Future<void> _cleanMetadataCache() async {
     try {
@@ -656,10 +638,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       if (!await booksDir.exists()) return;
 
       final files = await booksDir.list().toList();
-      final validFilePaths = files
-          .whereType<File>()
-          .map((f) => f.path)
-          .toSet();
+      final validFilePaths = files.whereType<File>().map((f) => f.path).toSet();
 
       bool hasInvalid = false;
       final invalidKeys = metadataMap.keys
@@ -779,188 +758,147 @@ class _BookCard extends StatefulWidget {
 }
 
 class _BookCardState extends State<_BookCard> {
-  bool _isHovered = false;
-
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: Card(
-        elevation: 2,
-        clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        child: InkWell(
-          onTap: widget.onTap,
-          onLongPress: () => _showActionMenu(context),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 封面区域
-              Expanded(
-                flex: 4,
+    return Card(
+      elevation: 2,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: InkWell(
+        onTap: widget.onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 封面区域
+            Expanded(
+              flex: 4,
+              child: Container(
+                width: double.infinity,
+                color: Colors.blue.withValues(alpha: 0.1),
+                child: widget.book.coverFile != null
+                    ? Image.file(
+                        widget.book.coverFile!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return _buildDefaultCover();
+                        },
+                      )
+                    : _buildDefaultCover(),
+              ),
+            ),
+            // 书籍信息
+            Expanded(
+              flex: 2,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Stack(
-                  fit: StackFit.expand,
                   children: [
-                    Container(
-                      width: double.infinity,
-                      color: Colors.blue.withValues(alpha: 0.1),
-                      child: widget.book.coverFile != null
-                          ? Image.file(
-                              widget.book.coverFile!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return _buildDefaultCover();
-                              },
-                            )
-                          : _buildDefaultCover(),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            widget.book.title,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Flexible(
+                          child: Text(
+                            widget.book.author,
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: Theme.of(context).textTheme.bodyMedium?.color,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                    // 编辑和删除按钮（悬停时显示）
-                    if (_isHovered)
-                      Positioned(
-                        top: 4,
-                        right: 4,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // 编辑按钮
-                            Material(
-                              color: Colors.blue.withValues(alpha: 0.9),
-                              borderRadius: BorderRadius.circular(16),
-                              child: InkWell(
-                                onTap: () => _showRenameDialog(context),
-                                borderRadius: BorderRadius.circular(16),
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  child: const Icon(
-                                    Icons.edit,
-                                    color: Colors.white,
-                                    size: 16,
-                                  ),
-                                ),
-                              ),
+                    // 右下角三个水平点菜单按钮
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Material(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
+                          onTap: () => _showActionMenu(context),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            child: const Icon(
+                              Icons.more_horiz,
+                              color: Colors.white,
+                              size: 16,
                             ),
-                            const SizedBox(width: 4),
-                            // 删除按钮
-                            Material(
-                              color: Colors.red.withValues(alpha: 0.9),
-                              borderRadius: BorderRadius.circular(16),
-                              child: InkWell(
-                                onTap: widget.onDelete,
-                                borderRadius: BorderRadius.circular(16),
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  child: const Icon(
-                                    Icons.delete,
-                                    color: Colors.white,
-                                    size: 16,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),
-              // 书籍信息
-              Expanded(
-                flex: 2,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          widget.book.title,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Flexible(
-                        child: Text(
-                          widget.book.author,
-                          style: TextStyle(
-                            fontSize: 8,
-                            color: Colors.grey[600],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  /// 显示操作菜单（用于手机端长按）
+  /// 显示操作菜单
   void _showActionMenu(BuildContext context) {
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
-                widget.book.title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.edit, color: Colors.blue),
-              title: const Text('重命名'),
-              onTap: () {
-                Navigator.pop(context);
-                _showRenameDialog(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('删除'),
-              onTap: () {
-                Navigator.pop(context);
-                widget.onDelete();
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        title: Text(
+          widget.book.title,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _showRenameDialog(context);
+            },
+            icon: const Icon(Icons.edit, size: 18),
+            label: const Text('重命名'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.blue,
+            ),
+          ),
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              widget.onDelete();
+            },
+            icon: const Icon(Icons.delete, size: 18),
+            label: const Text('删除'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+        ],
       ),
     );
   }

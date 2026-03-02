@@ -1946,49 +1946,46 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 page.chapterIndex,
               );
 
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: SelectableTextWithToolbar(
-                  text: item.text,
-                  style: TextStyle(
-                    fontSize: _fontSize,
-                    height: 1.5,
-                    color:
-                        Theme.of(context).textTheme.bodyMedium?.color ??
-                        Colors.black87,
-                  ),
-                  textStartOffset: textStartOffset,
-                  chapterIndex: page.chapterIndex,
-                  pageIndex: _currentPageIndex,
-                  spans: highlightedSpans,
-                  onTextSelected:
-                      (selectedText, position, startOffset, endOffset) {
-                        _selectionStartOffset = startOffset;
-                        _selectionEndOffset = endOffset;
-                        _selectionChapterIndex = page.chapterIndex;
-                        _selectionPageIndex = _currentPageIndex;
-
-                        // 检查是否选中了已有高亮/划线
-                        var existingHighlights =
-                            HighlightOperations.getHighlightsAtSelection(
-                              _highlights,
-                              page.chapterIndex,
-                              startOffset,
-                              endOffset,
-                            );
-
-                        _showTextToolbarAt(
-                          position,
-                          selectedText,
-                          existingHighlights: existingHighlights,
-                        );
-                      },
-                  onSelectionCleared: () {
-                    if (_showTextToolbar) {
-                      _hideTextToolbar();
-                    }
-                  },
+              return SelectableTextWithToolbar(
+                text: item.text,
+                style: TextStyle(
+                  fontSize: _fontSize,
+                  height: 1.1,
+                  color:
+                      Theme.of(context).textTheme.bodyMedium?.color ??
+                      Colors.black87,
                 ),
+                textStartOffset: textStartOffset,
+                chapterIndex: page.chapterIndex,
+                pageIndex: _currentPageIndex,
+                spans: highlightedSpans,
+                onTextSelected:
+                    (selectedText, position, startOffset, endOffset) {
+                      _selectionStartOffset = startOffset;
+                      _selectionEndOffset = endOffset;
+                      _selectionChapterIndex = page.chapterIndex;
+                      _selectionPageIndex = _currentPageIndex;
+
+                      // 检查是否选中了已有高亮/划线
+                      var existingHighlights =
+                          HighlightOperations.getHighlightsAtSelection(
+                            _highlights,
+                            page.chapterIndex,
+                            startOffset,
+                            endOffset,
+                          );
+
+                      _showTextToolbarAt(
+                        position,
+                        selectedText,
+                        existingHighlights: existingHighlights,
+                      );
+                    },
+                onSelectionCleared: () {
+                  if (_showTextToolbar) {
+                    _hideTextToolbar();
+                  }
+                },
               );
             } else if (item is ImageContent) {
               return FutureBuilder<Uint8List?>(

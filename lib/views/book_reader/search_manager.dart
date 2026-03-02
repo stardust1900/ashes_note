@@ -1,7 +1,8 @@
 import 'package:epub_plus/epub_plus.dart';
+
+import '../../models/book_reader/content_item.dart' show TextContent;
 import '../../models/book_reader/highlight.dart';
 import '../../models/book_reader/page_content.dart';
-import '../../models/book_reader/content_item.dart' show ContentItem, TextContent;
 
 /// 搜索管理器
 class SearchManager {
@@ -34,8 +35,6 @@ class SearchManager {
       int cumulativeOffset = 0;
 
       for (final page in chapterPages) {
-        int pageOffset = cumulativeOffset;
-
         for (final item in page.contentItems) {
           if (item is TextContent) {
             final textContent = item.text;
@@ -93,7 +92,9 @@ class SearchManager {
   }
 
   /// 合并同一页的搜索结果
-  static List<SearchResult> mergeResultsByPage(List<SearchResult> searchResults) {
+  static List<SearchResult> mergeResultsByPage(
+    List<SearchResult> searchResults,
+  ) {
     final Map<String, List<SearchResult>> pageResultsMap = {};
 
     // 按页分组

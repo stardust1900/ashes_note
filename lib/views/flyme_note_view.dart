@@ -530,7 +530,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         // 搜索头部信息
         Container(
           padding: EdgeInsets.all(16),
-          color: Theme.of(context).dividerColor?.withValues(alpha: 0.2),
+          color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
           child: Row(
             children: [
               Icon(

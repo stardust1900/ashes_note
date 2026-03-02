@@ -50,7 +50,6 @@ class BookLoader {
     dotAll: true,
   );
   static final RegExp _spaceTabRegex = RegExp(r'[ \t]+');
-  static final RegExp _multipleNewlineRegex = RegExp(r'\n+');
 
   /// 窗口大小
   Size? windowSize;
@@ -217,18 +216,20 @@ class BookLoader {
       final jsonString = jsonEncode(cacheData);
 
       // 统计原始大小和优化后大小
-      final originalData = {
-        'pages': pages.map((p) => p.toJson()).toList(),
-      };
+      final originalData = {'pages': pages.map((p) => p.toJson()).toList()};
       final originalSize = jsonEncode(originalData).length;
       final compressedSize = jsonString.length;
-      final ratio = ((1 - compressedSize / originalSize) * 100).toStringAsFixed(1);
+      final ratio = ((1 - compressedSize / originalSize) * 100).toStringAsFixed(
+        1,
+      );
 
       final cacheFile = File(cacheFilePath);
       await cacheFile.writeAsString(jsonString);
 
       print('页面缓存已保存: $cacheFilePath');
-      print('📊 缓存优化: 原始 $originalSize 字节 → 优化后 $compressedSize 字节 (减少 ${ratio}%)');
+      print(
+        '📊 缓存优化: 原始 $originalSize 字节 → 优化后 $compressedSize 字节 (减少 ${ratio}%)',
+      );
     } catch (e) {
       print('保存页面缓存失败: $e');
       print('错误堆栈: ${StackTrace.current}');
@@ -271,7 +272,8 @@ class BookLoader {
       }
 
       // 从缓存加载章节纯文本
-      final chapterTextsData = cacheData['chapterTexts'] as Map<String, dynamic>?;
+      final chapterTextsData =
+          cacheData['chapterTexts'] as Map<String, dynamic>?;
       final Map<int, String> chapterTexts = {};
       if (chapterTextsData != null) {
         chapterTextsData.forEach((key, value) {
@@ -458,10 +460,10 @@ class BookLoader {
   String stripHtmlTags(String html) {
     String result = html
         .replaceAll(_brTagRegex, '\n')
-        .replaceAll(_pOpenTagRegex, '\n')
-        .replaceAll(_pCloseTagRegex, '\n')
-        .replaceAll(_divOpenTagRegex, '\n')
-        .replaceAll(_divCloseTagRegex, '\n')
+        .replaceAll(_pOpenTagRegex, '')
+        .replaceAll(_pCloseTagRegex, '')
+        .replaceAll(_divOpenTagRegex, '')
+        .replaceAll(_divCloseTagRegex, '')
         .replaceAll(_headingTagRegex, '\n')
         .replaceAll(_anyTagRegex, '')
         .replaceAll('&nbsp;', ' ')
@@ -473,7 +475,12 @@ class BookLoader {
         .replaceAll(_spaceTabRegex, ' ')
         .trim();
 
-    result = result.replaceAll(_multipleNewlineRegex, '\n');
+    // 删除换行符周围的空格
+    result = result.replaceAll(RegExp(r' *[\r\n]+ *'), '\n');
+
+    // 压缩连续换行符不超过3个
+    result = result.replaceAll(RegExp(r'\n{4,}'), '\n\n\n');
+
     return result.trim();
   }
 
