@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 /// 内容项基类
 abstract class ContentItem {
   Map<String, dynamic> toJson();
@@ -100,8 +98,6 @@ class CoverContent extends ContentItem {
   }
 
   factory CoverContent.fromJson(Map<String, dynamic> json) {
-    return CoverContent(
-      imagePath: json['imagePath'] as String?,
-    );
+    return CoverContent(imagePath: json['imagePath'] as String?);
   }
 }

@@ -76,7 +76,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   Future<Map<String, BookMetadata>> _loadMetadataCache() async {
     try {
       final cacheFile = await _getMetadataCacheFile();
-      if (!await cacheFile.exists()) return {};
+      if (!await cacheFile.exists()) {
+        print('[BookLibrary] 元数据缓存文件不存在');
+        return {};
+      }
 
       final jsonString = await cacheFile.readAsString();
       final jsonData = jsonDecode(jsonString) as List<dynamic>;
@@ -84,9 +87,12 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       final metadataMap = <String, BookMetadata>{};
       for (final item in jsonData) {
         final metadata = BookMetadata.fromJson(item as Map<String, dynamic>);
-        metadataMap[metadata.filePath] = metadata;
+        // 规范化路径为统一的格式（使用正斜杠）
+        final normalizedPath = metadata.filePath.replaceAll('\\', '/');
+        metadataMap[normalizedPath] = metadata;
       }
 
+      print('[BookLibrary] 加载元数据缓存成功 (${metadataMap.length} 本书)');
       return metadataMap;
     } catch (e) {
       print('[BookLibrary] 加载元数据缓存失败: $e');
@@ -110,7 +116,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   /// 更新单本书籍的元数据缓存
   Future<void> _updateBookMetadata(BookMetadata metadata) async {
     final metadataMap = await _loadMetadataCache();
-    metadataMap[metadata.filePath] = metadata;
+    // 规范化路径为统一的格式（使用正斜杠）
+    final normalizedPath = metadata.filePath.replaceAll('\\', '/');
+    print('[BookLibrary] _updateBookMetadata: 更新缓存, key=$normalizedPath, 当前缓存键: ${metadataMap.keys.join(", ")}');
+    metadataMap[normalizedPath] = metadata;
     await _saveMetadataCache(metadataMap);
   }
 
@@ -118,14 +127,18 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   Future<BookMetadata> _parseBookMetadata(File file) async {
     // 先检查缓存
     final metadataMap = await _loadMetadataCache();
+    // 规范化路径为统一的格式（使用正斜杠）
+    final normalizedPath = file.path.replaceAll('\\', '/');
+    print('[BookLibrary] _parseBookMetadata: $normalizedPath, 缓存中找到: ${metadataMap.containsKey(normalizedPath)}, 缓存键: ${metadataMap.keys.join(", ")}');
 
-    if (metadataMap.containsKey(file.path)) {
+    if (metadataMap.containsKey(normalizedPath)) {
       // 检查文件是否仍然存在
-      final cached = metadataMap[file.path]!;
+      final cached = metadataMap[normalizedPath]!;
       final coverFile = cached.coverPath != null
           ? File(cached.coverPath!)
           : null;
 
+      print('[BookLibrary] 使用缓存的元数据: ${cached.title}');
       return BookMetadata(
         filePath: file.path,
         title: cached.title,
