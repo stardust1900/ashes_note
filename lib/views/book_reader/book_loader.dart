@@ -163,6 +163,21 @@ class BookLoader {
     return await cacheFile.exists();
   }
 
+  /// 清除缓存文件
+  Future<void> clearCache() async {
+    try {
+      if (bookCacheKey == null) return;
+      final cacheFilePath = await getCacheFilePath();
+      final cacheFile = File(cacheFilePath);
+      if (await cacheFile.exists()) {
+        await cacheFile.delete();
+        print('缓存文件已删除: $cacheFilePath');
+      }
+    } catch (e) {
+      print('删除缓存文件失败: $e');
+    }
+  }
+
   /// 保存页面数据到缓存（优化版：不存储完整文本，但保留章节纯文本）
   Future<void> savePagesToCache(List<PageContent> pages) async {
     try {
@@ -255,6 +270,13 @@ class BookLoader {
       final cachedHeight = (cacheData['windowHeight'] as num?)?.toDouble() ?? 0;
       final cachedFontSize = (cacheData['fontSize'] as num?)?.toDouble() ?? 16;
 
+      // 如果缓存的窗口大小为0，认为缓存无效
+      if (cachedWidth <= 0 || cachedHeight <= 0) {
+        print('缓存的窗口大小无效 ($cachedWidth x $cachedHeight)，重新生成页面');
+        await clearCache();
+        return null;
+      }
+
       if (windowSize != null &&
           windowSize!.width > 0 &&
           windowSize!.height > 0) {
@@ -262,11 +284,16 @@ class BookLoader {
         final heightDiff = (windowSize!.height - cachedHeight).abs();
         final fontSizeDiff = (fontSize - cachedFontSize).abs();
 
-        // 如果窗口大小变化超过10%或字体大小变化，认为缓存失效
-        if (widthDiff / windowSize!.width > 0.1 ||
-            heightDiff / windowSize!.height > 0.1 ||
-            fontSizeDiff > 0.5) {
+        // 如果窗口大小变化超过5%或字体大小变化超过0.1，认为缓存失效
+        // 降低容差以确保分页准确性
+        if (widthDiff / windowSize!.width > 0.05 ||
+            heightDiff / windowSize!.height > 0.05 ||
+            fontSizeDiff > 0.1) {
           print('缓存窗口大小不匹配，重新生成页面');
+          print('  当前: ${windowSize!.width}x${windowSize!.height}, 字体: $fontSize');
+          print('  缓存: $cachedWidth x $cachedHeight, 字体: $cachedFontSize');
+          // 删除无效的缓存文件
+          await clearCache();
           return null;
         }
       }
@@ -665,8 +692,6 @@ class BookLoader {
 
     // 每页可用高度（减去 padding）
     final usableHeight = availableHeight - 140 - kToolbarHeight;
-    final linesPerPage = (usableHeight / lineHeight).floor();
-    final charsPerPage = charsPerLine * linesPerPage;
 
     List<ContentItem> currentPageItems = [];
     double currentPageHeight = 0;
@@ -692,6 +717,9 @@ class BookLoader {
     for (final item in contentItems) {
       if (item is TextContent) {
         String remaining = item.text.trim();
+        // 计算当前文本在章节中的起始偏移量
+        int currentOffset = item.startOffset;
+
         while (remaining.isNotEmpty) {
           final remainingHeight = usableHeight - currentPageHeight;
           final remainingLines = (remainingHeight / lineHeight).floor();
@@ -706,7 +734,7 @@ class BookLoader {
 
           if (estimatedFit >= remaining.length) {
             // 估算可以放下，直接添加
-            currentPageItems.add(TextContent(text: remaining));
+            currentPageItems.add(TextContent(text: remaining, startOffset: currentOffset));
 
             // 只对短文本进行精确行数计算
             final actualLines = remaining.length < 1000
@@ -747,7 +775,7 @@ class BookLoader {
               cut = 1;
             }
 
-            currentPageItems.add(TextContent(text: part));
+            currentPageItems.add(TextContent(text: part, startOffset: currentOffset));
 
             // 使用估算计算行数
             final partLines = part.length < 1000
@@ -755,6 +783,7 @@ class BookLoader {
                 : (part.length / charsPerLine).ceil();
 
             currentPageHeight += partLines * lineHeight;
+            currentOffset += part.length;
             remaining = remaining.substring(cut).trimLeft();
 
             flushCurrentPage();
