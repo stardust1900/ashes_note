@@ -35,7 +35,7 @@ class BookMetadata {
 
   factory BookMetadata.fromJson(Map<String, dynamic> json) {
     return BookMetadata(
-      filePath: json['filePath'] as String,
+      filePath: (json['filePath'] as String).replaceAll('\\', '/'),
       title: json['title'] as String,
       author: json['author'] as String,
       coverPath: json['coverPath'] as String?,
@@ -77,7 +77,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     try {
       final cacheFile = await _getMetadataCacheFile();
       if (!await cacheFile.exists()) {
-        print('[BookLibrary] 元数据缓存文件不存在');
+        print('[BookLibrary] 元数据缓存文件不存在: ${cacheFile.path}');
         return {};
       }
 
@@ -119,7 +119,14 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     // 规范化路径为统一的格式（使用正斜杠）
     final normalizedPath = metadata.filePath.replaceAll('\\', '/');
     print('[BookLibrary] _updateBookMetadata: 更新缓存, key=$normalizedPath, 当前缓存键: ${metadataMap.keys.join(", ")}');
-    metadataMap[normalizedPath] = metadata;
+    // 使用规范化路径创建新的 metadata 对象
+    final normalizedMetadata = BookMetadata(
+      filePath: normalizedPath,
+      title: metadata.title,
+      author: metadata.author,
+      coverPath: metadata.coverPath?.replaceAll('\\', '/'),
+    );
+    metadataMap[normalizedPath] = normalizedMetadata;
     await _saveMetadataCache(metadataMap);
   }
 
@@ -139,12 +146,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           : null;
 
       print('[BookLibrary] 使用缓存的元数据: ${cached.title}');
-      return BookMetadata(
-        filePath: file.path,
-        title: cached.title,
-        author: cached.author,
-        coverPath: coverFile?.path,
-      );
+      return cached;
     }
 
     // 缓存中没有，需要解析
@@ -549,9 +551,20 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       // 从元数据缓存中移除
       try {
         final metadataMap = await _loadMetadataCache();
-        if (metadataMap.containsKey(book.file.path)) {
-          metadataMap.remove(book.file.path);
-          await _saveMetadataCache(metadataMap);
+        final normalizedPath = book.file.path.replaceAll('\\', '/');
+        if (metadataMap.containsKey(normalizedPath)) {
+          metadataMap.remove(normalizedPath);
+          // 如果缓存为空，直接删除缓存文件
+          if (metadataMap.isEmpty) {
+            final cacheFile = await _getMetadataCacheFile();
+            if (await cacheFile.exists()) {
+              await cacheFile.delete();
+              print('[BookLibrary] 元数据缓存已清空，删除缓存文件');
+            }
+          } else {
+            await _saveMetadataCache(metadataMap);
+            print('[BookLibrary] 已从元数据缓存中移除: $normalizedPath');
+          }
         }
       } catch (e) {
         print('[BookLibrary] 删除元数据缓存失败: $e');

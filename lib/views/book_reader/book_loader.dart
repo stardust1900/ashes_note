@@ -341,9 +341,10 @@ class BookLoader {
   List<EpubChapter> flattenChapters(List<EpubChapter> chapters) {
     final result = <EpubChapter>[];
     for (var chapter in chapters) {
-      if (chapter.htmlContent != null && chapter.htmlContent!.isNotEmpty) {
-        result.add(chapter);
-      }
+      // 添加所有章节，即使没有 htmlContent
+      // 这样可以保留章节结构，特别是只有标题的章节
+      result.add(chapter);
+
       if (chapter.subChapters.isNotEmpty) {
         result.addAll(flattenChapters(chapter.subChapters));
       }
@@ -629,7 +630,18 @@ class BookLoader {
     // 保存章节纯文本到映射中，用于缓存恢复
     _chapterPlainTextMap[chapterIndex] = chapterPlainText;
 
+    // 即使没有内容项，也创建一个空页面以保留章节
     if (contentItems.isEmpty) {
+      print('[BookLoader] 章节 ${chapter.title} (${chapterIndex}) 没有内容项，创建空页面');
+      pages.add(
+        PageContent(
+          chapterIndex: chapterIndex,
+          pageIndexInChapter: 0,
+          contentItems: [],
+          title: chapter.title,
+          chapterPlainText: chapterPlainText,
+        ),
+      );
       return pages;
     }
 
