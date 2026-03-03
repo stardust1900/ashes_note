@@ -6,10 +6,12 @@ import 'package:crypto/crypto.dart';
 import 'package:epub_plus/epub_plus.dart';
 import 'package:image/image.dart' as img show encodeJpg;
 import 'package:flutter/material.dart';
+import 'package:html/parser.dart' as html_parser;
+import 'package:html/dom.dart' as html_dom;
 import '../../utils/prefs_util.dart';
 import '../../models/book_reader/page_content.dart';
 import '../../models/book_reader/content_item.dart'
-    show ContentItem, TextContent, ImageContent, CoverContent;
+    show ContentItem, TextContent, ImageContent, CoverContent, HeaderContent;
 
 /// 图书加载器 - 负责图书的加载、处理和缓存
 class BookLoader {
@@ -23,32 +25,7 @@ class BookLoader {
   /// TextPainter 缓存，避免重复创建
   TextPainter? textPainterCache;
 
-  /// HTML 标签移除的正则表达式缓存
-  static final RegExp _brTagRegex = RegExp(r'<br\s*/?>', caseSensitive: false);
-  static final RegExp _pOpenTagRegex = RegExp(
-    r'<p[^>]*>',
-    caseSensitive: false,
-  );
-  static final RegExp _pCloseTagRegex = RegExp(r'</p>', caseSensitive: false);
-  static final RegExp _divOpenTagRegex = RegExp(
-    r'<div[^>]*>',
-    caseSensitive: false,
-  );
-  static final RegExp _divCloseTagRegex = RegExp(
-    r'</div>',
-    caseSensitive: false,
-  );
-  static final RegExp _headingTagRegex = RegExp(
-    r'<h[1-6][^>]*>.*?</h[1-6]>',
-    caseSensitive: false,
-    multiLine: true,
-    dotAll: true,
-  );
-  static final RegExp _anyTagRegex = RegExp(
-    r'<[^>]*>',
-    multiLine: true,
-    dotAll: true,
-  );
+  /// HTML 标签移除的正则表达式缓存（用于特殊标签处理）
   static final RegExp _spaceTabRegex = RegExp(r'[ \t]+');
 
   /// 窗口大小
@@ -379,137 +356,323 @@ class BookLoader {
     return result;
   }
 
-  /// 解析 HTML 内容（优化版，返回纯文本和带偏移量的内容项）
+  /// 解析 HTML 内容（使用 package:html，返回纯文本和带偏移量的内容项）
   ({List<ContentItem> items, String plainText}) parseHtmlContent(String html) {
     final List<ContentItem> items = <ContentItem>[];
     final StringBuffer plainTextBuffer = StringBuffer();
 
-    // 空内容直接返回
     if (html.isEmpty) return (items: items, plainText: '');
 
-    String cleanedHtml = html.replaceAll(_spaceTabRegex, ' ').trim();
+    final String cleanedHtml = html.replaceAll(_spaceTabRegex, ' ').trim();
+    final html_dom.Document document = html_parser.parse(cleanedHtml);
 
-    const String imgTag = '<img';
-    const String srcAttr = 'src=';
+    // 判断是否为块级元素
+    bool isBlockElement(html_dom.Element node) {
+      final name = node.localName ?? '';
+      return name == 'p' || name == 'div' || name == 'br';
+    }
 
-    int currentIndex = 0;
-    final int length = cleanedHtml.length;
+    // 判断是否为标题元素
+    bool isHeaderElement(html_dom.Element node) {
+      final name = node.localName ?? '';
+      return RegExp(r'^h([1-6])$').hasMatch(name);
+    }
 
-    while (currentIndex < length) {
-      // 查找下一个 img 标签
-      int imgStart = cleanedHtml.indexOf(imgTag, currentIndex);
+    // 判断是否为行内元素
+    bool isInlineElement(html_dom.Element node) {
+      final name = node.localName ?? '';
+      return name == 'span' || name == 'i' || name == 'b' ||
+             name == 'strong' || name == 'em' || name == 'a';
+    }
 
-      if (imgStart == -1) {
-        // 没有更多图片，处理剩余文本
-        if (currentIndex < length) {
-          String remainingText = cleanedHtml.substring(currentIndex);
-          String cleanText = stripHtmlTags(remainingText);
-          if (cleanText.trim().isNotEmpty) {
-            final offset = plainTextBuffer.length;
-            plainTextBuffer.write(cleanText);
-            items.add(TextContent(text: cleanText, startOffset: offset));
-          }
-        }
-        break;
-      }
+    // 处理块级元素内的内容
+    void processBlockElement(html_dom.Element node, {bool isParagraph = false}) {
+      final List<ContentItem> blockItems = [];
+      StringBuffer blockText = StringBuffer();
+      final blockStartOffset = plainTextBuffer.length;
 
-      // 处理图片前的文本
-      if (imgStart > currentIndex) {
-        String textBeforeImg = cleanedHtml.substring(currentIndex, imgStart);
-        String cleanText = stripHtmlTags(textBeforeImg);
-        if (cleanText.trim().isNotEmpty) {
-          final offset = plainTextBuffer.length;
-          plainTextBuffer.write(cleanText);
-          items.add(TextContent(text: cleanText, startOffset: offset));
-        }
-      }
+      print('[BookLoader] processBlockElement: isParagraph=$isParagraph, nodeName=${node.localName}');
 
-      // 提取图片 src
-      int srcStart = cleanedHtml.indexOf(srcAttr, imgStart);
-      if (srcStart != -1) {
-        int srcValueStart = srcStart + srcAttr.length;
-        // 跳过空格和等号
-        while (srcValueStart < length &&
-            (cleanedHtml[srcValueStart] == ' ' ||
-                cleanedHtml[srcValueStart] == '=')) {
-          srcValueStart++;
-        }
-
-        // 检查引号
-        String quote = '';
-        if (srcValueStart < length) {
-          final char = cleanedHtml[srcValueStart];
-          if (char == '"' || char == "'") {
-            quote = char;
-            srcValueStart++;
-          }
-        }
-
-        // 查找 src 结束位置
-        int srcValueEnd = srcValueStart;
-        if (quote.isNotEmpty) {
-          // 有引号，找配对引号
-          while (srcValueEnd < length && cleanedHtml[srcValueEnd] != quote) {
-            srcValueEnd++;
-          }
-        } else {
-          // 无引号，找分隔符
-          while (srcValueEnd < length) {
-            final char = cleanedHtml[srcValueEnd];
-            if (char == ' ' || char == '>' || char == '/') {
-              break;
+      // 遍历子节点
+      for (final child in node.nodes) {
+        if (child is html_dom.Element) {
+          if (child.localName == 'img') {
+            // 遇到图片，先保存之前的文本
+            if (blockText.isNotEmpty) {
+              blockItems.add(TextContent(
+                text: blockText.toString().trim(),
+                startOffset: plainTextBuffer.length,
+              ));
+              blockText.clear();
             }
-            srcValueEnd++;
+            blockItems.add(ImageContent(source: child.attributes['src'] ?? ''));
+          } else if (isInlineElement(child)) {
+            // 行内元素 - 提取文本
+            final text = child.text.trim();
+            if (text.isNotEmpty) {
+              if (blockText.isNotEmpty) {
+                blockText.write(' ');
+              }
+              blockText.write(text);
+            }
+          } else if (isHeaderElement(child)) {
+            // 块级元素内的标题 - 先保存文本，再处理标题
+            if (blockText.isNotEmpty) {
+              blockItems.add(TextContent(
+                text: blockText.toString().trim(),
+                startOffset: plainTextBuffer.length,
+              ));
+              plainTextBuffer.write(blockText.toString().trim());
+              blockText.clear();
+            }
+            final headerText = child.text.trim();
+            if (headerText.isNotEmpty) {
+              final levelMatch = RegExp(r'^h([1-6])$').firstMatch(child.localName ?? '');
+              final level = levelMatch != null ? int.parse(levelMatch.group(1)!) : 1;
+              // Header 文本也添加到 plainText
+              plainTextBuffer.write(headerText);
+              plainTextBuffer.write('\n');
+              blockItems.add(HeaderContent(text: headerText, level: level));
+            }
+          }
+          // 其他块级元素 - 递归处理，处理其子节点
+          else {
+            for (final grandchild in child.nodes) {
+              if (grandchild is html_dom.Element) {
+                if (grandchild.localName == 'img') {
+                  // 遇到图片，先保存之前的文本
+                  if (blockText.isNotEmpty) {
+                    blockItems.add(TextContent(
+                      text: blockText.toString().trim(),
+                      startOffset: plainTextBuffer.length,
+                    ));
+                    blockText.clear();
+                  }
+                  blockItems.add(ImageContent(source: grandchild.attributes['src'] ?? ''));
+                } else if (isInlineElement(grandchild)) {
+                  // 行内元素 - 提取文本
+                  final text = grandchild.text.trim();
+                  if (text.isNotEmpty) {
+                    if (blockText.isNotEmpty) {
+                      blockText.write(' ');
+                    }
+                    blockText.write(text);
+                  }
+                } else if (isHeaderElement(grandchild)) {
+                  // 块级元素内的标题 - 先保存文本，再处理标题
+                  if (blockText.isNotEmpty) {
+                    blockItems.add(TextContent(
+                      text: blockText.toString().trim(),
+                      startOffset: plainTextBuffer.length,
+                    ));
+                    plainTextBuffer.write(blockText.toString().trim());
+                    blockText.clear();
+                  }
+                  final headerText = grandchild.text.trim();
+                  if (headerText.isNotEmpty) {
+                    final levelMatch = RegExp(r'^h([1-6])$').firstMatch(grandchild.localName ?? '');
+                    final level = levelMatch != null ? int.parse(levelMatch.group(1)!) : 1;
+                    plainTextBuffer.write(headerText);
+                    plainTextBuffer.write('\n');
+                    blockItems.add(HeaderContent(text: headerText, level: level));
+                  }
+                }
+                // 继续递归处理更深的嵌套
+                else {
+                  for (final gc in grandchild.nodes) {
+                    if (gc is html_dom.Element) {
+                      if (gc.localName == 'img') {
+                        if (blockText.isNotEmpty) {
+                          blockItems.add(TextContent(
+                            text: blockText.toString().trim(),
+                            startOffset: plainTextBuffer.length,
+                          ));
+                          blockText.clear();
+                        }
+                        blockItems.add(ImageContent(source: gc.attributes['src'] ?? ''));
+                      } else if (isInlineElement(gc)) {
+                        final text = gc.text.trim();
+                        if (text.isNotEmpty) {
+                          if (blockText.isNotEmpty) {
+                            blockText.write(' ');
+                          }
+                          blockText.write(text);
+                        }
+                      } else if (isHeaderElement(gc)) {
+                        if (blockText.isNotEmpty) {
+                          blockItems.add(TextContent(
+                            text: blockText.toString().trim(),
+                            startOffset: plainTextBuffer.length,
+                          ));
+                          plainTextBuffer.write(blockText.toString().trim());
+                          blockText.clear();
+                        }
+                        final headerText = gc.text.trim();
+                        if (headerText.isNotEmpty) {
+                          final levelMatch = RegExp(r'^h([1-6])$').firstMatch(gc.localName ?? '');
+                          final level = levelMatch != null ? int.parse(levelMatch.group(1)!) : 1;
+                          plainTextBuffer.write(headerText);
+                          plainTextBuffer.write('\n');
+                          blockItems.add(HeaderContent(text: headerText, level: level));
+                        }
+                      }
+                    } else if (gc is html_dom.Text) {
+                      final text = gc.text.trim();
+                      if (text.isNotEmpty) {
+                        if (blockText.isNotEmpty) {
+                          blockText.write(' ');
+                        }
+                        blockText.write(text);
+                      }
+                    }
+                  }
+                }
+              } else if (grandchild is html_dom.Text) {
+                final text = grandchild.text.trim();
+                if (text.isNotEmpty) {
+                  if (blockText.isNotEmpty) {
+                    blockText.write(' ');
+                  }
+                  blockText.write(text);
+                }
+              }
+            }
+          }
+        } else if (child is html_dom.Text) {
+          final text = child.text.trim();
+          if (text.isNotEmpty) {
+            if (blockText.isNotEmpty) {
+              blockText.write(' ');
+            }
+            blockText.write(text);
           }
         }
+      }
 
-        // 添加图片
-        if (srcValueEnd > srcValueStart) {
-          String srcValue = cleanedHtml.substring(srcValueStart, srcValueEnd);
-          if (srcValue.isNotEmpty) {
-            items.add(ImageContent(source: srcValue));
-          }
+      // 保存剩余文本
+      if (blockText.isNotEmpty) {
+        blockItems.add(TextContent(
+          text: blockText.toString().trim(),
+          startOffset: plainTextBuffer.length,
+        ));
+      }
+
+      // 将块级元素的所有内容添加到主列表
+      bool hasTextContent = false;
+      TextContent? lastTextContent;
+      for (final blockItem in blockItems) {
+        if (blockItem is TextContent) {
+          plainTextBuffer.write(blockItem.text);
+          items.add(blockItem);
+          hasTextContent = true;
+          lastTextContent = blockItem;
+        } else if (blockItem is ImageContent || blockItem is HeaderContent) {
+          items.add(blockItem);
         }
+      }
 
-        // 更新当前索引
-        int imgEnd = cleanedHtml.indexOf('>', imgStart);
-        currentIndex = imgEnd != -1 ? imgEnd + 1 : imgStart + 1;
-      } else {
-        // 没找到 src，跳过这个 img 标签
-        int imgEnd = cleanedHtml.indexOf('>', imgStart);
-        currentIndex = imgEnd != -1 ? imgEnd + 1 : imgStart + 1;
+      // 块级元素处理完后添加换行（如果有内容）
+      if (hasTextContent && plainTextBuffer.isNotEmpty) {
+        // 段落（<p>）添加两个换行符，其他块级元素添加一个换行符
+        // 注意：不检查是否已经以 \n 结尾，因为每个块级元素都需要自己的换行符
+        final newlines = isParagraph ? '\n\n' : '\n';
+        print('[BookLoader] Adding newlines: $newlines (isParagraph=$isParagraph)');
+        plainTextBuffer.write(newlines);
+
+        // 将换行符也添加到最后一个 TextContent 中，这样缓存恢复时换行符不会丢失
+        if (lastTextContent != null) {
+          // 移除最后一个 TextContent 并重新创建，包含换行符
+          items.removeLast();
+          final textWithNewlines = '${lastTextContent!.text}$newlines';
+          items.add(TextContent(
+            text: textWithNewlines,
+            startOffset: lastTextContent!.startOffset,
+          ));
+          print('[BookLoader] Updated last TextContent with newlines: "${textWithNewlines.substring(0, textWithNewlines.length > 30 ? 30 : textWithNewlines.length)}..."');
+        }
       }
     }
 
-    return (items: items, plainText: plainTextBuffer.toString());
-  }
+    // 递归遍历 DOM 树
+    void traverseNode(html_dom.Node node) {
+      if (node is html_dom.Element) {
+        if (node.localName == 'img') {
+          // 根级别的图片
+          final src = node.attributes['src'];
+          if (src != null && src.isNotEmpty) {
+            items.add(ImageContent(source: src));
+          }
+        } else if (isHeaderElement(node)) {
+          // 标题节点 - 单独处理
+          final headerText = node.text.trim();
+          if (headerText.isNotEmpty) {
+            if (plainTextBuffer.isNotEmpty &&
+                plainTextBuffer.toString().endsWith('\n') == false) {
+              plainTextBuffer.write('\n');
+            }
+            final offset = plainTextBuffer.length;
+            plainTextBuffer.write(headerText);
+            final levelMatch = RegExp(r'^h([1-6])$').firstMatch(node.localName ?? '');
+            final level = levelMatch != null ? int.parse(levelMatch.group(1)!) : 1;
+            items.add(HeaderContent(text: headerText, level: level));
+          }
+        } else if (node.localName == 'p') {
+          // 段落 - 直接处理
+          processBlockElement(node, isParagraph: true);
+        } else if (node.localName == 'div') {
+          // div - 只递归处理其子节点，不作为块级元素处理
+          for (final child in node.nodes) {
+            traverseNode(child);
+          }
+        } else if (isInlineElement(node)) {
+          // 行内元素 - 提取文本内容
+          final text = node.text.trim();
+          if (text.isNotEmpty) {
+            if (plainTextBuffer.isNotEmpty &&
+                plainTextBuffer.toString().endsWith('\n') == false) {
+              plainTextBuffer.write(' ');
+            }
+            final offset = plainTextBuffer.length;
+            plainTextBuffer.write(text);
+            items.add(TextContent(text: text, startOffset: offset));
+          }
+        } else {
+          // 其他元素（如嵌套的其他标签），递归处理
+          for (final child in node.nodes) {
+            traverseNode(child);
+          }
+        }
+      } else if (node is html_dom.Text) {
+        // 根级别的文本节点
+        final text = node.text.trim();
+        if (text.isNotEmpty) {
+          if (plainTextBuffer.isNotEmpty &&
+              plainTextBuffer.toString().endsWith('\n') == false) {
+            plainTextBuffer.write(' ');
+          }
+          final offset = plainTextBuffer.length;
+          plainTextBuffer.write(text);
+          items.add(TextContent(text: text, startOffset: offset));
+        }
+      }
+    }
 
-  /// 去除 HTML 标签
-  String stripHtmlTags(String html) {
-    String result = html
-        .replaceAll(_brTagRegex, '\n')
-        .replaceAll(_pOpenTagRegex, '')
-        .replaceAll(_pCloseTagRegex, '')
-        .replaceAll(_divOpenTagRegex, '')
-        .replaceAll(_divCloseTagRegex, '')
-        .replaceAll(_headingTagRegex, '\n')
-        .replaceAll(_anyTagRegex, '')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll(_spaceTabRegex, ' ')
-        .trim();
+    // 解析所有节点
+    traverseNode(document.body ?? document.documentElement!);
 
-    // 删除换行符周围的空格
-    result = result.replaceAll(RegExp(r' *[\r\n]+ *'), '\n');
+    // 压缩多余换行和空格
+    String finalText = plainTextBuffer.toString().trim();
+    print('[BookLoader] Before regex: ${finalText.substring(0, finalText.length > 100 ? 100 : finalText.length)}');
+    // 只压缩连续的 3 个或更多换行符为 2 个（保留段落间的换行）
+    finalText = finalText.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    // 去除多余的空格
+    finalText = finalText.replaceAll(RegExp(r' {2,}'), ' ');
+    // 去除行首行尾的空格
+    finalText = finalText.replaceAll(RegExp(r' ?\n ?'), '\n');
+    finalText = finalText.trim();
+    print('[BookLoader] After regex: ${finalText.substring(0, finalText.length > 100 ? 100 : finalText.length)}');
 
-    // 压缩连续换行符不超过3个
-    result = result.replaceAll(RegExp(r'\n{4,}'), '\n\n\n');
-
-    return result.trim();
+    return (items: items, plainText: finalText);
   }
 
   /// 使用 TextPainter 计算文本在指定宽度下的实际行数（带缓存）
@@ -805,6 +968,16 @@ class BookLoader {
         if (imageHeight >= usableHeight) {
           flushCurrentPage();
         }
+      } else if (item is HeaderContent) {
+        // HeaderContent - 独占一行，根据级别设置不同的行数
+        final headerLines = 3; // header 占 3 行
+        final headerHeight = headerLines * lineHeight;
+        if (currentPageItems.isNotEmpty &&
+            currentPageHeight + headerHeight > usableHeight) {
+          flushCurrentPage();
+        }
+        currentPageItems.add(item);
+        currentPageHeight += headerHeight;
       } else if (item is CoverContent) {
         // cover always occupies a full page
         if (currentPageItems.isNotEmpty) {

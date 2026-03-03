@@ -8,6 +8,8 @@ abstract class ContentItem {
         return TextContent.fromJson(json);
       case 'text_ref':
         return TextContentRef.fromJson(json);
+      case 'header':
+        return HeaderContent.fromJson(json);
       case 'image':
         return ImageContent.fromJson(json);
       case 'cover':
@@ -83,6 +85,26 @@ class ImageContent extends ContentItem {
 
   factory ImageContent.fromJson(Map<String, dynamic> json) {
     return ImageContent(source: json['source'] as String);
+  }
+}
+
+/// 标题内容项
+class HeaderContent extends ContentItem {
+  final String text;
+  final int level; // 标题级别：1-6
+
+  HeaderContent({required this.text, required this.level});
+
+  @override
+  Map<String, dynamic> toJson() {
+    return {'type': 'header', 'text': text, 'level': level};
+  }
+
+  factory HeaderContent.fromJson(Map<String, dynamic> json) {
+    return HeaderContent(
+      text: json['text'] as String,
+      level: json['level'] as int,
+    );
   }
 }
 

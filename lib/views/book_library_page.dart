@@ -205,12 +205,17 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   }
 
   Future<void> _loadBooks() async {
+    print('[BookLibrary] 开始加载书籍列表...');
     final workingDir = SPUtil.get<String>('workingDirectory', '');
-    if (workingDir.isEmpty) return;
+    if (workingDir.isEmpty) {
+      print('[BookLibrary] 工作目录未设置');
+      return;
+    }
 
     final booksDir = Directory('$workingDir/books');
     if (!await booksDir.exists()) {
       await booksDir.create(recursive: true);
+      print('[BookLibrary] 创建书籍目录: $booksDir');
     }
 
     final files = await booksDir.list().toList();
@@ -228,23 +233,64 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         )
         .toList();
 
-    // 从缓存加载元数据，快速创建 BookInfo 对象
-    final List<BookInfo> bookInfos = [];
-    for (final file in supportedFiles) {
-      final metadata = await _parseBookMetadata(file);
-      final coverFile = metadata.coverPath != null
-          ? File(metadata.coverPath!)
-          : null;
+    print('[BookLibrary] 找到 ${supportedFiles.length} 本书籍');
 
-      bookInfos.add(
-        BookInfo(
-          file: file,
-          title: metadata.title,
-          author: metadata.author,
-          coverFile: coverFile,
-        ),
-      );
+    if (supportedFiles.isEmpty) {
+      setState(() {
+        _books = [];
+      });
+      return;
     }
+
+    // 一次性加载所有缓存
+    final metadataMap = await _loadMetadataCache();
+    print('[BookLibrary] 缓存中有 ${metadataMap.length} 本书籍元数据');
+
+    final List<BookInfo> bookInfos = [];
+    int parsedCount = 0;
+    int cachedCount = 0;
+
+    for (final file in supportedFiles) {
+      final normalizedPath = file.path.replaceAll('\\', '/');
+
+      if (metadataMap.containsKey(normalizedPath)) {
+        // 使用缓存
+        print('[BookLibrary] 使用缓存: $normalizedPath');
+        final metadata = metadataMap[normalizedPath]!;
+        final coverFile = metadata.coverPath != null
+            ? File(metadata.coverPath!)
+            : null;
+
+        bookInfos.add(
+          BookInfo(
+            file: file,
+            title: metadata.title,
+            author: metadata.author,
+            coverFile: coverFile,
+          ),
+        );
+        cachedCount++;
+      } else {
+        // 缓存中没有，需要解析
+        print('[BookLibrary] 解析书籍: $normalizedPath');
+        final metadata = await _parseBookMetadata(file);
+        final coverFile = metadata.coverPath != null
+            ? File(metadata.coverPath!)
+            : null;
+
+        bookInfos.add(
+          BookInfo(
+            file: file,
+            title: metadata.title,
+            author: metadata.author,
+            coverFile: coverFile,
+          ),
+        );
+        parsedCount++;
+      }
+    }
+
+    print('[BookLibrary] 加载完成 - 使用缓存: $cachedCount, 新解析: $parsedCount');
 
     setState(() {
       _books = bookInfos;
@@ -655,7 +701,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   Future<void> _cleanMetadataCache() async {
     try {
       final metadataMap = await _loadMetadataCache();
-      if (metadataMap.isEmpty) return;
+      if (metadataMap.isEmpty) {
+        print('[BookLibrary] 元数据缓存为空，跳过清理');
+        return;
+      }
 
       final workingDir = SPUtil.get<String>('workingDirectory', '');
       if (workingDir.isEmpty) return;
@@ -664,14 +713,31 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       if (!await booksDir.exists()) return;
 
       final files = await booksDir.list().toList();
-      final validFilePaths = files.whereType<File>().map((f) => f.path).toSet();
+
+      // 只获取支持的电子书文件，并统一路径格式
+      final validFilePaths = files
+          .whereType<File>()
+          .where((f) =>
+              f.path.endsWith('.epub') ||
+              f.path.endsWith('.mobi') ||
+              f.path.endsWith('.azw3') ||
+              f.path.endsWith('.kfx') ||
+              f.path.endsWith('.pdf'))
+          .map((f) => f.path.replaceAll('\\', '/'))  // 统一使用正斜杠
+          .toSet();
+
+      print('[BookLibrary] 缓存中有 ${metadataMap.length} 条记录，实际有 ${validFilePaths.length} 本书');
 
       bool hasInvalid = false;
       final invalidKeys = metadataMap.keys
           .where((filePath) => !validFilePaths.contains(filePath))
           .toList();
 
+      print('[BookLibrary] 缓存路径: ${metadataMap.keys.join(", ")}');
+      print('[BookLibrary] 实际路径: ${validFilePaths.join(", ")}');
+
       for (final invalidKey in invalidKeys) {
+        print('[BookLibrary] 发现无效缓存: $invalidKey');
         metadataMap.remove(invalidKey);
         hasInvalid = true;
       }
@@ -679,6 +745,8 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       if (hasInvalid) {
         await _saveMetadataCache(metadataMap);
         print('[BookLibrary] 清理了 ${invalidKeys.length} 条无效的元数据缓存');
+      } else {
+        print('[BookLibrary] 所有缓存记录都是有效的，无需清理');
       }
     } catch (e) {
       print('[BookLibrary] 清理元数据缓存失败: $e');
