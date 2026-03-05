@@ -8,7 +8,7 @@ import '../services/book_reader/free_dictionary_service.dart';
 import '../services/book_reader/hz_dictionary_service.dart';
 import '../models/book_reader/page_content.dart';
 import '../models/book_reader/content_item.dart'
-    show TextContent, ImageContent, CoverContent, HeaderContent;
+    show TextContent, ImageContent, CoverContent, HeaderContent, LinkContent;
 import '../models/book_reader/bookmark.dart';
 import '../models/book_reader/highlight.dart';
 import 'book_reader/highlight_operations.dart';
@@ -1872,7 +1872,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
       _isContentLoaded = false;
     });
 
-    await _bookLoader.processPagesAsync(_chapters, context);
+    await _bookLoader.processPages(_chapters, context, 0);
 
     setState(() {
       _isProcessingPages = false;
@@ -1989,8 +1989,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
               );
             } else if (item is HeaderContent) {
               cumulativeOffset += item.text.length;
-              final fontSize = 32.0 - (item.level - 1) * 4; // h1=32, h2=28, ..., h6=12
-              final fontWeight = item.level <= 2 ? FontWeight.bold : FontWeight.w600;
+              final fontSize =
+                  32.0 - (item.level - 1) * 4; // h1=32, h2=28, ..., h6=12
+              final fontWeight = item.level <= 2
+                  ? FontWeight.bold
+                  : FontWeight.w600;
               return Padding(
                 padding: const EdgeInsets.only(top: 24, bottom: 12),
                 child: Text(
@@ -1999,7 +2002,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     fontSize: fontSize,
                     fontWeight: fontWeight,
                     height: 1.2,
-                    color: Theme.of(context).textTheme.headlineMedium?.color ?? Colors.black87,
+                    color:
+                        Theme.of(context).textTheme.headlineMedium?.color ??
+                        Colors.black87,
                   ),
                 ),
               );
@@ -2086,6 +2091,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   }
                 },
               );
+            } else if (item is LinkContent) {
+              // LinkContent 不独立渲染，文本已经包含在 TextContent 中
+              // 这里只是占位，实际样式应该通过 RichText 或其他方式应用
+              cumulativeOffset += item.text.length;
+              return const SizedBox.shrink();
             } else if (item is CoverContent) {
               return Container(
                 width: double.infinity,
@@ -2793,7 +2803,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
                   Text('正在处理页面内容...'),
-                  Text('优先加载前 ${BookLoader.priorityChapterCount} 个章节，请稍候'),
+                  Text('正在加载所有章节，请稍候'),
                   if (_chapters.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),

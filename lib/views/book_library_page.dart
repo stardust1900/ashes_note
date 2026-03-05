@@ -77,7 +77,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     try {
       final cacheFile = await _getMetadataCacheFile();
       if (!await cacheFile.exists()) {
-        print('[BookLibrary] 元数据缓存文件不存在: ${cacheFile.path}');
         return {};
       }
 
@@ -92,10 +91,8 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         metadataMap[normalizedPath] = metadata;
       }
 
-      print('[BookLibrary] 加载元数据缓存成功 (${metadataMap.length} 本书)');
       return metadataMap;
     } catch (e) {
-      print('[BookLibrary] 加载元数据缓存失败: $e');
       return {};
     }
   }
@@ -107,9 +104,8 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       final jsonData = metadataMap.values.map((m) => m.toJson()).toList();
       final jsonString = jsonEncode(jsonData);
       await cacheFile.writeAsString(jsonString);
-      print('[BookLibrary] 元数据缓存已保存 (${metadataMap.length} 本书)');
     } catch (e) {
-      print('[BookLibrary] 保存元数据缓存失败: $e');
+      print('保存元数据缓存失败：$e');
     }
   }
 
@@ -118,7 +114,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     final metadataMap = await _loadMetadataCache();
     // 规范化路径为统一的格式（使用正斜杠）
     final normalizedPath = metadata.filePath.replaceAll('\\', '/');
-    print('[BookLibrary] _updateBookMetadata: 更新缓存, key=$normalizedPath, 当前缓存键: ${metadataMap.keys.join(", ")}');
     // 使用规范化路径创建新的 metadata 对象
     final normalizedMetadata = BookMetadata(
       filePath: normalizedPath,
@@ -136,16 +131,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     final metadataMap = await _loadMetadataCache();
     // 规范化路径为统一的格式（使用正斜杠）
     final normalizedPath = file.path.replaceAll('\\', '/');
-    print('[BookLibrary] _parseBookMetadata: $normalizedPath, 缓存中找到: ${metadataMap.containsKey(normalizedPath)}, 缓存键: ${metadataMap.keys.join(", ")}');
 
     if (metadataMap.containsKey(normalizedPath)) {
       // 检查文件是否仍然存在
       final cached = metadataMap[normalizedPath]!;
-      final coverFile = cached.coverPath != null
-          ? File(cached.coverPath!)
-          : null;
-
-      print('[BookLibrary] 使用缓存的元数据: ${cached.title}');
       return cached;
     }
 
@@ -179,7 +168,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
             await cacheDir.create(recursive: true);
           }
           final coverFilePath =
-              '${cacheDir.path}/cover_${file.path.hashCode}.jpg';
+              '${cacheDir.path}/cover_${normalizedPath.hashCode}.jpg';
           final coverData = Uint8List.fromList(img.encodeJpg(epub.coverImage!));
           await File(coverFilePath).writeAsBytes(coverData);
           coverFile = File(coverFilePath);
@@ -205,17 +194,14 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
   }
 
   Future<void> _loadBooks() async {
-    print('[BookLibrary] 开始加载书籍列表...');
     final workingDir = SPUtil.get<String>('workingDirectory', '');
     if (workingDir.isEmpty) {
-      print('[BookLibrary] 工作目录未设置');
       return;
     }
 
     final booksDir = Directory('$workingDir/books');
     if (!await booksDir.exists()) {
       await booksDir.create(recursive: true);
-      print('[BookLibrary] 创建书籍目录: $booksDir');
     }
 
     final files = await booksDir.list().toList();
@@ -233,8 +219,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         )
         .toList();
 
-    print('[BookLibrary] 找到 ${supportedFiles.length} 本书籍');
-
     if (supportedFiles.isEmpty) {
       setState(() {
         _books = [];
@@ -244,18 +228,14 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
     // 一次性加载所有缓存
     final metadataMap = await _loadMetadataCache();
-    print('[BookLibrary] 缓存中有 ${metadataMap.length} 本书籍元数据');
 
     final List<BookInfo> bookInfos = [];
-    int parsedCount = 0;
-    int cachedCount = 0;
 
     for (final file in supportedFiles) {
       final normalizedPath = file.path.replaceAll('\\', '/');
 
       if (metadataMap.containsKey(normalizedPath)) {
         // 使用缓存
-        print('[BookLibrary] 使用缓存: $normalizedPath');
         final metadata = metadataMap[normalizedPath]!;
         final coverFile = metadata.coverPath != null
             ? File(metadata.coverPath!)
@@ -269,10 +249,8 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
             coverFile: coverFile,
           ),
         );
-        cachedCount++;
       } else {
         // 缓存中没有，需要解析
-        print('[BookLibrary] 解析书籍: $normalizedPath');
         final metadata = await _parseBookMetadata(file);
         final coverFile = metadata.coverPath != null
             ? File(metadata.coverPath!)
@@ -286,11 +264,8 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
             coverFile: coverFile,
           ),
         );
-        parsedCount++;
       }
     }
-
-    print('[BookLibrary] 加载完成 - 使用缓存: $cachedCount, 新解析: $parsedCount');
 
     setState(() {
       _books = bookInfos;
@@ -299,7 +274,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
   Future<void> _importBook() async {
     try {
-      print('[BookLibrary] 开始导入书籍...');
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['epub', 'mobi', 'azw3', 'kfx', 'pdf'],
@@ -307,13 +281,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       );
 
       if (result == null || result.files.isEmpty) {
-        print('[BookLibrary] 未选择文件');
         return;
       }
-      print('[BookLibrary] 选择了 ${result.files.length} 个文件');
 
       final workingDir = SPUtil.get<String>('workingDirectory', '');
-      print('[BookLibrary] 工作目录: $workingDir');
       if (workingDir.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(
@@ -326,31 +297,24 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       final booksDir = Directory('$workingDir/books');
       if (!await booksDir.exists()) {
         await booksDir.create(recursive: true);
-        print('[BookLibrary] 创建书籍目录: $booksDir');
       }
 
       int importedCount = 0;
       for (var file in result.files) {
-        print('[BookLibrary] 处理文件: ${file.name}, path: ${file.path}');
         if (file.path != null) {
           final sourceFile = File(file.path!);
           final destFile = File('${booksDir.path}/${file.name}');
 
           if (!await destFile.exists()) {
-            print('[BookLibrary] 复制文件到: ${destFile.path}');
             await sourceFile.copy(destFile.path);
             importedCount++;
-            print('[BookLibrary] 导入成功: ${file.name}');
 
             // 立即解析并缓存元数据
             try {
               final metadata = await _parseBookMetadata(destFile);
-              print('[BookLibrary] 元数据已缓存: ${metadata.title}');
             } catch (e) {
-              print('[BookLibrary] 缓存元数据失败: $e');
+              print('缓存元数据失败：$e');
             }
-          } else {
-            print('[BookLibrary] 文件已存在: ${file.name}');
           }
         }
       }
@@ -370,12 +334,12 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         }
       }
     } catch (e, stackTrace) {
-      print('[BookLibrary] 导入失败: $e');
-      print('[BookLibrary] 堆栈: $stackTrace');
+      print('导入失败：$e');
+      print('堆栈：$stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('导入失败: $e')));
+        ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
       }
     }
   }
@@ -448,16 +412,13 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         }
       } catch (e) {
         // 缓存迁移失败不影响主流程
-        print('[BookLibrary] 迁移页面缓存失败: $e');
       }
 
       // 迁移高亮和笔记数据（使用新的存储服务）
       try {
         await BookStorageService().migrateBookData(oldFile.path, newFile.path);
-        print('[BookLibrary] 书籍数据已迁移');
       } catch (e) {
         // 数据迁移失败不影响主流程
-        print('[BookLibrary] 迁移书籍数据失败: $e');
       }
 
       // 重命名封面文件（如果存在且是独立文件）
@@ -492,7 +453,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           await _saveMetadataCache(metadataMap);
         }
       } catch (e) {
-        print('[BookLibrary] 更新元数据缓存失败: $e');
+        print('更新元数据缓存失败：$e');
       }
 
       if (mounted) {
@@ -504,7 +465,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('重命名失败: $e')));
+        ).showSnackBar(SnackBar(content: Text('重命名失败：$e')));
       }
     }
   }
@@ -538,7 +499,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         final bytes = await book.file.readAsBytes();
         final digest = crypto.md5.convert(bytes);
         cacheKey = digest.toString();
-        print('[BookLibrary] 缓存键: $cacheKey');
       } catch (e) {
         // 如果读取失败，使用路径和修改时间
         try {
@@ -546,7 +506,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           cacheKey =
               '${book.file.path.hashCode}_${stat.modified.millisecondsSinceEpoch}';
         } catch (e2) {
-          print('[BookLibrary] 获取缓存键失败: $e2');
           cacheKey = book.file.path.hashCode.toString();
         }
       }
@@ -559,13 +518,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           final cacheFile = File('${cacheDir.path}/$cacheKey.json');
           if (await cacheFile.exists()) {
             await cacheFile.delete();
-            print('[BookLibrary] 页面缓存已删除: $cacheKey');
-          } else {
-            print('[BookLibrary] 页面缓存文件不存在: $cacheKey.json');
           }
         }
       } catch (e) {
-        print('[BookLibrary] 删除页面缓存失败: $e');
+        print('删除页面缓存失败：$e');
       }
 
       // 删除书籍文件
@@ -605,15 +561,13 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
             final cacheFile = await _getMetadataCacheFile();
             if (await cacheFile.exists()) {
               await cacheFile.delete();
-              print('[BookLibrary] 元数据缓存已清空，删除缓存文件');
             }
           } else {
             await _saveMetadataCache(metadataMap);
-            print('[BookLibrary] 已从元数据缓存中移除: $normalizedPath');
           }
         }
       } catch (e) {
-        print('[BookLibrary] 删除元数据缓存失败: $e');
+        print('删除元数据缓存失败：$e');
       }
 
       // 检查并清理 last_read_book（如果删除的是最后阅读的书籍）
@@ -702,7 +656,6 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     try {
       final metadataMap = await _loadMetadataCache();
       if (metadataMap.isEmpty) {
-        print('[BookLibrary] 元数据缓存为空，跳过清理');
         return;
       }
 
@@ -717,39 +670,32 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       // 只获取支持的电子书文件，并统一路径格式
       final validFilePaths = files
           .whereType<File>()
-          .where((f) =>
-              f.path.endsWith('.epub') ||
-              f.path.endsWith('.mobi') ||
-              f.path.endsWith('.azw3') ||
-              f.path.endsWith('.kfx') ||
-              f.path.endsWith('.pdf'))
-          .map((f) => f.path.replaceAll('\\', '/'))  // 统一使用正斜杠
+          .where(
+            (f) =>
+                f.path.endsWith('.epub') ||
+                f.path.endsWith('.mobi') ||
+                f.path.endsWith('.azw3') ||
+                f.path.endsWith('.kfx') ||
+                f.path.endsWith('.pdf'),
+          )
+          .map((f) => f.path.replaceAll('\\', '/')) // 统一使用正斜杠
           .toSet();
-
-      print('[BookLibrary] 缓存中有 ${metadataMap.length} 条记录，实际有 ${validFilePaths.length} 本书');
 
       bool hasInvalid = false;
       final invalidKeys = metadataMap.keys
           .where((filePath) => !validFilePaths.contains(filePath))
           .toList();
 
-      print('[BookLibrary] 缓存路径: ${metadataMap.keys.join(", ")}');
-      print('[BookLibrary] 实际路径: ${validFilePaths.join(", ")}');
-
       for (final invalidKey in invalidKeys) {
-        print('[BookLibrary] 发现无效缓存: $invalidKey');
         metadataMap.remove(invalidKey);
         hasInvalid = true;
       }
 
       if (hasInvalid) {
         await _saveMetadataCache(metadataMap);
-        print('[BookLibrary] 清理了 ${invalidKeys.length} 条无效的元数据缓存');
-      } else {
-        print('[BookLibrary] 所有缓存记录都是有效的，无需清理');
       }
     } catch (e) {
-      print('[BookLibrary] 清理元数据缓存失败: $e');
+      print('清理元数据缓存失败：$e');
     }
   }
 
@@ -792,7 +738,6 @@ class BookInfo {
       try {
         final bytes = await file.readAsBytes();
         final epub = await EpubReader.readBook(bytes);
-        print('[BookLibrary] 解析 EPUB 元数据成功: ${epub.title}, ${epub.author}');
         if (epub.title != null && epub.title!.isNotEmpty) {
           title = epub.title!;
         }
@@ -800,7 +745,7 @@ class BookInfo {
           author = epub.author!;
         }
       } catch (e) {
-        print('[BookLibrary] 解析 EPUB 元数据失败: $e');
+        print('解析 EPUB 元数据失败：$e');
       }
     }
 
@@ -908,7 +853,9 @@ class _BookCardState extends State<_BookCard> {
                             widget.book.author,
                             style: TextStyle(
                               fontSize: 9,
-                              color: Theme.of(context).textTheme.bodyMedium?.color,
+                              color: Theme.of(
+                                context,
+                              ).textTheme.bodyMedium?.color,
                               fontWeight: FontWeight.w500,
                             ),
                             maxLines: 1,
@@ -958,10 +905,7 @@ class _BookCardState extends State<_BookCard> {
         contentPadding: const EdgeInsets.symmetric(vertical: 8),
         title: Text(
           widget.book.title,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
@@ -973,9 +917,7 @@ class _BookCardState extends State<_BookCard> {
             },
             icon: const Icon(Icons.edit, size: 18),
             label: const Text('重命名'),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.blue,
-            ),
+            style: TextButton.styleFrom(foregroundColor: Colors.blue),
           ),
           TextButton.icon(
             onPressed: () {
@@ -984,9 +926,7 @@ class _BookCardState extends State<_BookCard> {
             },
             icon: const Icon(Icons.delete, size: 18),
             label: const Text('删除'),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.red,
-            ),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context),

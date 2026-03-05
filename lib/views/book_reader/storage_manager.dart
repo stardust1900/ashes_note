@@ -18,7 +18,8 @@ class StorageManager {
 
   /// 生成书籍的唯一标识键
   static String getBookKey(String bookPath) {
-    return '$_readingPositionPrefix${bookPath.hashCode}';
+    final normalizedPath = bookPath.replaceAll('\\', '/');
+    return '$_readingPositionPrefix${normalizedPath.hashCode}';
   }
 
   /// 保存阅读位置到本地
@@ -95,7 +96,8 @@ class StorageManager {
 
   /// 生成书签存储键
   static String _getBookmarksKey(String bookPath) {
-    return '$_bookmarksPrefix${bookPath.hashCode}';
+    final normalizedPath = bookPath.replaceAll('\\', '/');
+    return '$_bookmarksPrefix${normalizedPath.hashCode}';
   }
 
   /// 保存书签到本地
@@ -167,7 +169,8 @@ class StorageManager {
   ) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final bookKey = '$_highlightsPrefix${bookPath.hashCode}';
+      final normalizedPath = bookPath.replaceAll('\\', '/');
+      final bookKey = '$_highlightsPrefix${normalizedPath.hashCode}';
       final highlightsJson = highlights.map((h) => h.toJson()).toList();
       await prefs.setString(bookKey, jsonEncode(highlightsJson));
     } catch (e) {
@@ -179,7 +182,8 @@ class StorageManager {
   static Future<List<Highlight>> loadHighlights(String bookPath) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final bookKey = '$_highlightsPrefix${bookPath.hashCode}';
+      final normalizedPath = bookPath.replaceAll('\\', '/');
+      final bookKey = '$_highlightsPrefix${normalizedPath.hashCode}';
       final highlightsString = prefs.getString(bookKey);
 
       if (highlightsString != null) {
@@ -198,7 +202,8 @@ class StorageManager {
   static Future<void> saveFontSize(String bookPath, double fontSize) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final bookKey = 'book_font_size_${bookPath.hashCode}';
+      final normalizedPath = bookPath.replaceAll('\\', '/');
+      final bookKey = 'book_font_size_${normalizedPath.hashCode}';
       await prefs.setDouble(bookKey, fontSize);
     } catch (e) {
       print('保存字体大小失败: $e');
@@ -209,7 +214,8 @@ class StorageManager {
   static Future<double?> loadFontSize(String bookPath) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final bookKey = 'book_font_size_${bookPath.hashCode}';
+      final normalizedPath = bookPath.replaceAll('\\', '/');
+      final bookKey = 'book_font_size_${normalizedPath.hashCode}';
       return prefs.getDouble(bookKey);
     } catch (e) {
       print('加载字体大小失败: $e');

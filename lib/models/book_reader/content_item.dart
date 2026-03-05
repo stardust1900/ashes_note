@@ -14,6 +14,8 @@ abstract class ContentItem {
         return ImageContent.fromJson(json);
       case 'cover':
         return CoverContent.fromJson(json);
+      case 'link':
+        return LinkContent.fromJson(json);
       default:
         throw Exception('Unknown content type: $type');
     }
@@ -121,5 +123,61 @@ class CoverContent extends ContentItem {
 
   factory CoverContent.fromJson(Map<String, dynamic> json) {
     return CoverContent(imagePath: json['imagePath'] as String?);
+  }
+}
+
+/// 脚注链接内容项
+class LinkContent extends ContentItem {
+  final String id; // 链接唯一标识（chapter + 原始id）
+  final String text; // 链接文本
+  final int startOffset; // 文本在章节中的起始偏移量
+  final int endOffset; // 文本在章节中的结束偏移量
+  final String href; // 原始 HTML href 属性值（保持不变）
+  final int? pageIndexInChapter; // 链接所在页码
+  final int? targetChapterIndex; // 目标章节索引
+  final int? targetPageIndexInChapter; // 目标在章节内的页码
+  final String? targetExplanation; // 目标内容说明
+
+  LinkContent({
+    required this.id,
+    required this.text,
+    this.startOffset = 0,
+    int? endOffset,
+    required this.href,
+    this.pageIndexInChapter,
+    this.targetChapterIndex,
+    this.targetPageIndexInChapter,
+    this.targetExplanation,
+  }) : endOffset = endOffset ?? (startOffset + text.length);
+
+  @override
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{
+      'type': 'link',
+      'id': id,
+      'text': text,
+      'startOffset': startOffset,
+      'endOffset': endOffset,
+      'href': href,
+    };
+    if (pageIndexInChapter != null) json['pageIndexInChapter'] = pageIndexInChapter;
+    if (targetChapterIndex != null) json['targetChapterIndex'] = targetChapterIndex;
+    if (targetPageIndexInChapter != null) json['targetPageIndexInChapter'] = targetPageIndexInChapter;
+    if (targetExplanation != null) json['targetExplanation'] = targetExplanation;
+    return json;
+  }
+
+  factory LinkContent.fromJson(Map<String, dynamic> json) {
+    return LinkContent(
+      id: json['id'] as String,
+      text: json['text'] as String,
+      startOffset: json['startOffset'] as int? ?? 0,
+      endOffset: json['endOffset'] as int?,
+      href: json['href'] as String,
+      pageIndexInChapter: json['pageIndexInChapter'] as int?,
+      targetChapterIndex: json['targetChapterIndex'] as int?,
+      targetPageIndexInChapter: json['targetPageIndexInChapter'] as int?,
+      targetExplanation: json['targetExplanation'] as String?,
+    );
   }
 }
