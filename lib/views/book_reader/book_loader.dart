@@ -185,7 +185,8 @@ class BookLoader {
       for (final page in pages) {
         final chapterIndexStr = page.chapterIndex.toString();
         // 只保存每个章节的第一个页面的纯文本
-        if (page.chapterPlainText != null && !chapterTexts.containsKey(chapterIndexStr)) {
+        if (page.chapterPlainText != null &&
+            !chapterTexts.containsKey(chapterIndexStr)) {
           chapterTexts[chapterIndexStr] = page.chapterPlainText!;
         }
       }
@@ -366,7 +367,8 @@ class BookLoader {
             'offset': linkMap['offset'] as int?,
             'length': linkMap['length'] as int?,
             'targetChapterIndex': linkMap['targetChapterIndex'] as int?,
-            'targetPageIndexInChapter': linkMap['targetPageIndexInChapter'] as int?,
+            'targetPageIndexInChapter':
+                linkMap['targetPageIndexInChapter'] as int?,
             'targetExplanation': linkMap['targetExplanation'] as String?,
           });
         }
@@ -589,7 +591,9 @@ class BookLoader {
               }
 
               // 提取 targetId
-              final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+              final targetId = hashIndex != -1
+                  ? href.substring(hashIndex + 1)
+                  : '';
 
               // 所有链接都添加到 _globalLinks
               final linkOffset = plainTextBuffer.length + blockText.length;
@@ -609,7 +613,9 @@ class BookLoader {
               });
 
               // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
-              final isFootnote = hashIndex != -1 && !(href.contains('/') || href.contains('.html'));
+              final isFootnote =
+                  hashIndex != -1 &&
+                  !(href.contains('/') || href.contains('.html'));
               if (isFootnote) {
                 // 脚注链接不记录文本
               } else {
@@ -630,7 +636,8 @@ class BookLoader {
               bool hasFootnoteLink = false;
               for (final link in footnoteLinks) {
                 final href = link.attributes['href'] ?? '';
-                if (href.contains('#') && !(href.contains('/') || href.contains('.html'))) {
+                if (href.contains('#') &&
+                    !(href.contains('/') || href.contains('.html'))) {
                   hasFootnoteLink = true;
                   break;
                 }
@@ -651,14 +658,18 @@ class BookLoader {
                       if (linkId != null && linkId.isNotEmpty) {
                         finalLinkId = 'chapter$chapterIndex#$linkId';
                       } else {
-                        finalLinkId = 'chapter$chapterIndex#link_${_globalLinks.length}';
+                        finalLinkId =
+                            'chapter$chapterIndex#link_${_globalLinks.length}';
                       }
 
                       // 提取 targetId
-                      final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+                      final targetId = hashIndex != -1
+                          ? href.substring(hashIndex + 1)
+                          : '';
 
                       // 添加到 _globalLinks
-                      final linkOffset = plainTextBuffer.length + blockText.length;
+                      final linkOffset =
+                          plainTextBuffer.length + blockText.length;
                       _globalLinks.add({
                         'chapterIndex': chapterIndex,
                         'href': href,
@@ -713,7 +724,7 @@ class BookLoader {
                   : 1;
               // Header 文本也添加到 plainText
               plainTextBuffer.write(headerText);
-              plainTextBuffer.write('\n');
+              // plainTextBuffer.write('\n');
               blockItems.add(HeaderContent(text: headerText, level: level));
             }
           }
@@ -757,10 +768,13 @@ class BookLoader {
                     }
 
                     // 提取 targetId
-                    final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+                    final targetId = hashIndex != -1
+                        ? href.substring(hashIndex + 1)
+                        : '';
 
                     // 所有链接都添加到 _globalLinks
-                    final linkOffset = plainTextBuffer.length + blockText.length;
+                    final linkOffset =
+                        plainTextBuffer.length + blockText.length;
                     _globalLinks.add({
                       'chapterIndex': chapterIndex,
                       'href': href,
@@ -777,7 +791,9 @@ class BookLoader {
                     });
 
                     // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
-                    final isFootnote = hashIndex != -1 && !(href.contains('/') || href.contains('.html'));
+                    final isFootnote =
+                        hashIndex != -1 &&
+                        !(href.contains('/') || href.contains('.html'));
                     if (isFootnote) {
                       // 脚注链接不记录文本
                     } else {
@@ -794,11 +810,14 @@ class BookLoader {
                     );
                   } else {
                     // 普通行内元素 - 检查是否包含脚注链接
-                    final footnoteLinks = grandchild.querySelectorAll('a[href*="#"]');
+                    final footnoteLinks = grandchild.querySelectorAll(
+                      'a[href*="#"]',
+                    );
                     bool hasFootnoteLink = false;
                     for (final link in footnoteLinks) {
                       final href = link.attributes['href'] ?? '';
-                      if (href.contains('#') && !(href.contains('/') || href.contains('.html'))) {
+                      if (href.contains('#') &&
+                          !(href.contains('/') || href.contains('.html'))) {
                         hasFootnoteLink = true;
                         break;
                       }
@@ -819,14 +838,18 @@ class BookLoader {
                             if (linkId != null && linkId.isNotEmpty) {
                               finalLinkId = 'chapter$chapterIndex#$linkId';
                             } else {
-                              finalLinkId = 'chapter$chapterIndex#link_${_globalLinks.length}';
+                              finalLinkId =
+                                  'chapter$chapterIndex#link_${_globalLinks.length}';
                             }
 
                             // 提取 targetId
-                            final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+                            final targetId = hashIndex != -1
+                                ? href.substring(hashIndex + 1)
+                                : '';
 
                             // 添加到 _globalLinks
-                            final linkOffset = plainTextBuffer.length + blockText.length;
+                            final linkOffset =
+                                plainTextBuffer.length + blockText.length;
                             _globalLinks.add({
                               'chapterIndex': chapterIndex,
                               'href': href,
@@ -923,10 +946,13 @@ class BookLoader {
                           }
 
                           // 提取 targetId
-                          final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+                          final targetId = hashIndex != -1
+                              ? href.substring(hashIndex + 1)
+                              : '';
 
                           // 所有链接都添加到 _globalLinks
-                          final linkOffset = plainTextBuffer.length + blockText.length;
+                          final linkOffset =
+                              plainTextBuffer.length + blockText.length;
                           _globalLinks.add({
                             'chapterIndex': chapterIndex,
                             'href': href,
@@ -943,7 +969,9 @@ class BookLoader {
                           });
 
                           // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
-                          final isFootnote = hashIndex != -1 && !(href.contains('/') || href.contains('.html'));
+                          final isFootnote =
+                              hashIndex != -1 &&
+                              !(href.contains('/') || href.contains('.html'));
                           if (isFootnote) {
                             // 脚注链接不记录文本
                           } else {
@@ -960,11 +988,15 @@ class BookLoader {
                           );
                         } else {
                           // 普通行内元素 - 检查是否包含脚注链接
-                          final footnoteLinks = gc.querySelectorAll('a[href*="#"]');
+                          final footnoteLinks = gc.querySelectorAll(
+                            'a[href*="#"]',
+                          );
                           bool hasFootnoteLink = false;
                           for (final link in footnoteLinks) {
                             final href = link.attributes['href'] ?? '';
-                            if (href.contains('#') && !(href.contains('/') || href.contains('.html'))) {
+                            if (href.contains('#') &&
+                                !(href.contains('/') ||
+                                    href.contains('.html'))) {
                               hasFootnoteLink = true;
                               break;
                             }
@@ -983,16 +1015,21 @@ class BookLoader {
                                   // 生成或使用 linkId
                                   String? finalLinkId;
                                   if (linkId != null && linkId.isNotEmpty) {
-                                    finalLinkId = 'chapter$chapterIndex#$linkId';
+                                    finalLinkId =
+                                        'chapter$chapterIndex#$linkId';
                                   } else {
-                                    finalLinkId = 'chapter$chapterIndex#link_${_globalLinks.length}';
+                                    finalLinkId =
+                                        'chapter$chapterIndex#link_${_globalLinks.length}';
                                   }
 
                                   // 提取 targetId
-                                  final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+                                  final targetId = hashIndex != -1
+                                      ? href.substring(hashIndex + 1)
+                                      : '';
 
                                   // 添加到 _globalLinks
-                                  final linkOffset = plainTextBuffer.length + blockText.length;
+                                  final linkOffset =
+                                      plainTextBuffer.length + blockText.length;
                                   _globalLinks.add({
                                     'chapterIndex': chapterIndex,
                                     'href': href,
@@ -1096,10 +1133,13 @@ class BookLoader {
                 // 检查 grandchild 是否包含脚注链接
                 bool hasFootnoteLinkInGrandchild = false;
                 if (grandchild is html_dom.Element) {
-                  final footnoteLinks = grandchild.querySelectorAll('a[href*="#"]');
+                  final footnoteLinks = grandchild.querySelectorAll(
+                    'a[href*="#"]',
+                  );
                   for (final link in footnoteLinks) {
                     final href = link.attributes['href'] ?? '';
-                    if (href.contains('#') && !(href.contains('/') || href.contains('.html'))) {
+                    if (href.contains('#') &&
+                        !(href.contains('/') || href.contains('.html'))) {
                       hasFootnoteLinkInGrandchild = true;
                       break;
                     }
@@ -1255,7 +1295,9 @@ class BookLoader {
             }
 
             // 提取 targetId
-            final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+            final targetId = hashIndex != -1
+                ? href.substring(hashIndex + 1)
+                : '';
             final linkOffset = plainTextBuffer.length;
 
             // 所有链接都添加到 _globalLinks
@@ -1275,7 +1317,9 @@ class BookLoader {
             });
 
             // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 plainTextBuffer
-            final isFootnote = hashIndex != -1 && !(href.contains('/') || href.contains('.html'));
+            final isFootnote =
+                hashIndex != -1 &&
+                !(href.contains('/') || href.contains('.html'));
             if (isFootnote) {
               // 脚注链接不记录文本
               return;
@@ -1287,7 +1331,12 @@ class BookLoader {
                   plainTextBuffer.write(' ');
                 }
                 plainTextBuffer.write(linkText);
-                items.add(TextContent(text: linkText, startOffset: plainTextBuffer.length - linkText.length));
+                items.add(
+                  TextContent(
+                    text: linkText,
+                    startOffset: plainTextBuffer.length - linkText.length,
+                  ),
+                );
               }
               return;
             }
@@ -2068,16 +2117,5 @@ class BookLoader {
         processPages(epubBook, context, 0);
       });
     }
-  }
-
-  /// 从 href 中提取 targetId
-  String _extractTargetIdFromHref(String href) {
-    if (href.contains('#')) {
-      final parts = href.split('#');
-      if (parts.length == 2) {
-        return parts[1];
-      }
-    }
-    return '';
   }
 }
