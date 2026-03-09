@@ -130,25 +130,27 @@ class CoverContent extends ContentItem {
 class LinkContent extends ContentItem {
   final String id; // 链接唯一标识（chapter + 原始id）
   final String text; // 链接文本
-  final int startOffset; // 文本在章节中的起始偏移量
-  final int endOffset; // 文本在章节中的结束偏移量
+  final int offset; // 文本在章节中的起始偏移量
+  final int length; // 文本长度
   final String href; // 原始 HTML href 属性值（保持不变）
-  final int? pageIndexInChapter; // 链接所在页码
   final int? targetChapterIndex; // 目标章节索引
   final int? targetPageIndexInChapter; // 目标在章节内的页码
   final String? targetExplanation; // 目标内容说明
 
+  // 保留 startOffset 和 endOffset 以兼容旧代码（已废弃）
+  int get startOffset => offset;
+  int get endOffset => offset + length;
+
   LinkContent({
     required this.id,
     required this.text,
-    this.startOffset = 0,
-    int? endOffset,
+    this.offset = 0,
+    int? length,
     required this.href,
-    this.pageIndexInChapter,
     this.targetChapterIndex,
     this.targetPageIndexInChapter,
     this.targetExplanation,
-  }) : endOffset = endOffset ?? (startOffset + text.length);
+  }) : length = length ?? text.length;
 
   @override
   Map<String, dynamic> toJson() {
@@ -156,11 +158,10 @@ class LinkContent extends ContentItem {
       'type': 'link',
       'id': id,
       'text': text,
-      'startOffset': startOffset,
-      'endOffset': endOffset,
+      'offset': offset,
+      'length': length,
       'href': href,
     };
-    if (pageIndexInChapter != null) json['pageIndexInChapter'] = pageIndexInChapter;
     if (targetChapterIndex != null) json['targetChapterIndex'] = targetChapterIndex;
     if (targetPageIndexInChapter != null) json['targetPageIndexInChapter'] = targetPageIndexInChapter;
     if (targetExplanation != null) json['targetExplanation'] = targetExplanation;
@@ -168,13 +169,26 @@ class LinkContent extends ContentItem {
   }
 
   factory LinkContent.fromJson(Map<String, dynamic> json) {
+    // 兼容旧的 startOffset/endOffset 格式
+    final hasOldFormat = json.containsKey('startOffset') && json.containsKey('endOffset');
+    if (hasOldFormat) {
+      return LinkContent(
+        id: json['id'] as String,
+        text: json['text'] as String,
+        offset: json['startOffset'] as int? ?? 0,
+        length: (json['endOffset'] as int? ?? 0) - (json['startOffset'] as int? ?? 0),
+        href: json['href'] as String,
+        targetChapterIndex: json['targetChapterIndex'] as int?,
+        targetPageIndexInChapter: json['targetPageIndexInChapter'] as int?,
+        targetExplanation: json['targetExplanation'] as String?,
+      );
+    }
     return LinkContent(
       id: json['id'] as String,
       text: json['text'] as String,
-      startOffset: json['startOffset'] as int? ?? 0,
-      endOffset: json['endOffset'] as int?,
+      offset: json['offset'] as int? ?? 0,
+      length: json['length'] as int? ?? 0,
       href: json['href'] as String,
-      pageIndexInChapter: json['pageIndexInChapter'] as int?,
       targetChapterIndex: json['targetChapterIndex'] as int?,
       targetPageIndexInChapter: json['targetPageIndexInChapter'] as int?,
       targetExplanation: json['targetExplanation'] as String?,

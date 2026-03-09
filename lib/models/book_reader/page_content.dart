@@ -1,4 +1,5 @@
-import 'content_item.dart';
+import 'content_item.dart'
+    show ContentItem, TextContent, TextContentRef, LinkContent;
 
 /// 页面内容
 class PageContent {
@@ -20,11 +21,17 @@ class PageContent {
 
   /// 将所有 TextContentRef 转换为 TextContent
   PageContent resolveTextRefs() {
-    if (chapterPlainText == null) return this;
+    if (chapterPlainText == null) {
+      print(
+        '[PageContent] resolveTextRefs: chapterPlainText 为空，无法解析 TextContentRef, chapterIndex=$chapterIndex',
+      );
+      return this;
+    }
 
     final resolvedItems = contentItems.map((item) {
       if (item is TextContentRef) {
-        return item.toTextContent(chapterPlainText!);
+        final textContent = item.toTextContent(chapterPlainText!);
+        return textContent;
       }
       return item;
     }).toList();
@@ -49,6 +56,14 @@ class PageContent {
       }
       return item;
     }).toList();
+
+    final textContentCount = contentItems.whereType<TextContent>().length;
+    final linkContentCount = contentItems.whereType<LinkContent>().length;
+    final optimizedLinkCount = optimizedItems.whereType<LinkContent>().length;
+
+    print(
+      '[PageContent] optimizeForCache: chapterIndex=$chapterIndex, chapterPlainText长度=${chapterPlainText?.length ?? 0}, TextContent数量=$textContentCount, LinkContent数量=$linkContentCount, 优化后LinkContent数量=$optimizedLinkCount',
+    );
 
     return PageContent(
       chapterIndex: chapterIndex,

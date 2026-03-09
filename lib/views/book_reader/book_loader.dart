@@ -52,7 +52,7 @@ class BookLoader {
   final Map<String, int> _chapterFilenameToIndex = {};
 
   /// 全局链接收集（所有章节的所有链接，统一处理）
-  /// List<{chapterIndex, href, targetId, fullLinkId, startOffset, linkText, isCrossChapter}>
+  /// List<{chapterIndex, pageIndexInChapter, href, targetId, fullLinkId, offset, linkText}>
   final List<Map<String, dynamic>> _globalLinks = [];
 
   /// 缓存相关
@@ -79,6 +79,9 @@ class BookLoader {
 
   /// 章节更新回调函数
   final Function(List<EpubChapter> chapters)? onChaptersUpdated;
+
+  /// 获取所有全局链接
+  List<Map<String, dynamic>> get globalLinks => _globalLinks;
 
   BookLoader({
     required this.bookPath,
@@ -166,7 +169,7 @@ class BookLoader {
     }
   }
 
-  /// 保存页面数据到缓存（优化版：不存储完整文本，但保留章节纯文本）
+  /// 保存页面数据到缓存（优化版：链接单独存储，文本仅记录位置）
   Future<void> savePagesToCache(List<PageContent> pages) async {
     try {
       if (bookCacheKey == null || pages.isEmpty) return;
@@ -177,11 +180,36 @@ class BookLoader {
       final optimizedPages = pages.map((p) => p.optimizeForCache()).toList();
 
       // 收集所有章节的纯文本（转换为 String 键以支持 JSON 序列化）
+      // 每个章节只保存一次纯文本，避免重复
       final chapterTexts = <String, String>{};
       for (final page in pages) {
-        if (page.chapterPlainText != null) {
-          chapterTexts[page.chapterIndex.toString()] = page.chapterPlainText!;
+        final chapterIndexStr = page.chapterIndex.toString();
+        // 只保存每个章节的第一个页面的纯文本
+        if (page.chapterPlainText != null && !chapterTexts.containsKey(chapterIndexStr)) {
+          chapterTexts[chapterIndexStr] = page.chapterPlainText!;
         }
+      }
+
+      // 收集所有链接并记录所在章节和页面
+      // 直接从 _globalLinks 收集，不再遍历 contentItems
+      final links = <Map<String, dynamic>>[];
+      for (final link in _globalLinks) {
+        // 截断 targetExplanation，超过200字符仅保留前200字符
+        String? targetExplanation = link['targetExplanation'] as String?;
+        if (targetExplanation != null && targetExplanation.length > 200) {
+          targetExplanation = targetExplanation.substring(0, 200);
+        }
+        links.add({
+          'id': link['fullLinkId'] as String,
+          'text': link['linkText'] as String,
+          'targetChapterIndex': link['targetChapterIndex'] as int?,
+          'targetPageIndexInChapter': link['targetPageIndexInChapter'] as int?,
+          'targetExplanation': targetExplanation,
+          'chapterIndex': link['chapterIndex'] as int,
+          'pageIndexInChapter': link['pageIndexInChapter'] as int?,
+          'offset': link['offset'] as int?,
+          'length': link['length'] as int?,
+        });
       }
 
       // 验证所有页面项都可以正确序列化
@@ -213,7 +241,8 @@ class BookLoader {
         'windowHeight': windowSize?.height ?? 0,
         'fontSize': fontSize,
         'chapterTexts': chapterTexts, // 存储章节纯文本
-        'pages': optimizedPages.map((p) => p.toJson()).toList(),
+        'links': links, // 单独存储所有链接，记录所在章节和页面
+        'pages': optimizedPages.map((p) => p.toJson()).toList(), // 文本仅记录位置
       };
 
       final jsonString = jsonEncode(cacheData);
@@ -230,6 +259,7 @@ class BookLoader {
       await cacheFile.writeAsString(jsonString);
 
       print('页面缓存已保存: $cacheFilePath');
+      print('📊 缓存统计: 页面数=${pages.length}, 链接数=${links.length}');
       print(
         '📊 缓存优化: 原始 $originalSize 字节 → 优化后 $compressedSize 字节 (减少 ${ratio}%)',
       );
@@ -297,6 +327,7 @@ class BookLoader {
           chapterTexts[int.parse(key)] = value as String;
         });
       }
+      print('[BookLoader] 加载缓存: 章节文本数量=${chapterTexts.length}');
 
       // 从缓存加载页面（包含 TextContentRef）
       final pages = pagesJson.map((json) {
@@ -310,6 +341,8 @@ class BookLoader {
             title: page.title,
             chapterPlainText: chapterTexts[page.chapterIndex],
           );
+        } else {
+          print('[BookLoader] 警告: 章节 $page.chapterIndex 没有纯文本数据');
         }
         return page;
       }).toList();
@@ -317,7 +350,30 @@ class BookLoader {
       // 解析所有 TextContentRef 为 TextContent
       final resolvedPages = pages.map((p) => p.resolveTextRefs()).toList();
 
-      print('从缓存加载了 ${resolvedPages.length} 页（优化版本）');
+      // 从缓存的 links 中重建 _globalLinks（不再添加 LinkContent 到页面）
+      _globalLinks.clear();
+      final linksData = cacheData['links'] as List<dynamic>?;
+      if (linksData != null) {
+        for (final linkData in linksData) {
+          final linkMap = linkData as Map<String, dynamic>;
+
+          // 添加到 _globalLinks
+          _globalLinks.add({
+            'chapterIndex': linkMap['chapterIndex'] as int,
+            'fullLinkId': linkMap['id'] as String,
+            'linkText': linkMap['text'] as String,
+            'pageIndexInChapter': linkMap['pageIndexInChapter'] as int?,
+            'offset': linkMap['offset'] as int?,
+            'length': linkMap['length'] as int?,
+            'targetChapterIndex': linkMap['targetChapterIndex'] as int?,
+            'targetPageIndexInChapter': linkMap['targetPageIndexInChapter'] as int?,
+            'targetExplanation': linkMap['targetExplanation'] as String?,
+          });
+        }
+      }
+      print('[BookLoader] 从缓存重建 _globalLinks: 数量=${_globalLinks.length}');
+
+      print('从缓存加载了 ${resolvedPages.length} 页（链接单独存储版本）');
       return resolvedPages;
     } catch (e) {
       print('从缓存加载页面失败: $e');
@@ -397,7 +453,9 @@ class BookLoader {
       // 映射文件名到章节索引
       _chapterFilenameToIndex[baseFilename] = i;
 
-      print('[BookLoader] 章节 $i ($title) 映射: contentFileName=$contentFileName, baseFilename=$baseFilename');
+      print(
+        '[BookLoader] 章节 $i ($title) 映射: contentFileName=$contentFileName, baseFilename=$baseFilename',
+      );
     }
 
     print(
@@ -417,6 +475,38 @@ class BookLoader {
 
     final String cleanedHtml = html.replaceAll(_spaceTabRegex, ' ').trim();
     final html_dom.Document document = html_parser.parse(cleanedHtml);
+
+    // 辅助函数：从元素中提取图片源
+    String? extractImageSource(html_dom.Element element) {
+      if (element.localName == 'img') {
+        return element.attributes['src'];
+      } else if (element.localName == 'image') {
+        // SVG 中的 image 元素，使用 xlink:href 或 href 属性
+        // 尝试多种可能的属性名称（包括命名空间变体）
+        var xlinkHref = element.attributes['xlink:href'];
+        var href = element.attributes['href'];
+
+        // 如果属性名为空，尝试通过 attributes 属性直接访问
+        if (xlinkHref == null) {
+          // 遍历所有属性，找到匹配的
+          for (var attr in element.attributes.entries) {
+            final key = attr.key.toString().toLowerCase();
+            if (key.contains('xlink') && key.contains('href')) {
+              xlinkHref = attr.value.toString();
+              print('[BookLoader] 通过属性遍历找到 xlink:href: $xlinkHref');
+              break;
+            }
+          }
+        }
+
+        final result = xlinkHref ?? href;
+        print(
+          '[BookLoader] extractImageSource 结果: $result (xlinkHref=$xlinkHref, href=$href)',
+        );
+        return result;
+      }
+      return null;
+    }
 
     // 判断是否为块级元素
     // bool isBlockElement(html_dom.Element node) {
@@ -438,7 +528,9 @@ class BookLoader {
           name == 'b' ||
           name == 'strong' ||
           name == 'em' ||
-          name == 'a';
+          name == 'a' ||
+          name == 'sup' ||
+          name == 'sub';
     }
 
     // 判断是否为脚注链接（有 id 和 href）
@@ -463,41 +555,28 @@ class BookLoader {
       // 遍历子节点
       for (final child in node.nodes) {
         if (child is html_dom.Element) {
-          if (child.localName == 'img') {
+          if (child.localName == 'img' || child.localName == 'image') {
             // 遇到图片，先保存之前的文本
-            if (blockText.isNotEmpty) {
-              blockItems.add(
-                TextContent(
-                  text: blockText.toString().trim(),
-                  startOffset: plainTextBuffer.length,
-                ),
-              );
-              blockText.clear();
+            final imageSource = extractImageSource(child);
+            if (imageSource != null && imageSource.isNotEmpty) {
+              if (blockText.isNotEmpty) {
+                blockItems.add(
+                  TextContent(
+                    text: blockText.toString().trim(),
+                    startOffset: plainTextBuffer.length,
+                  ),
+                );
+                blockText.clear();
+              }
+              blockItems.add(ImageContent(source: imageSource));
             }
-            blockItems.add(ImageContent(source: child.attributes['src'] ?? ''));
           } else if (isInlineElement(child)) {
             // 检查是否为脚注链接
             if (isFootnoteLink(child) && chapterIndex >= 0) {
               final linkId = child.attributes['id'];
               final href = child.attributes['href']!;
               final linkText = child.text.trim();
-
-              // 检查是否为跨章节链接
-              final isCrossChapter =
-                  href.contains('/') || href.contains('.html');
               final hashIndex = href.indexOf('#');
-              if (hashIndex == -1) {
-                // 没有 #，不是脚注链接，当作普通文本处理
-                if (linkText.isNotEmpty) {
-                  if (blockText.isNotEmpty) {
-                    blockText.write(' ');
-                  }
-                  blockText.write(linkText);
-                }
-                continue;
-              }
-
-              final targetId = href.substring(hashIndex + 1);
 
               // 生成或使用 linkId
               String? finalLinkId;
@@ -509,63 +588,107 @@ class BookLoader {
                     'chapter$chapterIndex#link_${_globalLinks.length}';
               }
 
-              // 先保存之前的文本
-              if (blockText.isNotEmpty) {
-                blockItems.add(
-                  TextContent(
-                    text: blockText.toString().trim(),
-                    startOffset: plainTextBuffer.length,
-                  ),
-                );
-                blockText.clear();
-              }
+              // 提取 targetId
+              final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
 
-              // 记录链接在文本中的位置（此时还没写入 plainTextBuffer）
-              final linkOffset = plainTextBuffer.length;
-
-              // 将链接文本添加到 blockText（后续会统一写入 plainTextBuffer）
-              if (linkText.isNotEmpty) {
-                if (blockText.isNotEmpty) {
-                  blockText.write(' ');
-                }
-                blockText.write(linkText);
-              }
-
-              // 计算链接的结束位置
-              final linkEndOffset = linkOffset + linkText.length;
-
-              // 创建 LinkContent（只记录位置，不独立渲染）
-              blockItems.add(
-                LinkContent(
-                  id: finalLinkId,
-                  text: linkText,
-                  startOffset: linkOffset,
-                  endOffset: linkEndOffset,
-                  href: href, // 使用原始 HTML href
-                ),
-              );
-
-              // 统一收集所有链接，后续统一处理
+              // 所有链接都添加到 _globalLinks
+              final linkOffset = plainTextBuffer.length + blockText.length;
               _globalLinks.add({
                 'chapterIndex': chapterIndex,
                 'href': href,
                 'targetId': targetId,
                 'fullLinkId': finalLinkId,
-                'startOffset': linkOffset,
                 'linkText': linkText,
-                'isCrossChapter': isCrossChapter,
+                'linkId': linkId,
+                'pageIndexInChapter': null,
+                'offset': linkOffset,
+                'length': linkText.length,
+                'targetChapterIndex': null,
+                'targetPageIndexInChapter': null,
+                'targetExplanation': null,
               });
+
+              // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
+              final isFootnote = hashIndex != -1 && !(href.contains('/') || href.contains('.html'));
+              if (isFootnote) {
+                // 脚注链接不记录文本
+              } else {
+                // 其他链接记录文本
+                if (linkText.isNotEmpty) {
+                  if (blockText.isNotEmpty) {
+                    blockText.write(' ');
+                  }
+                  blockText.write(linkText);
+                }
+              }
               print(
-                '[BookLoader] 收集链接: chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId, offset=$linkOffset',
+                '[BookLoader] 收集链接: chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId',
               );
             } else {
-              // 普通行内元素 - 提取文本
-              final text = child.text.trim();
-              if (text.isNotEmpty) {
-                if (blockText.isNotEmpty) {
-                  blockText.write(' ');
+              // 普通行内元素 - 检查是否包含脚注链接
+              final footnoteLinks = child.querySelectorAll('a[href*="#"]');
+              bool hasFootnoteLink = false;
+              for (final link in footnoteLinks) {
+                final href = link.attributes['href'] ?? '';
+                if (href.contains('#') && !(href.contains('/') || href.contains('.html'))) {
+                  hasFootnoteLink = true;
+                  break;
                 }
-                blockText.write(text);
+              }
+              if (hasFootnoteLink) {
+                // 如果包含脚注链接，递归处理子元素中的链接
+                for (final grandchild in child.nodes) {
+                  if (grandchild is html_dom.Element) {
+                    if (isFootnoteLink(grandchild) && chapterIndex >= 0) {
+                      // 处理脚注链接
+                      final linkId = grandchild.attributes['id'];
+                      final href = grandchild.attributes['href']!;
+                      final linkText = grandchild.text.trim();
+                      final hashIndex = href.indexOf('#');
+
+                      // 生成或使用 linkId
+                      String? finalLinkId;
+                      if (linkId != null && linkId.isNotEmpty) {
+                        finalLinkId = 'chapter$chapterIndex#$linkId';
+                      } else {
+                        finalLinkId = 'chapter$chapterIndex#link_${_globalLinks.length}';
+                      }
+
+                      // 提取 targetId
+                      final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+
+                      // 添加到 _globalLinks
+                      final linkOffset = plainTextBuffer.length + blockText.length;
+                      _globalLinks.add({
+                        'chapterIndex': chapterIndex,
+                        'href': href,
+                        'targetId': targetId,
+                        'fullLinkId': finalLinkId,
+                        'linkText': linkText,
+                        'linkId': linkId,
+                        'pageIndexInChapter': null,
+                        'offset': linkOffset,
+                        'length': linkText.length,
+                        'targetChapterIndex': null,
+                        'targetPageIndexInChapter': null,
+                        'targetExplanation': null,
+                      });
+                      print(
+                        '[BookLoader] 收集链接(行内元素-子元素): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId',
+                      );
+                    }
+                  }
+                }
+                // 不提取文本，避免脚注文本重复
+              } else {
+                // 普通行内元素 - 提取文本
+                final text = child.text.trim();
+                if (text.isNotEmpty) {
+                  if (blockText.isNotEmpty) {
+                    blockText.write(' ');
+                  }
+                  blockText.write(text);
+                }
               }
             }
           } else if (isHeaderElement(child)) {
@@ -577,7 +700,7 @@ class BookLoader {
                   startOffset: plainTextBuffer.length,
                 ),
               );
-              plainTextBuffer.write(blockText.toString().trim());
+              // 注意：不在这里写入 plainTextBuffer，而是在遍历 blockItems 时统一写入
               blockText.clear();
             }
             final headerText = child.text.trim();
@@ -598,20 +721,22 @@ class BookLoader {
           else {
             for (final grandchild in child.nodes) {
               if (grandchild is html_dom.Element) {
-                if (grandchild.localName == 'img') {
+                if (grandchild.localName == 'img' ||
+                    grandchild.localName == 'image') {
                   // 遇到图片，先保存之前的文本
-                  if (blockText.isNotEmpty) {
-                    blockItems.add(
-                      TextContent(
-                        text: blockText.toString().trim(),
-                        startOffset: plainTextBuffer.length,
-                      ),
-                    );
-                    blockText.clear();
+                  final imageSource = extractImageSource(grandchild);
+                  if (imageSource != null && imageSource.isNotEmpty) {
+                    if (blockText.isNotEmpty) {
+                      blockItems.add(
+                        TextContent(
+                          text: blockText.toString().trim(),
+                          startOffset: plainTextBuffer.length,
+                        ),
+                      );
+                      blockText.clear();
+                    }
+                    blockItems.add(ImageContent(source: imageSource));
                   }
-                  blockItems.add(
-                    ImageContent(source: grandchild.attributes['src'] ?? ''),
-                  );
                 } else if (isInlineElement(grandchild)) {
                   // 检查是否为脚注链接
                   if (isFootnoteLink(grandchild)) {
@@ -620,20 +745,6 @@ class BookLoader {
                     final href = grandchild.attributes['href']!;
                     final linkText = grandchild.text.trim();
                     final hashIndex = href.indexOf('#');
-                    if (hashIndex == -1) {
-                      // 没有 #，不是脚注链接，当作普通文本处理
-                      if (linkText.isNotEmpty) {
-                        if (blockText.isNotEmpty) {
-                          blockText.write(' ');
-                        }
-                        blockText.write(linkText);
-                      }
-                      continue;
-                    }
-
-                    final targetId = href.substring(hashIndex + 1);
-                    final isCrossChapter =
-                        href.contains('/') || href.contains('.html');
 
                     // 生成或使用 linkId
                     String? finalLinkId;
@@ -645,63 +756,106 @@ class BookLoader {
                           'chapter$chapterIndex#link_${_globalLinks.length}';
                     }
 
-                    // 先保存之前的文本
-                    if (blockText.isNotEmpty) {
-                      blockItems.add(
-                        TextContent(
-                          text: blockText.toString().trim(),
-                          startOffset: plainTextBuffer.length,
-                        ),
-                      );
-                      blockText.clear();
-                    }
+                    // 提取 targetId
+                    final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
 
-                    // 记录链接在文本中的位置（此时还没写入 plainTextBuffer）
-                    final linkOffset = plainTextBuffer.length;
-
-                    // 将链接文本添加到 blockText（后续会统一写入 plainTextBuffer）
-                    if (linkText.isNotEmpty) {
-                      if (blockText.isNotEmpty) {
-                        blockText.write(' ');
-                      }
-                      blockText.write(linkText);
-                    }
-
-                    // 计算链接的结束位置
-                    final linkEndOffset = linkOffset + linkText.length;
-
-                    // 创建 LinkContent（只记录位置，不独立渲染）
-                    blockItems.add(
-                      LinkContent(
-                        id: finalLinkId,
-                        text: linkText,
-                        startOffset: linkOffset,
-                        endOffset: linkEndOffset,
-                        href: href, // 使用原始 HTML href
-                      ),
-                    );
-
-                    // 统一收集所有链接
+                    // 所有链接都添加到 _globalLinks
+                    final linkOffset = plainTextBuffer.length + blockText.length;
                     _globalLinks.add({
                       'chapterIndex': chapterIndex,
                       'href': href,
                       'targetId': targetId,
                       'fullLinkId': finalLinkId,
-                      'startOffset': linkOffset,
                       'linkText': linkText,
-                      'isCrossChapter': isCrossChapter,
+                      'linkId': linkId,
+                      'pageIndexInChapter': null,
+                      'offset': linkOffset,
+                      'length': linkText.length,
+                      'targetChapterIndex': null,
+                      'targetPageIndexInChapter': null,
+                      'targetExplanation': null,
                     });
+
+                    // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
+                    final isFootnote = hashIndex != -1 && !(href.contains('/') || href.contains('.html'));
+                    if (isFootnote) {
+                      // 脚注链接不记录文本
+                    } else {
+                      // 其他链接记录文本
+                      if (linkText.isNotEmpty) {
+                        if (blockText.isNotEmpty) {
+                          blockText.write(' ');
+                        }
+                        blockText.write(linkText);
+                      }
+                    }
                     print(
-                      '[BookLoader] 收集链接(块级-子节点): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId, offset=$linkOffset',
+                      '[BookLoader] 收集链接(块级-子节点): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId',
                     );
                   } else {
-                    // 普通行内元素 - 提取文本
-                    final text = grandchild.text.trim();
-                    if (text.isNotEmpty) {
-                      if (blockText.isNotEmpty) {
-                        blockText.write(' ');
+                    // 普通行内元素 - 检查是否包含脚注链接
+                    final footnoteLinks = grandchild.querySelectorAll('a[href*="#"]');
+                    bool hasFootnoteLink = false;
+                    for (final link in footnoteLinks) {
+                      final href = link.attributes['href'] ?? '';
+                      if (href.contains('#') && !(href.contains('/') || href.contains('.html'))) {
+                        hasFootnoteLink = true;
+                        break;
                       }
-                      blockText.write(text);
+                    }
+                    if (hasFootnoteLink) {
+                      // 如果包含脚注链接，递归处理子元素中的链接
+                      for (final gg in grandchild.nodes) {
+                        if (gg is html_dom.Element) {
+                          if (isFootnoteLink(gg) && chapterIndex >= 0) {
+                            // 处理脚注链接
+                            final linkId = gg.attributes['id'];
+                            final href = gg.attributes['href']!;
+                            final linkText = gg.text.trim();
+                            final hashIndex = href.indexOf('#');
+
+                            // 生成或使用 linkId
+                            String? finalLinkId;
+                            if (linkId != null && linkId.isNotEmpty) {
+                              finalLinkId = 'chapter$chapterIndex#$linkId';
+                            } else {
+                              finalLinkId = 'chapter$chapterIndex#link_${_globalLinks.length}';
+                            }
+
+                            // 提取 targetId
+                            final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+
+                            // 添加到 _globalLinks
+                            final linkOffset = plainTextBuffer.length + blockText.length;
+                            _globalLinks.add({
+                              'chapterIndex': chapterIndex,
+                              'href': href,
+                              'targetId': targetId,
+                              'fullLinkId': finalLinkId,
+                              'linkText': linkText,
+                              'linkId': linkId,
+                              'pageIndexInChapter': null,
+                              'offset': linkOffset,
+                              'length': linkText.length,
+                              'targetChapterIndex': null,
+                              'targetPageIndexInChapter': null,
+                              'targetExplanation': null,
+                            });
+                            print(
+                              '[BookLoader] 收集链接(块级-子元素-孙元素): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId',
+                            );
+                          }
+                        }
+                      }
+                    } else {
+                      // 普通行内元素 - 提取文本
+                      final text = grandchild.text.trim();
+                      if (text.isNotEmpty) {
+                        if (blockText.isNotEmpty) {
+                          blockText.write(' ');
+                        }
+                        blockText.write(text);
+                      }
                     }
                   }
                 } else if (isHeaderElement(grandchild)) {
@@ -736,19 +890,20 @@ class BookLoader {
                 else {
                   for (final gc in grandchild.nodes) {
                     if (gc is html_dom.Element) {
-                      if (gc.localName == 'img') {
-                        if (blockText.isNotEmpty) {
-                          blockItems.add(
-                            TextContent(
-                              text: blockText.toString().trim(),
-                              startOffset: plainTextBuffer.length,
-                            ),
-                          );
-                          blockText.clear();
+                      if (gc.localName == 'img' || gc.localName == 'image') {
+                        final imageSource = extractImageSource(gc);
+                        if (imageSource != null && imageSource.isNotEmpty) {
+                          if (blockText.isNotEmpty) {
+                            blockItems.add(
+                              TextContent(
+                                text: blockText.toString().trim(),
+                                startOffset: plainTextBuffer.length,
+                              ),
+                            );
+                            blockText.clear();
+                          }
+                          blockItems.add(ImageContent(source: imageSource));
                         }
-                        blockItems.add(
-                          ImageContent(source: gc.attributes['src'] ?? ''),
-                        );
                       } else if (isInlineElement(gc)) {
                         // 检查是否为脚注链接
                         if (isFootnoteLink(gc) && chapterIndex >= 0) {
@@ -756,20 +911,6 @@ class BookLoader {
                           final href = gc.attributes['href']!;
                           final linkText = gc.text.trim();
                           final hashIndex = href.indexOf('#');
-                          if (hashIndex == -1) {
-                            // 没有 #，不是脚注链接，当作普通文本处理
-                            if (linkText.isNotEmpty) {
-                              if (blockText.isNotEmpty) {
-                                blockText.write(' ');
-                              }
-                              blockText.write(linkText);
-                            }
-                            continue;
-                          }
-
-                          final targetId = href.substring(hashIndex + 1);
-                          final isCrossChapter =
-                              href.contains('/') || href.contains('.html');
 
                           // 生成或使用 linkId
                           String? finalLinkId;
@@ -781,63 +922,106 @@ class BookLoader {
                                 'chapter$chapterIndex#link_${_globalLinks.length}';
                           }
 
-                          // 先保存之前的文本
-                          if (blockText.isNotEmpty) {
-                            blockItems.add(
-                              TextContent(
-                                text: blockText.toString().trim(),
-                                startOffset: plainTextBuffer.length,
-                              ),
-                            );
-                            blockText.clear();
-                          }
+                          // 提取 targetId
+                          final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
 
-                          // 记录链接在文本中的位置（此时还没写入 plainTextBuffer）
-                          final linkOffset = plainTextBuffer.length;
-
-                          // 将链接文本添加到 blockText（后续会统一写入 plainTextBuffer）
-                          if (linkText.isNotEmpty) {
-                            if (blockText.isNotEmpty) {
-                              blockText.write(' ');
-                            }
-                            blockText.write(linkText);
-                          }
-
-                          // 计算链接的结束位置
-                          final linkEndOffset = linkOffset + linkText.length;
-
-                          // 创建 LinkContent（只记录位置，不独立渲染）
-                          blockItems.add(
-                            LinkContent(
-                              id: finalLinkId,
-                              text: linkText,
-                              startOffset: linkOffset,
-                              endOffset: linkEndOffset,
-                              href: href, // 使用原始 HTML href
-                            ),
-                          );
-
-                          // 统一收集所有链接
+                          // 所有链接都添加到 _globalLinks
+                          final linkOffset = plainTextBuffer.length + blockText.length;
                           _globalLinks.add({
                             'chapterIndex': chapterIndex,
                             'href': href,
                             'targetId': targetId,
                             'fullLinkId': finalLinkId,
-                            'startOffset': linkOffset,
                             'linkText': linkText,
-                            'isCrossChapter': isCrossChapter,
+                            'linkId': linkId,
+                            'pageIndexInChapter': null,
+                            'offset': linkOffset,
+                            'length': linkText.length,
+                            'targetChapterIndex': null,
+                            'targetPageIndexInChapter': null,
+                            'targetExplanation': null,
                           });
+
+                          // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
+                          final isFootnote = hashIndex != -1 && !(href.contains('/') || href.contains('.html'));
+                          if (isFootnote) {
+                            // 脚注链接不记录文本
+                          } else {
+                            // 其他链接记录文本
+                            if (linkText.isNotEmpty) {
+                              if (blockText.isNotEmpty) {
+                                blockText.write(' ');
+                              }
+                              blockText.write(linkText);
+                            }
+                          }
                           print(
-                            '[BookLoader] 收集链接(块级-孙节点): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId, offset=$linkOffset',
+                            '[BookLoader] 收集链接(块级-孙节点): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId',
                           );
                         } else {
-                          // 普通行内元素 - 提取文本
-                          final text = gc.text.trim();
-                          if (text.isNotEmpty) {
-                            if (blockText.isNotEmpty) {
-                              blockText.write(' ');
+                          // 普通行内元素 - 检查是否包含脚注链接
+                          final footnoteLinks = gc.querySelectorAll('a[href*="#"]');
+                          bool hasFootnoteLink = false;
+                          for (final link in footnoteLinks) {
+                            final href = link.attributes['href'] ?? '';
+                            if (href.contains('#') && !(href.contains('/') || href.contains('.html'))) {
+                              hasFootnoteLink = true;
+                              break;
                             }
-                            blockText.write(text);
+                          }
+                          if (hasFootnoteLink) {
+                            // 如果包含脚注链接，递归处理子元素中的链接
+                            for (final ggc in gc.nodes) {
+                              if (ggc is html_dom.Element) {
+                                if (isFootnoteLink(ggc) && chapterIndex >= 0) {
+                                  // 处理脚注链接
+                                  final linkId = ggc.attributes['id'];
+                                  final href = ggc.attributes['href']!;
+                                  final linkText = ggc.text.trim();
+                                  final hashIndex = href.indexOf('#');
+
+                                  // 生成或使用 linkId
+                                  String? finalLinkId;
+                                  if (linkId != null && linkId.isNotEmpty) {
+                                    finalLinkId = 'chapter$chapterIndex#$linkId';
+                                  } else {
+                                    finalLinkId = 'chapter$chapterIndex#link_${_globalLinks.length}';
+                                  }
+
+                                  // 提取 targetId
+                                  final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+
+                                  // 添加到 _globalLinks
+                                  final linkOffset = plainTextBuffer.length + blockText.length;
+                                  _globalLinks.add({
+                                    'chapterIndex': chapterIndex,
+                                    'href': href,
+                                    'targetId': targetId,
+                                    'fullLinkId': finalLinkId,
+                                    'linkText': linkText,
+                                    'linkId': linkId,
+                                    'pageIndexInChapter': null,
+                                    'offset': linkOffset,
+                                    'length': linkText.length,
+                                    'targetChapterIndex': null,
+                                    'targetPageIndexInChapter': null,
+                                    'targetExplanation': null,
+                                  });
+                                  print(
+                                    '[BookLoader] 收集链接(块级-子元素-孙元素-曾孙元素): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId',
+                                  );
+                                }
+                              }
+                            }
+                          } else {
+                            // 普通行内元素 - 提取文本
+                            final text = gc.text.trim();
+                            if (text.isNotEmpty) {
+                              if (blockText.isNotEmpty) {
+                                blockText.write(' ');
+                              }
+                              blockText.write(text);
+                            }
                           }
                         }
                       } else if (isHeaderElement(gc)) {
@@ -848,7 +1032,7 @@ class BookLoader {
                               startOffset: plainTextBuffer.length,
                             ),
                           );
-                          plainTextBuffer.write(blockText.toString().trim());
+                          // 注意：不在这里写入 plainTextBuffer，而是在遍历 blockItems 时统一写入
                           blockText.clear();
                         }
                         final headerText = gc.text.trim();
@@ -866,6 +1050,38 @@ class BookLoader {
                           );
                         }
                       }
+                    } else if (gc is html_dom.Element &&
+                        gc.localName == 'svg') {
+                      // SVG 元素 - 递归处理查找其中的 image
+                      print('[BookLoader] 遇到 SVG 元素（递归）');
+                      void processSvgChildren(html_dom.Node svgNode) {
+                        if (svgNode is html_dom.Element) {
+                          if (svgNode.localName == 'image') {
+                            final imageSource = extractImageSource(svgNode);
+                            if (imageSource != null && imageSource.isNotEmpty) {
+                              if (blockText.isNotEmpty) {
+                                blockItems.add(
+                                  TextContent(
+                                    text: blockText.toString().trim(),
+                                    startOffset: plainTextBuffer.length,
+                                  ),
+                                );
+                                blockText.clear();
+                              }
+                              blockItems.add(ImageContent(source: imageSource));
+                              print('[BookLoader] 从 SVG 中提取到图片: $imageSource');
+                            }
+                          } else {
+                            for (final child in svgNode.nodes) {
+                              processSvgChildren(child);
+                            }
+                          }
+                        }
+                      }
+
+                      for (final child in gc.nodes) {
+                        processSvgChildren(child);
+                      }
                     } else if (gc is html_dom.Text) {
                       final text = gc.text.trim();
                       if (text.isNotEmpty) {
@@ -877,13 +1093,26 @@ class BookLoader {
                     }
                   }
                 }
-              } else if (grandchild is html_dom.Text) {
-                final text = grandchild.text.trim();
-                if (text.isNotEmpty) {
-                  if (blockText.isNotEmpty) {
-                    blockText.write(' ');
+                // 检查 grandchild 是否包含脚注链接
+                bool hasFootnoteLinkInGrandchild = false;
+                if (grandchild is html_dom.Element) {
+                  final footnoteLinks = grandchild.querySelectorAll('a[href*="#"]');
+                  for (final link in footnoteLinks) {
+                    final href = link.attributes['href'] ?? '';
+                    if (href.contains('#') && !(href.contains('/') || href.contains('.html'))) {
+                      hasFootnoteLinkInGrandchild = true;
+                      break;
+                    }
                   }
-                  blockText.write(text);
+                }
+                if (!hasFootnoteLinkInGrandchild) {
+                  final text = grandchild.text.trim();
+                  if (text.isNotEmpty) {
+                    if (blockText.isNotEmpty) {
+                      blockText.write(' ');
+                    }
+                    blockText.write(text);
+                  }
                 }
               }
             }
@@ -899,7 +1128,7 @@ class BookLoader {
         }
       }
 
-      // 保存剩余文本
+      // 先保存剩余文本
       if (blockText.isNotEmpty) {
         blockItems.add(
           TextContent(
@@ -914,17 +1143,26 @@ class BookLoader {
       TextContent? lastTextContent;
       for (final blockItem in blockItems) {
         if (blockItem is TextContent) {
+          // 更新 startOffset 为当前的 plainTextBuffer.length
+          final updatedTextContent = TextContent(
+            text: blockItem.text,
+            startOffset: plainTextBuffer.length,
+          );
           plainTextBuffer.write(blockItem.text);
-          items.add(blockItem);
+          print(
+            '[BookLoader] TextContent: startOffset=${updatedTextContent.startOffset}, length=${updatedTextContent.text.length}, text="${updatedTextContent.text.substring(0, updatedTextContent.text.length > 20 ? 20 : updatedTextContent.text.length)}..."',
+          );
+          items.add(updatedTextContent);
           hasTextContent = true;
-          lastTextContent = blockItem;
+          lastTextContent = updatedTextContent;
         } else if (blockItem is LinkContent) {
-          // LinkContent 不添加到 items（文本已经包含在前面的 TextContent 中）
-          // LinkContent 只作为标记，用于在渲染时应用样式
-          // 将 LinkContent 也添加到 items，但渲染时会跳过
+          // LinkContent：写入链接文本到 plainTextBuffer，并添加到 items
+          // 注意：链接文本应该写入 plainTextBuffer，以保持 offset 的连续性
+          // plainTextBuffer.write(blockItem.text);
+          print(
+            '[BookLoader] LinkContent: offset=${blockItem.offset}, length=${blockItem.length}, text="${blockItem.text}"',
+          );
           items.add(blockItem);
-          // 不写入 plainTextBuffer（文本已在 TextContent 中）
-          // 不需要添加换行符,不更新 lastTextContent
         } else if (blockItem is ImageContent || blockItem is HeaderContent) {
           items.add(blockItem);
         }
@@ -955,11 +1193,24 @@ class BookLoader {
     // 递归遍历 DOM 树
     void traverseNode(html_dom.Node node) {
       if (node is html_dom.Element) {
-        if (node.localName == 'img') {
+        if (node.localName == 'img' || node.localName == 'image') {
           // 根级别的图片
-          final src = node.attributes['src'];
+          final src = extractImageSource(node);
           if (src != null && src.isNotEmpty) {
             items.add(ImageContent(source: src));
+            print('[BookLoader] 提取到图片(traverseNode): src=$src');
+          }
+        } else if (node.localName == 'svg') {
+          // SVG 元素 - 递归处理其子节点，查找其中的 image 元素
+          print('[BookLoader] 遇到 SVG 元素，递归处理子节点');
+          for (final child in node.nodes) {
+            if (child is html_dom.Element) {
+              print('[BookLoader] SVG 子节点类型: ${child.localName}');
+              if (child.localName == 'image') {
+                print('[BookLoader] 在 SVG 中发现 image 元素');
+              }
+            }
+            traverseNode(child);
           }
         } else if (isHeaderElement(node)) {
           // 标题节点 - 单独处理
@@ -993,20 +1244,6 @@ class BookLoader {
             final href = node.attributes['href']!;
             final linkText = node.text.trim();
             final hashIndex = href.indexOf('#');
-            if (hashIndex == -1) {
-              // 没有 #，不是脚注链接，当作普通文本处理
-              if (linkText.isNotEmpty) {
-                if (plainTextBuffer.isNotEmpty &&
-                    plainTextBuffer.toString().endsWith('\n') == false) {
-                  plainTextBuffer.write(' ');
-                }
-                plainTextBuffer.write(linkText);
-              }
-              return;
-            }
-
-            final targetId = href.substring(hashIndex + 1);
-            final isCrossChapter = href.contains('/') || href.contains('.html');
 
             // 生成或使用 linkId
             String? finalLinkId;
@@ -1017,43 +1254,43 @@ class BookLoader {
               finalLinkId = 'chapter$chapterIndex#link_${_globalLinks.length}';
             }
 
-            if (plainTextBuffer.isNotEmpty &&
-                plainTextBuffer.toString().endsWith('\n') == false) {
-              plainTextBuffer.write(' ');
-            }
+            // 提取 targetId
+            final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+            final linkOffset = plainTextBuffer.length;
 
-            final offset = plainTextBuffer.length;
-
-            // 根级别的链接直接写入 plainTextBuffer
-            plainTextBuffer.write(linkText);
-
-            // 计算链接的结束位置
-            final linkEndOffset = offset + linkText.length;
-
-            // 添加 LinkContent（只记录位置）
-            items.add(
-              LinkContent(
-                id: finalLinkId,
-                text: linkText,
-                startOffset: offset,
-                endOffset: linkEndOffset,
-                href: href,
-              ),
-            ); // 使用原始 HTML href
-
-            // 统一收集所有链接
+            // 所有链接都添加到 _globalLinks
             _globalLinks.add({
               'chapterIndex': chapterIndex,
               'href': href,
               'targetId': targetId,
               'fullLinkId': finalLinkId,
-              'startOffset': offset,
               'linkText': linkText,
-              'isCrossChapter': isCrossChapter,
+              'linkId': linkId,
+              'pageIndexInChapter': null,
+              'offset': linkOffset,
+              'length': linkText.length,
+              'targetChapterIndex': null,
+              'targetPageIndexInChapter': null,
+              'targetExplanation': null,
             });
-            print(
-              '[BookLoader] 收集链接(traverseNode): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId, offset=$offset',
-            );
+
+            // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 plainTextBuffer
+            final isFootnote = hashIndex != -1 && !(href.contains('/') || href.contains('.html'));
+            if (isFootnote) {
+              // 脚注链接不记录文本
+              return;
+            } else {
+              // 其他链接记录文本
+              if (linkText.isNotEmpty) {
+                if (plainTextBuffer.isNotEmpty &&
+                    plainTextBuffer.toString().endsWith('\n') == false) {
+                  plainTextBuffer.write(' ');
+                }
+                plainTextBuffer.write(linkText);
+                items.add(TextContent(text: linkText, startOffset: plainTextBuffer.length - linkText.length));
+              }
+              return;
+            }
           } else {
             // 普通行内元素 - 提取文本内容
             final text = node.text.trim();
@@ -1246,6 +1483,10 @@ class BookLoader {
     final contentItems = parsed.items;
     final chapterPlainText = parsed.plainText;
 
+    print(
+      '[BookLoader] 章节 $chapterIndex (${chapter.title}): HTML长度=${htmlContent.length}, contentItems数量=${contentItems.length}, plainText长度=${chapterPlainText.length}',
+    );
+
     // 保存章节纯文本到映射中，用于缓存恢复
     _chapterPlainTextMap[chapterIndex] = chapterPlainText;
 
@@ -1412,18 +1653,9 @@ class BookLoader {
         currentPageItems.add(item);
         currentPageHeight += headerHeight;
       } else if (item is LinkContent) {
-        // LinkContent - 作为文本内容的一部分，单独处理
-        final linkText = item.text;
-        if (linkText.isNotEmpty) {
-          // 估算脚注链接占用的行数（通常很短，假设占用 1 行）
-          final linkHeight = lineHeight;
-          if (currentPageItems.isNotEmpty &&
-              currentPageHeight + linkHeight > usableHeight) {
-            flushCurrentPage();
-          }
-          currentPageItems.add(item);
-          currentPageHeight += linkHeight;
-        }
+        // LinkContent - 只作为标记，不独立占用页面空间
+        // 文本已经包含在 TextContent 中，这里只添加标记
+        currentPageItems.add(item);
       } else if (item is CoverContent) {
         // cover always occupies a full page
         if (currentPageItems.isNotEmpty) {
@@ -1461,17 +1693,24 @@ class BookLoader {
     // 统一处理所有链接，不区分章节内和跨章节
     for (final link in _globalLinks) {
       final chapterIndex = link['chapterIndex'] as int;
-      final href = link['href'] as String;
-      final targetId = link['targetId'] as String;
+      final href = link['href'] as String?;
+      final targetId = link['targetId'] as String?;
       final fullLinkId = link['fullLinkId'] as String;
-      final isCrossChapter = link['isCrossChapter'] as bool;
 
       // 解析 href 找到目标章节索引和页面索引
       int? targetChapterIndex;
       int? targetPageIndexInChapter;
       String? targetExplanation;
 
-      if (isCrossChapter) {
+      // 如果 href 为 null，跳过处理（从缓存恢复的链接已有完整信息）
+      if (href == null) {
+        continue;
+      }
+
+      // 判断是否跨章节（检查 href 是否包含文件名）
+      final isCrossChapterLink = href.contains('/') || href.contains('.html');
+
+      if (isCrossChapterLink) {
         // 跨章节链接：解析 href 格式: part0004_split_004.html#note1n
         final hashIndex = href.indexOf('#');
         if (hashIndex == -1) continue;
@@ -1567,31 +1806,29 @@ class BookLoader {
         }
       }
 
-      // 直接更新 pages 中的 LinkContent
-      for (final page in allPages) {
-        if (page.chapterIndex != chapterIndex) continue;
+      // 更新 _globalLinks 中的链接信息
+      link['targetChapterIndex'] = targetChapterIndex;
+      link['targetPageIndexInChapter'] = targetPageIndexInChapter;
+      link['targetExplanation'] = targetExplanation;
 
-        for (int i = 0; i < page.contentItems.length; i++) {
-          final item = page.contentItems[i];
-          if (item is LinkContent && item.id == fullLinkId) {
-            // 创建更新后的 LinkContent
-            final updatedLink = LinkContent(
-              id: item.id,
-              text: item.text,
-              startOffset: item.startOffset,
-              href: item.href,
-              pageIndexInChapter: page.pageIndexInChapter,
-              targetChapterIndex: targetChapterIndex,
-              targetPageIndexInChapter: targetPageIndexInChapter,
-              targetExplanation: targetExplanation,
-            );
-            page.contentItems[i] = updatedLink;
-            print(
-              '[BookLoader] 更新链接: chapter=$chapterIndex, page=${page.pageIndexInChapter}, linkId=$fullLinkId, targetChapter=$targetChapterIndex, targetPageIndex=$targetPageIndexInChapter',
-            );
-            break;
-          }
-        }
+      // 计算链接所在页面的索引
+      final linkOffset = link['offset'] as int?;
+      if (linkOffset != null) {
+        final linkPageIndex = _findPageIndexByOffset(
+          chapterToPagesMap[chapterIndex] ?? [],
+          linkOffset,
+        );
+        link['pageIndexInChapter'] = linkPageIndex;
+      }
+
+      if (targetExplanation != null) {
+        print(
+          '[BookLoader] 更新链接信息: fullLinkId=$fullLinkId, pageIndexInChapter=${link['pageIndexInChapter']}, targetChapter=$targetChapterIndex, targetPageIndex=$targetPageIndexInChapter, targetExplanation=${targetExplanation.length > 20 ? targetExplanation.substring(0, 20) : targetExplanation}...',
+        );
+      } else {
+        print(
+          '[BookLoader] 更新链接信息: fullLinkId=$fullLinkId, pageIndexInChapter=${link['pageIndexInChapter']}, targetChapter=$targetChapterIndex, targetPageIndex=$targetPageIndexInChapter, targetExplanation=null',
+        );
       }
     }
 
@@ -1626,7 +1863,7 @@ class BookLoader {
       } else if (node.nodeType == html_dom.Node.ELEMENT_NODE) {
         final element = node as html_dom.Element;
         // 跳过某些元素（如图片）
-        if (element.localName == 'img') {
+        if (element.localName == 'img' || element.localName == 'image') {
           return;
         }
         // 遍历子节点
@@ -1650,17 +1887,27 @@ class BookLoader {
         if (item is TextContent) {
           if (targetOffset >= item.startOffset &&
               targetOffset < item.startOffset + item.text.length) {
+            print(
+              '[BookLoader] 找到页面索引: targetOffset=$targetOffset, page=${page.pageIndexInChapter}, item.startOffset=${item.startOffset}, item.text.length=${item.text.length}',
+            );
             return page.pageIndexInChapter;
           }
         }
       }
+    }
+    print(
+      '[BookLoader] 未找到目标偏移量对应的页面: targetOffset=$targetOffset, 总页面数=${pages.length}',
+    );
+    // 如果没有找到，返回第一页作为默认值
+    if (pages.isNotEmpty) {
+      return 0;
     }
     return null;
   }
 
   /// 重新处理所有页面（用于窗口大小变化等情况）
   Future<void> processPages(
-    List<EpubChapter> chapters,
+    EpubBook epubBook,
     BuildContext context,
     int currentPageIndex,
   ) async {
@@ -1672,32 +1919,124 @@ class BookLoader {
 
     final pages = <PageContent>[];
 
+    // 清空全局链接，重新收集
+    _globalLinks.clear();
+
+    final spineItems = epubBook.schema?.package?.spine?.items;
+    final manifestItems = epubBook.schema?.package?.manifest?.items;
+
     // 添加封面页
-    final coverImagePath = getCoverImagePath();
-    final coverFile = File(coverImagePath);
-    if (await coverFile.exists()) {
-      pages.add(
-        PageContent(
-          chapterIndex: -1,
-          pageIndexInChapter: 0,
-          contentItems: [CoverContent(imagePath: coverImagePath)],
-          title: '封面',
-        ),
-      );
+    // final coverImagePath = getCoverImagePath();
+    // final coverFile = File(coverImagePath);
+    // if (await coverFile.exists()) {
+    //   pages.add(
+    //     PageContent(
+    //       chapterIndex: -1,
+    //       pageIndexInChapter: 0,
+    //       contentItems: [CoverContent(imagePath: coverImagePath)],
+    //       title: '封面',
+    //     ),
+    //   );
+    // }
+
+    if (spineItems == null || manifestItems == null) {
+      print('[BookLoader] spine 或 manifest 为空，无法处理页面');
+      return;
     }
 
-    // 重新处理所有章节
-    for (int i = 0; i < chapters.length; i++) {
-      final chapter = chapters[i];
-      final chapterPages = splitChapterIntoPages(
-        chapter,
-        i,
-        availableHeight,
-        availableWidth,
-      );
-      pages.addAll(chapterPages);
+    // 构建 contentFileName 到 chapter 的映射
+    final Map<String, EpubChapter> fileNameToChapterMap = {};
+    final List<EpubChapter> chapters = flattenChapters(epubBook.chapters);
 
-      // 每处理几个章节让出时间片
+    for (final chapter in chapters) {
+      final contentFileName = chapter.contentFileName;
+      print('[BookLoader] 添加章节: $contentFileName ${chapter.title}');
+      if (contentFileName != null && contentFileName.isNotEmpty) {
+        fileNameToChapterMap[contentFileName] = chapter;
+      }
+    }
+
+    print('[BookLoader] 章节文件映射: ${fileNameToChapterMap.keys.join(", ")}');
+
+    // 非章节页面索引计数器，从 -1 开始递增
+    int nonChapterPageCounter = -1;
+
+    // 遍历 spine 处理所有页面
+    for (int i = 0; i < spineItems.length; i++) {
+      final spineItem = spineItems[i];
+      final idRef = spineItem.idRef;
+
+      if (idRef == null) {
+        print('[BookLoader] spine item $i 缺少 idRef，跳过');
+        continue;
+      }
+
+      // 在 manifest 中查找对应的 item
+      final manifestItem = manifestItems.cast<EpubManifestItem?>().firstWhere(
+        (item) => item?.id == idRef,
+        orElse: () => null,
+      );
+
+      if (manifestItem == null) {
+        print('[BookLoader] 在 manifest 中找不到 idRef=$idRef 的项，跳过');
+        continue;
+      }
+
+      final href = manifestItem.href;
+      if (href == null) {
+        print('[BookLoader] manifest item id=$idRef 缺少 href，跳过');
+        continue;
+      }
+      // 检查该文件是否有对应的 chapter
+      final chapter = fileNameToChapterMap[href];
+
+      if (chapter != null) {
+        // 有对应的 chapter，按原方式处理
+        final chapterIndex = chapters.indexOf(chapter);
+        final chapterPages = splitChapterIntoPages(
+          chapter,
+          chapterIndex,
+          availableHeight,
+          availableWidth,
+        );
+        pages.addAll(chapterPages);
+        print(
+          '[BookLoader] 处理章节: spine=$i, href=$href, chapterIndex=$chapterIndex',
+        );
+      } else {
+        // 没有对应的 chapter，从 epubBook.content.html 获取内容
+        final htmlContent = epubBook.content?.html[href]?.content;
+        if (htmlContent != null && htmlContent.isNotEmpty) {
+          // 创建临时 chapter 用于处理
+          final tempChapter = EpubChapter(
+            title: manifestItem.id ?? '页面 ${i + 1}',
+            contentFileName: href,
+            htmlContent: htmlContent,
+          );
+
+          // 非章节页面使用负数索引，避免与章节索引冲突
+          // 使用单独计数器，使非章节页面索引连续递增：-1, -2, -3...
+          final nonChapterIndex = nonChapterPageCounter;
+
+          final chapterPages = splitChapterIntoPages(
+            tempChapter,
+            nonChapterIndex,
+            availableHeight,
+            availableWidth,
+          );
+          pages.addAll(chapterPages);
+          print(
+            '[BookLoader] 处理非章节页面: spine=$i, href=$href, chapterIndex=$nonChapterIndex, htmlContent长度=${htmlContent.length}',
+          );
+
+          // 递增非章节页面计数器
+          nonChapterPageCounter--;
+        } else {
+          print('[BookLoader] 警告：找不到 HTML 内容，href=$href');
+        }
+      }
+
+      // 每处理几个页面让出时间片
       if (i % 5 == 0) {
         await Future.delayed(const Duration(milliseconds: 5));
       }
@@ -1718,22 +2057,27 @@ class BookLoader {
   }
 
   /// 处理窗口大小变化
-  void onWindowResize(
-    Size newSize,
-    List<EpubChapter> chapters,
-    BuildContext context,
-  ) {
+  void onWindowResize(Size newSize, EpubBook epubBook, BuildContext context) {
     if (windowSize == null ||
         (newSize.width != windowSize!.width ||
             newSize.height != windowSize!.height)) {
       windowSize = newSize;
-      if (chapters.isNotEmpty) {
-        // 防抖处理：取消之前的定时器，避免频繁重绘
-        resizeDebounceTimer?.cancel();
-        resizeDebounceTimer = Timer(resizeDebounceDuration, () {
-          processPages(chapters, context, 0);
-        });
+      // 防抖处理：取消之前的定时器，避免频繁重绘
+      resizeDebounceTimer?.cancel();
+      resizeDebounceTimer = Timer(resizeDebounceDuration, () {
+        processPages(epubBook, context, 0);
+      });
+    }
+  }
+
+  /// 从 href 中提取 targetId
+  String _extractTargetIdFromHref(String href) {
+    if (href.contains('#')) {
+      final parts = href.split('#');
+      if (parts.length == 2) {
+        return parts[1];
       }
     }
+    return '';
   }
 }
