@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:ashes_note/services/book_reader/book_reader_services.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
+import 'package:ashes_note/views/book_reader/storage_manager.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:epub_plus/epub_plus.dart' hide Image;
 import 'package:file_picker/file_picker.dart';
@@ -311,7 +312,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
             // 立即解析并缓存元数据
             try {
-              final metadata = await _parseBookMetadata(destFile);
+              await _parseBookMetadata(destFile);
             } catch (e) {
               print('缓存元数据失败：$e');
             }
@@ -534,21 +535,13 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         await book.coverFile!.delete();
       }
 
-      // 删除阅读进度缓存
-      final bookKey = 'reading_position_${book.file.path.hashCode}';
-      await SPUtil.remove(bookKey);
-
-      // 删除书签缓存
-      final bookmarksKey = 'bookmarks_${book.file.path.hashCode}';
-      await SPUtil.remove(bookmarksKey);
-
-      // 删除高亮缓存
-      final highlightsKey = 'book_highlights_${book.file.path.hashCode}';
-      await SPUtil.remove(highlightsKey);
-
-      // 删除字体大小缓存
-      final fontSizeKey = 'book_font_size_${book.file.path.hashCode}';
-      await SPUtil.remove(fontSizeKey);
+      // 删除所有书籍相关数据（阅读位置、书签、高亮、字体大小等）
+      try {
+        await BookStorageService().deleteBookData(book.file.path);
+        await StorageManager.deleteBookData(book.file.path);
+      } catch (e) {
+        print('删除书籍数据失败：$e');
+      }
 
       // 从元数据缓存中移除
       try {

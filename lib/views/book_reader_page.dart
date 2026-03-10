@@ -124,28 +124,45 @@ class _BookReaderPageState extends State<BookReaderPage> {
           _errorMessage = errorMessage ?? '';
         });
       },
-      onPagesUpdated:
-          (pages, totalPages, currentPageIndex, currentChapterIndex) {
-            setState(() {
-              _pages = pages;
-              _totalPages = totalPages;
-              // 从 BookLoader 获取全局链接
-              _globalLinks.clear();
-              _globalLinks.addAll(_bookLoader.globalLinks);
-              print(
-                '[BookReader] onPagesUpdated: 复制了 ${_globalLinks.length} 个链接',
-              );
-              if (_globalLinks.isNotEmpty) {
-                final sampleLink = _globalLinks.first;
-                print('[BookReader] 示例链接字段: ${sampleLink.keys.join(", ")}');
-                print('[BookReader] 示例链接fullLinkId: ${sampleLink['fullLinkId']}');
-              }
-              if (currentPageIndex >= 0 && currentPageIndex < pages.length) {
-                _currentPageIndex = currentPageIndex;
-                _currentChapterIndex = pages[currentPageIndex].chapterIndex;
-              }
-            });
-          },
+      onPagesUpdated: (pages, totalPages, currentPageIndex, currentChapterIndex) {
+        setState(() {
+          _pages = pages;
+          _totalPages = totalPages;
+          // 从 BookLoader 获取全局链接
+          _globalLinks.clear();
+          _globalLinks.addAll(_bookLoader.globalLinks);
+          print('[BookReader] onPagesUpdated: 复制了 ${_globalLinks.length} 个链接');
+
+          // 调试：打印第1章第0页的链接
+          final chapter1Page0Links = _globalLinks
+              .where(
+                (link) =>
+                    link['chapterIndex'] == 1 &&
+                    link['pageIndexInChapter'] == 0,
+              )
+              .take(3)
+              .toList();
+          print(
+            '[BookReader] onPagesUpdated后第1章第0页链接数: ${chapter1Page0Links.length}',
+          );
+          for (int i = 0; i < chapter1Page0Links.length; i++) {
+            final link = chapter1Page0Links[i];
+            print(
+              '[BookReader] 链接$i: pageIndexInChapter=${link['pageIndexInChapter']}, offset=${link['offset']}, length=${link['length']}',
+            );
+          }
+
+          if (_globalLinks.isNotEmpty) {
+            final sampleLink = _globalLinks.first;
+            print('[BookReader] 示例链接字段: ${sampleLink.keys.join(", ")}');
+            print('[BookReader] 示例链接fullLinkId: ${sampleLink['fullLinkId']}');
+          }
+          if (currentPageIndex >= 0 && currentPageIndex < pages.length) {
+            _currentPageIndex = currentPageIndex;
+            _currentChapterIndex = pages[currentPageIndex].chapterIndex;
+          }
+        });
+      },
       onChaptersUpdated: (chapters) {
         setState(() {
           _chapters.clear();
@@ -183,27 +200,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     super.dispose();
   }
 
-  /// 计算页面起始偏移量
-  int _calculatePageStartOffset(PageContent page) {
-    int offset = 0;
-    // 遍历该页之前的所有页面（全局索引）
-    for (int i = 0; i < _pages.length; i++) {
-      final p = _pages[i];
-      if (p == page) {
-        break; // 找到当前页面，停止累加
-      }
-      if (p.chapterIndex == page.chapterIndex) {
-        // 累加同章节之前所有页面文本的长度
-        for (final item in p.contentItems) {
-          if (item is TextContent) {
-            offset += item.text.length;
-          }
-        }
-      }
-    }
-    return offset;
-  }
-
   /// 处理链接点击
   void _handleLinkTap(String linkId) {
     print('[BookReader] 点击链接: $linkId');
@@ -222,7 +218,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
     }
 
     final targetChapterIndex = linkData['targetChapterIndex'] as int?;
-    final targetPageIndexInChapter = linkData['targetPageIndexInChapter'] as int?;
+    final targetPageIndexInChapter =
+        linkData['targetPageIndexInChapter'] as int?;
 
     if (targetChapterIndex == null) {
       print('[BookReader] 链接缺少目标章节索引: $linkId');
@@ -260,6 +257,151 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (targetExplanation != null) {
       print('[BookReader] 目标文字: $targetExplanation');
       // 可以在这里添加高亮显示逻辑，例如添加一个临时的搜索结果高亮
+    }
+  }
+
+  /// 合并链接和高亮spans
+  List<TextSpan> _mergeLinksAndHighlights(
+    String text,
+    int textStartOffset,
+    List<InlineSpan> highlightSpans,
+    List<Map<String, dynamic>> linksInRange,
+  ) {
+    // 如果没有链接，直接返回高亮spans（转换为TextSpan）
+    if (linksInRange.isEmpty) {
+      return highlightSpans.whereType<TextSpan>().toList();
+    }
+
+    // 构建链接位置映射（使用offset精确匹配）
+    final linkRanges = <Map<String, dynamic>>[];
+    for (final link in linksInRange) {
+      final linkOffset = link['offset'] as int?;
+      final linkLength = link['length'] as int?;
+
+      if (linkOffset == null || linkLength == null) {
+        continue;
+      }
+
+      // 计算链接在当前文本中的相对位置
+      final linkStart = linkOffset - textStartOffset;
+      final linkEnd = linkStart + linkLength;
+
+      // 允许链接部分重叠：只要有交集就处理
+      // 调整链接范围以适应当前文本
+      final clampedStart = linkStart.clamp(0, text.length);
+      final clampedEnd = linkEnd.clamp(0, text.length);
+
+      // 只有当调整后的范围有效时才添加
+      if (clampedStart < clampedEnd) {
+        linkRanges.add({
+          'start': clampedStart,
+          'end': clampedEnd,
+          'linkId': link['fullLinkId'] as String,
+        });
+      }
+    }
+
+    // 按起始位置排序
+    linkRanges.sort((a, b) => (a['start'] as int).compareTo(b['start'] as int));
+
+    // 将highlightSpans转换为字符级别的样式映射
+    final Map<int, TextStyle> charStyles = {};
+    int spanOffset = 0;
+    for (final span in highlightSpans) {
+      if (span is TextSpan && span.text != null) {
+        for (int i = 0; i < span.text!.length; i++) {
+          if (span.style != null) {
+            charStyles[spanOffset + i] = span.style!;
+          }
+        }
+        spanOffset += span.text!.length;
+      }
+    }
+
+    // 重新构建spans，将链接样式叠加到高亮上
+    final List<TextSpan> finalSpans = [];
+    int currentPos = 0;
+
+    for (final linkRange in linkRanges) {
+      final linkStart = linkRange['start'] as int;
+      final linkEnd = linkRange['end'] as int;
+      final linkId = linkRange['linkId'] as String;
+
+      // 添加链接前的文本（保留原有高亮）
+      if (linkStart > currentPos) {
+        _addSpansFromRange(finalSpans, text, currentPos, linkStart, charStyles);
+      }
+
+      // 添加链接span（蓝色下划线，保留高亮背景）
+      final linkText = text.substring(linkStart, linkEnd);
+      final baseStyle = charStyles[linkStart];
+
+      finalSpans.add(
+        TextSpan(
+          text: linkText,
+          style: TextStyle(
+            fontSize: _fontSize,
+            height: 1.1,
+            color: Colors.blue,
+            decoration: TextDecoration.underline,
+            decorationColor: Colors.blue,
+            backgroundColor: baseStyle?.backgroundColor, // 保留高亮背景色
+          ),
+          recognizer: TapGestureRecognizer()
+            ..onTapDown = (_) {
+              _lastTappedLink = true;
+              print('[BookReader] 点击链接: $linkId');
+              _handleLinkTap(linkId);
+            },
+        ),
+      );
+
+      currentPos = linkEnd;
+    }
+
+    // 添加剩余文本
+    if (currentPos < text.length) {
+      _addSpansFromRange(finalSpans, text, currentPos, text.length, charStyles);
+    }
+
+    return finalSpans;
+  }
+
+  /// 从字符样式映射中添加spans
+  void _addSpansFromRange(
+    List<TextSpan> spans,
+    String text,
+    int start,
+    int end,
+    Map<int, TextStyle> charStyles,
+  ) {
+    int segmentStart = start;
+    TextStyle? currentStyle = charStyles[start];
+
+    for (int i = start + 1; i <= end; i++) {
+      final newStyle = i < end ? charStyles[i] : null;
+
+      // 样式变化时，添加一个新的span
+      if (newStyle != currentStyle || i == end) {
+        if (segmentStart < i) {
+          spans.add(
+            TextSpan(
+              text: text.substring(segmentStart, i),
+              style:
+                  currentStyle ??
+                  TextStyle(
+                    fontSize: _fontSize,
+                    height: 1.1,
+                    color:
+                        Theme.of(context).textTheme.bodyMedium?.color ??
+                        Colors.black87,
+                  ),
+            ),
+          );
+        }
+        segmentStart = i;
+        currentStyle = newStyle;
+      }
     }
   }
 
@@ -1235,18 +1377,23 @@ class _BookReaderPageState extends State<BookReaderPage> {
     for (int i = 0; i < _pages.length; i++) {
       final page = _pages[i];
       if (page.chapterIndex == highlight.chapterIndex) {
-        // 计算该页面的文本范围
-        int pageStartOffset = _calculatePageStartOffset(page);
-        int pageEndOffset = pageStartOffset;
+        // 检查该页面的TextContent是否包含高亮的offset范围
+        bool foundInPage = false;
         for (final item in page.contentItems) {
           if (item is TextContent) {
-            pageEndOffset += item.text.length;
+            final textStart = item.startOffset;
+            final textEnd = textStart + item.text.length;
+
+            // 检查高亮是否在该TextContent范围内
+            if (highlight.startOffset >= textStart &&
+                highlight.startOffset < textEnd) {
+              foundInPage = true;
+              break;
+            }
           }
         }
 
-        // 检查高亮是否在该页面范围内
-        if (highlight.startOffset < pageEndOffset &&
-            highlight.endOffset > pageStartOffset) {
+        if (foundInPage) {
           setState(() {
             _currentPageIndex = i;
             _currentChapterIndex = page.chapterIndex;
@@ -1878,6 +2025,29 @@ class _BookReaderPageState extends State<BookReaderPage> {
           _totalPages = cachedPages.length;
           _isLoading = false;
           _isContentLoaded = true;
+
+          // 从 BookLoader 获取全局链接
+          _globalLinks.clear();
+          _globalLinks.addAll(_bookLoader.globalLinks);
+          print('[BookReader] 从缓存加载后复制了 ${_globalLinks.length} 个链接');
+
+          // 调试：打印第1章第0页的链接
+          final chapter1Page0Links = _globalLinks
+              .where(
+                (link) =>
+                    link['chapterIndex'] == 1 &&
+                    link['pageIndexInChapter'] == 0,
+              )
+              .take(3)
+              .toList();
+          print('[BookReader] 缓存加载后第1章第0页链接数: ${chapter1Page0Links.length}');
+          for (int i = 0; i < chapter1Page0Links.length; i++) {
+            final link = chapter1Page0Links[i];
+            print(
+              '[BookReader] 链接$i: pageIndexInChapter=${link['pageIndexInChapter']}, offset=${link['offset']}, length=${link['length']}',
+            );
+          }
+
           if (_totalPages > 0) {
             _currentPageIndex = 0;
             _currentChapterIndex = cachedPages[0].chapterIndex;
@@ -1988,12 +2158,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   Widget _buildPageContent(PageContent page, double availableHeight) {
     // availableHeight 已剔除顶部/底部控制区的高度，确保页面内容不超高
-    // 计算该页之前所有文本的累积偏移量
-    int cumulativeOffset = _calculatePageStartOffset(page);
 
-    // 调试：打印第1章的所有页面信息
-    if (page.chapterIndex == 1) {
-      print('[BookReader] 渲染第${page.pageIndexInChapter}页: chapterIndex=${page.chapterIndex}, contentItems数量=${page.contentItems.length}');
+    // 调试：打印页面信息
+    if (page.chapterIndex == 1 && page.pageIndexInChapter == 0) {
+      print(
+        '[BookReader] ========== 渲染第1章第${page.pageIndexInChapter}页 ==========',
+      );
     }
 
     return Padding(
@@ -2003,34 +2173,54 @@ class _BookReaderPageState extends State<BookReaderPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: page.contentItems.map((item) {
             if (item is TextContent) {
-              final textStartOffset = cumulativeOffset;
+              // TextContent的startOffset已经是章节内的全局偏移量
+              final textStartOffset = item.startOffset;
               final textEndOffset = textStartOffset + item.text.length;
-              cumulativeOffset = textEndOffset;
 
-              // 调试：打印第1章的所有 TextContent
-              if (page.chapterIndex == 1) {
-                print('[BookReader] 第${page.pageIndexInChapter}页 TextContent: textRange=[$textStartOffset, $textEndOffset), text="${item.text.substring(0, item.text.length > 50 ? 50 : item.text.length)}..."');
+              // 调试：打印第1章第0页的TextContent信息
+              if (page.chapterIndex == 1 && page.pageIndexInChapter == 0) {
+                print(
+                  '[BookReader] TextContent: textRange=[$textStartOffset, $textEndOffset), text="${item.text.substring(0, item.text.length > 30 ? 30 : item.text.length)}..."',
+                );
               }
 
               // 查找覆盖此文本范围内的链接
+              // 使用offset精确匹配（offset是章节内的全局偏移量）
               final linksInRange = _globalLinks.where((link) {
+                final linkChapter = link['chapterIndex'] as int?;
+                final linkPageIndex = link['pageIndexInChapter'] as int?;
                 final linkOffset = link['offset'] as int?;
                 final linkLength = link['length'] as int?;
-                final linkChapter = link['chapterIndex'] as int?;
-                if (linkOffset == null || linkLength == null || linkChapter == null) return false;
-                final linkEnd = linkOffset + linkLength;
-                final matches = linkChapter == page.chapterIndex &&
-                    linkEnd > textStartOffset &&
-                    linkOffset < textEndOffset;
-                if (page.chapterIndex == 1) {
-                  print('[BookReader] 第${page.pageIndexInChapter}页 textRange: [$textStartOffset, $textEndOffset), 链接: offset=$linkOffset, length=$linkLength, fullLinkId=${link['fullLinkId']}, matches=$matches');
+
+                // 首先检查章节是否匹配
+                if (linkChapter != page.chapterIndex) {
+                  return false;
                 }
+
+                // 然后检查页面索引是否匹配
+                if (linkPageIndex != page.pageIndexInChapter) {
+                  return false;
+                }
+
+                // 检查offset范围是否匹配
+                if (linkOffset == null || linkLength == null) {
+                  return false;
+                }
+
+                final linkEnd = linkOffset + linkLength;
+                final matches =
+                    linkEnd > textStartOffset && linkOffset < textEndOffset;
+
+                if (matches &&
+                    page.chapterIndex == 1 &&
+                    page.pageIndexInChapter == 0) {
+                  print(
+                    '[BookReader] 匹配到链接: text="${link['linkText']}", offset=$linkOffset, length=$linkLength',
+                  );
+                }
+
                 return matches;
               }).toList();
-
-              if (page.chapterIndex == 1) {
-                print('[BookReader] 第${page.pageIndexInChapter}页找到 ${linksInRange.length} 个匹配链接');
-              }
 
               // 构建带高亮的文本 spans
               final highlightedSpans = HighlightOperations.buildHighlightSpans(
@@ -2059,88 +2249,43 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   spans: highlightedSpans,
                   onTextSelected:
                       (selectedText, position, startOffset, endOffset) {
-                    _selectionStartOffset = startOffset;
-                    _selectionEndOffset = endOffset;
-                    _selectionChapterIndex = page.chapterIndex;
-                    _selectionPageIndex = _currentPageIndex;
+                        _selectionStartOffset = startOffset;
+                        _selectionEndOffset = endOffset;
+                        _selectionChapterIndex = page.chapterIndex;
+                        _selectionPageIndex = _currentPageIndex;
 
-                      // 检查是否选中了已有高亮/划线
-                      var existingHighlights =
-                          HighlightOperations.getHighlightsAtSelection(
-                            _highlights,
-                            page.chapterIndex,
-                            startOffset,
-                            endOffset,
-                          );
+                        // 检查是否选中了已有高亮/划线
+                        var existingHighlights =
+                            HighlightOperations.getHighlightsAtSelection(
+                              _highlights,
+                              page.chapterIndex,
+                              startOffset,
+                              endOffset,
+                            );
 
-                      _showTextToolbarAt(
-                        position,
-                        selectedText,
-                        existingHighlights: existingHighlights,
-                      );
-                    },
-                onSelectionCleared: () {
-                  if (_showTextToolbar) {
-                    _hideTextToolbar();
-                  }
-                },
-              );
-              }
-
-              // 有链接的情况，使用 Text.rich 渲染
-              final linkSpans = <InlineSpan>[];
-              int currentPos = 0;
-
-              for (final link in linksInRange) {
-                final linkOffset = (link['offset'] as int)!;
-                final linkLength = (link['length'] as int)!;
-                final linkStart = linkOffset - textStartOffset;
-                final linkEnd = linkStart + linkLength;
-                final linkText = item.text.substring(
-                  linkStart.clamp(0, item.text.length),
-                  linkEnd.clamp(0, item.text.length),
+                        _showTextToolbarAt(
+                          position,
+                          selectedText,
+                          existingHighlights: existingHighlights,
+                        );
+                      },
+                  onSelectionCleared: () {
+                    if (_showTextToolbar) {
+                      _hideTextToolbar();
+                    }
+                  },
+                );
+              } else {
+                // 有链接的情况，合并链接和高亮
+                final finalSpans = _mergeLinksAndHighlights(
+                  item.text,
+                  textStartOffset,
+                  highlightedSpans,
+                  linksInRange,
                 );
 
-                // 添加链接前的文本
-                if (linkStart > currentPos) {
-                  linkSpans.add(TextSpan(
-                    text: item.text.substring(currentPos, linkStart),
-                    style: TextStyle(
-                      fontSize: _fontSize,
-                      height: 1.1,
-                      color:
-                          Theme.of(context).textTheme.bodyMedium?.color ??
-                          Colors.black87,
-                    ),
-                  ));
-                }
-
-                // 添加链接
-                final linkId = link['fullLinkId'] as String;
-                linkSpans.add(TextSpan(
-                  text: linkText,
-                  style: TextStyle(
-                    fontSize: _fontSize,
-                    height: 1.1,
-                    color: Colors.blue,
-                    decoration: TextDecoration.underline,
-                    decorationColor: Colors.blue,
-                  ),
-                  recognizer: TapGestureRecognizer()
-                    ..onTapDown = (_) {
-                      _lastTappedLink = true;
-                      print('[BookReader] 点击链接: $linkId');
-                      _handleLinkTap(linkId);
-                    },
-                ));
-
-                currentPos = linkEnd;
-              }
-
-              // 添加剩余文本
-              if (currentPos < item.text.length) {
-                linkSpans.add(TextSpan(
-                  text: item.text.substring(currentPos),
+                return SelectableTextWithToolbar(
+                  text: item.text,
                   style: TextStyle(
                     fontSize: _fontSize,
                     height: 1.1,
@@ -2148,16 +2293,40 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         Theme.of(context).textTheme.bodyMedium?.color ??
                         Colors.black87,
                   ),
-                ));
-              }
+                  textStartOffset: textStartOffset,
+                  chapterIndex: page.chapterIndex,
+                  pageIndex: _currentPageIndex,
+                  spans: finalSpans,
+                  onTextSelected:
+                      (selectedText, position, startOffset, endOffset) {
+                        _selectionStartOffset = startOffset;
+                        _selectionEndOffset = endOffset;
+                        _selectionChapterIndex = page.chapterIndex;
+                        _selectionPageIndex = _currentPageIndex;
 
-              return Text.rich(
-                TextSpan(
-                  children: linkSpans,
-                ),
-              );
+                        // 检查是否选中了已有高亮/划线
+                        var existingHighlights =
+                            HighlightOperations.getHighlightsAtSelection(
+                              _highlights,
+                              page.chapterIndex,
+                              startOffset,
+                              endOffset,
+                            );
+
+                        _showTextToolbarAt(
+                          position,
+                          selectedText,
+                          existingHighlights: existingHighlights,
+                        );
+                      },
+                  onSelectionCleared: () {
+                    if (_showTextToolbar) {
+                      _hideTextToolbar();
+                    }
+                  },
+                );
+              }
             } else if (item is HeaderContent) {
-              cumulativeOffset += item.text.length;
               final fontSize =
                   32.0 - (item.level - 1) * 4; // h1=32, h2=28, ..., h6=12
               final fontWeight = item.level <= 2
@@ -2392,50 +2561,55 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 ),
               ),
               // 翻页手势层（放在内容层之上，但控制栏之下）
-              GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTapDown: (details) {
-                  // 每次新的点击开始时重置标志
-                  print('[BookReader] 翻页手势 onTapDown: 重置 _lastTappedLink');
-                  _lastTappedLink = false;
-                },
-                onTapUp: (details) {
-                  // 如果点击了链接，不处理翻页
-                  if (_lastTappedLink) {
-                    print('[BookReader] 翻页手势 onTapUp: 检测到链接点击，跳过翻页');
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTapDown: (details) {
+                    // 每次新的点击开始时重置标志
+                    print('[BookReader] 翻页手势 onTapDown: 重置 _lastTappedLink');
                     _lastTappedLink = false;
-                    return;
-                  }
+                  },
+                  onTapUp: (details) {
+                    // 延迟检查，给链接点击事件足够的时间设置标志
+                    Future.delayed(const Duration(milliseconds: 50), () {
+                      // 如果点击了链接，不处理翻页
+                      if (_lastTappedLink) {
+                        print('[BookReader] 翻页手势 onTapUp: 检测到链接点击，跳过翻页');
+                        _lastTappedLink = false;
+                        return;
+                      }
 
-                  final screenWidth = MediaQuery.of(context).size.width;
-                  final screenHeight = MediaQuery.of(context).size.height;
-                  final tapX = details.globalPosition.dx;
-                  final tapY = details.globalPosition.dy;
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      final screenHeight = MediaQuery.of(context).size.height;
+                      final tapX = details.globalPosition.dx;
+                      final tapY = details.globalPosition.dy;
 
-                  // 如果控制栏显示，点击任何位置都隐藏控制栏
-                  if (_showControls) {
-                    setState(() {
-                      _showControls = false;
+                      // 如果控制栏显示，点击任何位置都隐藏控制栏
+                      if (_showControls) {
+                        setState(() {
+                          _showControls = false;
+                        });
+                        return;
+                      }
+
+                      // 点击左右区域翻页
+                      if (tapX < screenWidth * 0.2) {
+                        print('[BookReader] 翻页: 上一页');
+                        _previousPage();
+                      } else if (tapX > screenWidth * 0.8) {
+                        print('[BookReader] 翻页: 下一页');
+                        _nextPage();
+                      } else if (tapY > screenHeight * 0.2 &&
+                          tapY < screenHeight * 0.8) {
+                        // 点击中间区域显示控制栏
+                        print('[BookReader] 显示控制栏');
+                        setState(() {
+                          _showControls = true;
+                        });
+                      }
                     });
-                    return;
-                  }
-
-                  // 点击左右区域翻页
-                  if (tapX < screenWidth * 0.2) {
-                    print('[BookReader] 翻页: 上一页');
-                    _previousPage();
-                  } else if (tapX > screenWidth * 0.8) {
-                    print('[BookReader] 翻页: 下一页');
-                    _nextPage();
-                  } else if (tapY > screenHeight * 0.2 &&
-                      tapY < screenHeight * 0.8) {
-                    // 点击中间区域显示控制栏
-                    print('[BookReader] 显示控制栏');
-                    setState(() {
-                      _showControls = true;
-                    });
-                  }
-                },
+                  },
+                ),
               ),
               // 底部控制栏（放在最上层，可以响应点击事件）
               if (_showControls)

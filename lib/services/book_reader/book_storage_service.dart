@@ -222,4 +222,37 @@ class BookStorageService {
       print('迁移书籍数据失败: $e');
     }
   }
+
+  // ==================== 删除数据 ====================
+
+  /// 删除书籍的所有相关数据
+  Future<void> deleteBookData(String bookPath) async {
+    try {
+      final prefs = await _preferences;
+
+      // 删除阅读位置
+      final positionKey = '$_readingPositionPrefix${bookPath.hashCode}';
+      await prefs.remove(positionKey);
+
+      // 删除书签
+      final bookmarksKey = '$_bookmarksPrefix${bookPath.hashCode}';
+      await prefs.remove(bookmarksKey);
+
+      // 删除高亮
+      final highlightsKey = '$_highlightsPrefix${bookPath.hashCode}';
+      await prefs.remove(highlightsKey);
+
+      // 删除字体大小
+      final fontSizeKey = 'book_font_size_${bookPath.hashCode}';
+      await prefs.remove(fontSizeKey);
+
+      // 如果是最后阅读的书籍，清除记录
+      final lastReadBook = prefs.getString(_lastReadBookKey);
+      if (lastReadBook == bookPath) {
+        await prefs.remove(_lastReadBookKey);
+      }
+    } catch (e) {
+      print('删除书籍数据失败: $e');
+    }
+  }
 }

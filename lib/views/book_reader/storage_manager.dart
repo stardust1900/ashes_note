@@ -267,4 +267,36 @@ class StorageManager {
       return null;
     }
   }
+
+  /// 删除书籍的所有相关数据
+  static Future<void> deleteBookData(String bookPath) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final normalizedPath = bookPath.replaceAll('\\', '/');
+
+      // 删除阅读位置
+      final positionKey = getBookKey(bookPath);
+      await prefs.remove(positionKey);
+
+      // 删除书签
+      final bookmarksKey = _getBookmarksKey(bookPath);
+      await prefs.remove(bookmarksKey);
+
+      // 删除高亮
+      final highlightsKey = '$_highlightsPrefix${normalizedPath.hashCode}';
+      await prefs.remove(highlightsKey);
+
+      // 删除字体大小
+      final fontSizeKey = 'book_font_size_${normalizedPath.hashCode}';
+      await prefs.remove(fontSizeKey);
+
+      // 如果是最后阅读的书籍，清除记录
+      final lastReadBook = prefs.getString(_lastReadBookKey);
+      if (lastReadBook == bookPath) {
+        await prefs.remove(_lastReadBookKey);
+      }
+    } catch (e) {
+      print('删除书籍数据失败: $e');
+    }
+  }
 }
