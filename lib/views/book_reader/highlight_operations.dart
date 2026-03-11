@@ -132,7 +132,7 @@ class HighlightOperations {
           fontWeight: FontWeight.bold,
         );
         if (hasUnderline) {
-          style = style!.copyWith(
+          style = style.copyWith(
             decoration: TextDecoration.underline,
             decorationColor: Colors.red,
             decorationThickness: 2.5,
@@ -166,7 +166,8 @@ class HighlightOperations {
   /// 合并重叠的高亮和划线
   static List<MergedHighlight> mergeOverlappingHighlights(
     List<Highlight> highlights,
-    String Function(int chapterIndex, int startOffset, int endOffset) getTextForRange,
+    String Function(int chapterIndex, int startOffset, int endOffset)
+    getTextForRange,
   ) {
     if (highlights.isEmpty) return [];
 
@@ -285,7 +286,8 @@ class HighlightOperations {
   static List<ChapterGroup> groupHighlightsByChapter(
     List<Highlight> highlights,
     String Function(int chapterIndex) getChapterTitle,
-    String Function(int chapterIndex, int startOffset, int endOffset) getTextForRange,
+    String Function(int chapterIndex, int startOffset, int endOffset)
+    getTextForRange,
   ) {
     // 先按章节索引排序
     final sorted = List<Highlight>.from(highlights)

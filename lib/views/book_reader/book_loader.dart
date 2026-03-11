@@ -812,9 +812,6 @@ class BookLoader {
                     });
 
                     // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
-                    final isFootnote =
-                        hashIndex != -1 &&
-                        !(href.contains('/') || href.contains('.html'));
 
                     // 所有链接都记录文本（包括脚注链接）
                     if (linkText.isNotEmpty) {
@@ -1001,9 +998,6 @@ class BookLoader {
                           });
 
                           // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
-                          final isFootnote =
-                              hashIndex != -1 &&
-                              !(href.contains('/') || href.contains('.html'));
 
                           // 所有链接都记录文本（包括脚注链接）
                           if (linkText.isNotEmpty) {
@@ -1165,17 +1159,15 @@ class BookLoader {
                 }
                 // 检查 grandchild 是否包含脚注链接
                 bool hasFootnoteLinkInGrandchild = false;
-                if (grandchild is html_dom.Element) {
-                  final footnoteLinks = grandchild.querySelectorAll(
-                    'a[href*="#"]',
-                  );
-                  for (final link in footnoteLinks) {
-                    final href = link.attributes['href'] ?? '';
-                    if (href.contains('#') &&
-                        !(href.contains('/') || href.contains('.html'))) {
-                      hasFootnoteLinkInGrandchild = true;
-                      break;
-                    }
+                final footnoteLinks = grandchild.querySelectorAll(
+                  'a[href*="#"]',
+                );
+                for (final link in footnoteLinks) {
+                  final href = link.attributes['href'] ?? '';
+                  if (href.contains('#') &&
+                      !(href.contains('/') || href.contains('.html'))) {
+                    hasFootnoteLinkInGrandchild = true;
+                    break;
                   }
                 }
                 if (!hasFootnoteLinkInGrandchild) {
@@ -1409,9 +1401,6 @@ class BookLoader {
             });
 
             // 章节内脚注链接（有 # 且无跨章节标识）
-            final isFootnote =
-                hashIndex != -1 &&
-                !(href.contains('/') || href.contains('.html'));
 
             // 所有链接都记录文本（包括脚注链接）
             if (linkText.isNotEmpty) {

@@ -228,7 +228,7 @@ class FileUtilImpl implements FileUtil {
       // 修复迭代逻辑，正确处理 JavaScript 异步迭代器
       final entriesIterator = _createAsyncIterator(targetHandle.values());
       await for (final entry in entriesIterator) {
-        final handle = entry as FileSystemHandle;
+        final handle = entry;
         final name = handle.name.toDart;
         final kind = handle.kind.toDart;
         if (kind == 'file' && type == 'file') {
@@ -308,7 +308,7 @@ class FileUtilImpl implements FileUtil {
       // 修复迭代逻辑，正确处理 JavaScript 异步迭代器
       final entriesIterator = _createAsyncIterator(targetHandle.values());
       await for (final entry in entriesIterator) {
-        final handle = entry as FileSystemHandle;
+        final handle = entry;
         final name = handle.name.toDart;
         final kind = handle.kind.toDart;
         if (kind == 'file') {
