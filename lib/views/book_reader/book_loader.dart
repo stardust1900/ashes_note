@@ -542,7 +542,12 @@ class BookLoader {
               '$htmlFileName child $child node.localName:${child.localName}',
             );
           }
-          if (child.localName == 'img' || child.localName == 'image') {
+          if (child.localName == 'br') {
+            // 处理换行标签 - 添加换行符到文本
+            if (blockText.isNotEmpty) {
+              blockText.write('\n');
+            }
+          } else if (child.localName == 'img' || child.localName == 'image') {
             // 遇到图片，先保存之前的文本
             final imageSource = extractImageSource(child);
             if (imageSource != null && imageSource.isNotEmpty) {
@@ -588,7 +593,9 @@ class BookLoader {
               // 计算链接偏移量（在决定是否添加文本之前）
               // 链接文本会被添加到 blockText 的末尾（前面可能需要空格）
               // 所以 offset = plainTextBuffer.length + blockText.length + (前面有文本?1:0)
-              final linkOffset = plainTextBuffer.length + blockText.length +
+              final linkOffset =
+                  plainTextBuffer.length +
+                  blockText.length +
                   (blockText.isNotEmpty ? 1 : 0);
 
               // 所有链接都添加到 _globalLinks
@@ -666,7 +673,9 @@ class BookLoader {
 
                       // 添加到 _globalLinks
                       // offset 需要考虑 blockText 的长度和可能的空格
-                      final linkOffset = plainTextBuffer.length + blockText.length +
+                      final linkOffset =
+                          plainTextBuffer.length +
+                          blockText.length +
                           (blockText.isNotEmpty ? 1 : 0);
                       _globalLinks.add({
                         'chapterIndex': chapterIndex,
@@ -735,7 +744,12 @@ class BookLoader {
           else {
             for (final grandchild in child.nodes) {
               if (grandchild is html_dom.Element) {
-                if (grandchild.localName == 'img' ||
+                if (grandchild.localName == 'br') {
+                  // 处理换行标签
+                  if (blockText.isNotEmpty) {
+                    blockText.write('\n');
+                  }
+                } else if (grandchild.localName == 'img' ||
                     grandchild.localName == 'image') {
                   // 遇到图片，先保存之前的文本
                   final imageSource = extractImageSource(grandchild);
@@ -777,7 +791,9 @@ class BookLoader {
 
                     // 所有链接都添加到 _globalLinks
                     // offset 需要考虑 blockText 的长度和可能的空格
-                    final linkOffset = plainTextBuffer.length + blockText.length +
+                    final linkOffset =
+                        plainTextBuffer.length +
+                        blockText.length +
                         (blockText.isNotEmpty ? 1 : 0);
                     _globalLinks.add({
                       'chapterIndex': chapterIndex,
@@ -851,7 +867,9 @@ class BookLoader {
 
                             // 添加到 _globalLinks
                             // offset 需要考虑 blockText 的长度和可能的空格
-                            final linkOffset = plainTextBuffer.length + blockText.length +
+                            final linkOffset =
+                                plainTextBuffer.length +
+                                blockText.length +
                                 (blockText.isNotEmpty ? 1 : 0);
                             _globalLinks.add({
                               'chapterIndex': chapterIndex,
@@ -917,7 +935,13 @@ class BookLoader {
                 else {
                   for (final gc in grandchild.nodes) {
                     if (gc is html_dom.Element) {
-                      if (gc.localName == 'img' || gc.localName == 'image') {
+                      if (gc.localName == 'br') {
+                        // 处理换行标签
+                        if (blockText.isNotEmpty) {
+                          blockText.write('\n');
+                        }
+                      } else if (gc.localName == 'img' ||
+                          gc.localName == 'image') {
                         final imageSource = extractImageSource(gc);
                         if (imageSource != null && imageSource.isNotEmpty) {
                           if (blockText.isNotEmpty) {
@@ -956,7 +980,9 @@ class BookLoader {
 
                           // 所有链接都添加到 _globalLinks
                           // offset 需要考虑 blockText 的长度和可能的空格
-                          final linkOffset = plainTextBuffer.length + blockText.length +
+                          final linkOffset =
+                              plainTextBuffer.length +
+                              blockText.length +
                               (blockText.isNotEmpty ? 1 : 0);
                           _globalLinks.add({
                             'chapterIndex': chapterIndex,
@@ -1032,7 +1058,9 @@ class BookLoader {
 
                                   // 添加到 _globalLinks
                                   // offset 需要考虑 blockText 的长度和可能的空格
-                                  final linkOffset = plainTextBuffer.length + blockText.length +
+                                  final linkOffset =
+                                      plainTextBuffer.length +
+                                      blockText.length +
                                       (blockText.isNotEmpty ? 1 : 0);
                                   _globalLinks.add({
                                     'chapterIndex': chapterIndex,
@@ -1257,7 +1285,23 @@ class BookLoader {
     // 递归遍历 DOM 树
     void traverseNode(html_dom.Node node) {
       if (node is html_dom.Element) {
-        if (node.localName == 'img' || node.localName == 'image') {
+        if (node.localName == 'br') {
+          // 处理换行标签 - 添加换行符
+          if (plainTextBuffer.isNotEmpty) {
+            plainTextBuffer.write('\n');
+            // 如果最后一个item是TextContent，将换行符添加到其中
+            if (items.isNotEmpty && items.last is TextContent) {
+              final lastText = items.last as TextContent;
+              items.removeLast();
+              items.add(
+                TextContent(
+                  text: '${lastText.text}\n',
+                  startOffset: lastText.startOffset,
+                ),
+              );
+            }
+          }
+        } else if (node.localName == 'img' || node.localName == 'image') {
           // 根级别的图片
           final src = extractImageSource(node);
           if (src != null && src.isNotEmpty) {
@@ -1296,7 +1340,23 @@ class BookLoader {
           // 段落 - 直接处理
           processBlockElement(node, isParagraph: true);
         } else if (node.localName == 'div') {
-          // div - 只递归处理其子节点，不作为块级元素处理
+          // div 处理前添加换行
+          if (plainTextBuffer.isNotEmpty &&
+              !plainTextBuffer.toString().endsWith('\n')) {
+            plainTextBuffer.write('\n');
+            // 如果最后一个item是TextContent，将换行符添加到其中
+            if (items.isNotEmpty && items.last is TextContent) {
+              final lastText = items.last as TextContent;
+              items.removeLast();
+              items.add(
+                TextContent(
+                  text: '${lastText.text}\n',
+                  startOffset: lastText.startOffset,
+                ),
+              );
+            }
+          }
+          // div - 递归处理其子节点，处理完后添加换行
           for (final child in node.nodes) {
             traverseNode(child);
           }
@@ -1324,8 +1384,12 @@ class BookLoader {
 
             // 计算链接偏移量
             // 如果 plainTextBuffer 不为空且不以换行符结尾，会先添加一个空格
-            final linkOffset = plainTextBuffer.length +
-                (plainTextBuffer.isNotEmpty && !plainTextBuffer.toString().endsWith('\n') ? 1 : 0);
+            final linkOffset =
+                plainTextBuffer.length +
+                (plainTextBuffer.isNotEmpty &&
+                        !plainTextBuffer.toString().endsWith('\n')
+                    ? 1
+                    : 0);
 
             // 所有链接都添加到 _globalLinks
             _globalLinks.add({
@@ -1414,9 +1478,7 @@ class BookLoader {
     final List<ContentItem> mergedItems = [];
     for (final item in items) {
       if (item is TextContent) {
-        final lastItem = mergedItems.isNotEmpty
-            ? mergedItems.last
-            : null;
+        final lastItem = mergedItems.isNotEmpty ? mergedItems.last : null;
         if (lastItem is TextContent) {
           // 合并到上一个 TextContent
           final mergedText = '${lastItem.text}${item.text}';
