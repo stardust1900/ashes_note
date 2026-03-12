@@ -2101,13 +2101,35 @@ class _BookReaderPageState extends State<BookReaderPage> {
       _isContentLoaded = false;
     });
 
+    // 处理页面（会自动保存缓存）
     await _bookLoader.processPages(_epubBook!, context, 0);
 
-    if (mounted) {
-      setState(() {
-        _isProcessingPages = false;
-        _isContentLoaded = true;
-      });
+    // 处理完成后，从缓存重新加载页面
+    // 这样可以确保首次加载和后续加载的一致性
+    final cachedPages = await _bookLoader.loadPagesFromCache();
+
+    if (cachedPages != null && cachedPages.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _pages = cachedPages;
+          _totalPages = cachedPages.length;
+          _isProcessingPages = false;
+          _isContentLoaded = true;
+
+          // 从 BookLoader 获取全局链接
+          _globalLinks.clear();
+          _globalLinks.addAll(_bookLoader.globalLinks);
+          print('[BookReader] 从缓存加载后复制了 ${_globalLinks.length} 个链接');
+        });
+      }
+    } else {
+      print('[BookReader] 警告：处理完成后无法从缓存加载页面');
+      if (mounted) {
+        setState(() {
+          _isProcessingPages = false;
+          _isContentLoaded = false;
+        });
+      }
     }
   }
 

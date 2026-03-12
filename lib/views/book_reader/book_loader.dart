@@ -37,10 +37,6 @@ class BookLoader {
   /// 字体大小
   double fontSize = 16;
 
-  /// 文本行数缓存（key: 文本长度+宽度, value: 估算行数）
-  static final Map<String, int> _textLinesCache = {};
-  static const int _maxLinesCacheSize = 500;
-
   /// 字符容纳数缓存
   static final Map<String, int> _fitCharsCache = {};
   static const int _maxFitCharsCacheSize = 500;
@@ -744,7 +740,26 @@ class BookLoader {
           else {
             for (final grandchild in child.nodes) {
               if (grandchild is html_dom.Element) {
-                if (grandchild.localName == 'br') {
+                if (grandchild.localName == 'div') {
+                  // 遇到嵌套的 div，先保存当前文本
+                  if (blockText.isNotEmpty) {
+                    blockItems.add(
+                      TextContent(
+                        text: blockText.toString().trim(),
+                        startOffset: plainTextBuffer.length,
+                      ),
+                    );
+                    blockText.clear();
+                  }
+                  // 递归处理嵌套的 div
+                  processBlockElement(grandchild);
+                  // 继续添加换行符到 blockText，作为分隔
+                  if (blockText.isEmpty) {
+                    blockText.write('\n');
+                  } else {
+                    blockText.write('\n\n');
+                  }
+                } else if (grandchild.localName == 'br') {
                   // 处理换行标签
                   if (blockText.isNotEmpty) {
                     blockText.write('\n');
@@ -932,7 +947,20 @@ class BookLoader {
                 else {
                   for (final gc in grandchild.nodes) {
                     if (gc is html_dom.Element) {
-                      if (gc.localName == 'br') {
+                      if (gc.localName == 'div') {
+                        // 遇到嵌套的 div，先保存当前文本，然后添加换行符
+                        if (blockText.isNotEmpty) {
+                          blockItems.add(
+                            TextContent(
+                              text: blockText.toString().trim(),
+                              startOffset: plainTextBuffer.length,
+                            ),
+                          );
+                          blockText.clear();
+                        }
+                        // 添加换行符
+                        blockText.write('\n');
+                      } else if (gc.localName == 'br') {
                         // 处理换行标签
                         if (blockText.isNotEmpty) {
                           blockText.write('\n');
@@ -1193,35 +1221,27 @@ class BookLoader {
         }
       }
 
-      // 先保存剩余文本
+      // 先保存剩余文本（不 trim，保留换行符）
       if (blockText.isNotEmpty) {
         blockItems.add(
           TextContent(
-            text: blockText.toString().trim(),
+            text: blockText.toString(),
             startOffset: plainTextBuffer.length,
           ),
         );
       }
 
-      // 合并连续的 TextContent 以减少碎片化
-      final List<ContentItem> mergedBlockItems = [];
-      for (final blockItem in blockItems) {
-        if (blockItem is TextContent) {
-          final lastItem = mergedBlockItems.isNotEmpty
-              ? mergedBlockItems.last
-              : null;
-          if (lastItem is TextContent) {
-            // 合并到上一个 TextContent
-            final mergedText = '${lastItem.text}${blockItem.text}';
-            mergedBlockItems.removeLast();
-            mergedBlockItems.add(
-              TextContent(text: mergedText, startOffset: lastItem.startOffset),
-            );
-          } else {
-            mergedBlockItems.add(blockItem);
-          }
+      // 不再在此处合并 TextContent，而是在分页阶段只合并同一页面的 TextContent
+      // 直接使用 blockItems，不进行合并
+      final List<ContentItem> mergedBlockItems = blockItems;
+
+      print('[BookLoader] processBlockElement 完成: blockItems数量=${blockItems.length}');
+      for (int i = 0; i < blockItems.length && i < 5; i++) {
+        final item = blockItems[i];
+        if (item is TextContent) {
+          print('[BookLoader]   [$i] TextContent: 长度=${item.text.length}, 文本="${item.text.substring(0, item.text.length > 20 ? 20 : item.text.length)}..."');
         } else {
-          mergedBlockItems.add(blockItem);
+          print('[BookLoader]   [$i] ${item.runtimeType}');
         }
       }
 
@@ -1348,7 +1368,7 @@ class BookLoader {
               );
             }
           }
-          // div - 递归处理其子节点，处理完后添加换行
+          // div - 递归处理其子节点
           for (final child in node.nodes) {
             traverseNode(child);
           }
@@ -1492,36 +1512,31 @@ class BookLoader {
 
     textPainterCache ??= TextPainter(textDirection: TextDirection.ltr);
 
-    // 获取字符平均宽度
-    textPainterCache!.text = TextSpan(text: '中', style: style);
-    textPainterCache!.layout();
-    final charWidth = textPainterCache!.width;
+    // 先按换行符分割文本，然后逐段计算行数
+    final lines = text.split('\n');
+    int totalLines = 0;
 
-    // 估算行数
-    final estimatedCharsPerLine = (maxWidth / charWidth).floor();
-    if (estimatedCharsPerLine <= 0) return text.length;
-
-    // 对长文本使用缓存（基于文本长度和宽度的近似值）
-    if (text.length >= 500) {
-      final cacheKey = '${text.length}_${estimatedCharsPerLine}';
-      if (_textLinesCache.containsKey(cacheKey)) {
-        return _textLinesCache[cacheKey]!;
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.isEmpty) {
+        // 空行也算一行
+        totalLines += 1;
+      } else {
+        // 使用 TextPainter 计算这一行在指定宽度下占多少行
+        textPainterCache!.text = TextSpan(text: line, style: style);
+        textPainterCache!.layout(maxWidth: maxWidth);
+        final lineMetrics = textPainterCache!.computeLineMetrics();
+        totalLines += lineMetrics.length;
       }
 
-      final estimatedLines = (text.length / estimatedCharsPerLine).ceil();
-
-      // 缓存结果（控制缓存大小）
-      if (_textLinesCache.length < _maxLinesCacheSize) {
-        _textLinesCache[cacheKey] = estimatedLines;
+      if (i == lines.length - 1) {
+        print(
+          '[BookLoader] calculateTextLines: totalLines=$totalLines, linesCount=${lines.length}',
+        );
       }
-
-      return estimatedLines;
     }
 
-    // 短文本进行精确计算
-    textPainterCache!.text = TextSpan(text: text, style: style);
-    textPainterCache!.layout(maxWidth: maxWidth);
-    return textPainterCache!.computeLineMetrics().length;
+    return totalLines;
   }
 
   /// 使用 TextPainter 计算文本在指定宽度下能容纳的最大字符数（带缓存）
@@ -1559,12 +1574,28 @@ class BookLoader {
         return _fitCharsCache[cacheKey]!.clamp(1, text.length);
       }
 
-      // 对长文本直接返回估算值并缓存
-      if (_fitCharsCache.length < _maxFitCharsCacheSize) {
-        _fitCharsCache[cacheKey] = estimatedChars;
-      }
+      // 对中等长度文本进行精确校正后再缓存
+      textPainterCache!.text = TextSpan(
+        text: text.substring(0, estimatedChars.clamp(0, text.length)),
+        style: style,
+      );
+      textPainterCache!.layout(maxWidth: maxWidth);
+      final lineMetrics = textPainterCache!.computeLineMetrics();
 
-      return estimatedChars.clamp(1, text.length);
+      if (lineMetrics.length <= maxLines) {
+        final corrected = estimatedChars;
+        if (_fitCharsCache.length < _maxFitCharsCacheSize) {
+          _fitCharsCache[cacheKey] = corrected;
+        }
+        return corrected.clamp(1, text.length);
+      } else {
+        // 超出，需要减少
+        final corrected = (estimatedChars * 0.8).floor().clamp(1, text.length);
+        if (_fitCharsCache.length < _maxFitCharsCacheSize) {
+          _fitCharsCache[cacheKey] = corrected;
+        }
+        return corrected;
+      }
     }
 
     // 对短文本进行精确校正（< 1000 字符）
@@ -1678,6 +1709,7 @@ class BookLoader {
 
     // 每页可用高度（减去 padding）
     final usableHeight = availableHeight - 140 - kToolbarHeight;
+    final linesPerPage = (usableHeight / lineHeight).floor();
 
     List<ContentItem> currentPageItems = [];
     double currentPageHeight = 0;
@@ -1714,6 +1746,10 @@ class BookLoader {
           final remainingHeight = usableHeight - currentPageHeight;
           final remainingLines = (remainingHeight / lineHeight).floor();
 
+          print(
+            '[BookLoader] 循环处理: currentPageHeight=$currentPageHeight, usableHeight=$usableHeight, remainingHeight=$remainingHeight, remainingLines=$remainingLines',
+          );
+
           if (remainingLines <= 0) {
             flushCurrentPage();
             continue;
@@ -1722,67 +1758,137 @@ class BookLoader {
           // 使用估算快速判断，减少精确计算次数
           final estimatedFit = remainingLines * charsPerLine;
 
-          if (estimatedFit >= remaining.length) {
-            // 估算可以放下，直接添加
-            currentPageItems.add(
-              TextContent(text: remaining, startOffset: currentOffset),
+          print(
+            '[BookLoader] 分页前判断: remaining.length=${remaining.length}, estimatedFit=$estimatedFit, remainingLines=$remainingLines, charsPerLine=$charsPerLine, newlineCount=${remaining.split('\n').length}',
+          );
+
+          // 精确计算实际行数（不管估算结果如何）
+          final actualLines = calculateTextLines(remaining, availableWidth, textStyle);
+
+          print(
+            '[BookLoader] 分页判断: remaining.length=${remaining.length}, estimatedFit=$estimatedFit, remainingLines=$remainingLines, actualLines=$actualLines',
+          );
+
+          if (actualLines <= remainingLines) {
+            print(
+              '[BookLoader] 可以放下: actualLines=$actualLines <= remainingLines=$remainingLines，不分割文本',
             );
-
-            // 只对短文本进行精确行数计算
-            final actualLines = remaining.length < 1000
-                ? calculateTextLines(remaining, availableWidth, textStyle)
-                : (remaining.length / charsPerLine).ceil();
-
-            currentPageHeight += actualLines * lineHeight;
-            remaining = '';
-          } else {
-            // 需要分割文本，使用优化的计算方法
-            final fitChars = calculateFitChars(
-              remaining,
-              availableWidth,
-              remainingLines,
-              textStyle,
-            );
-
-            if (fitChars <= 0) {
-              // 无法分割，强制换页
-              flushCurrentPage();
-              continue;
-            }
-
-            // 尝试在单词边界处截断
-            int cut = fitChars;
-            if (cut > 0 && cut < remaining.length) {
-              final sub = remaining.substring(0, cut);
-              final lastSpace = sub.lastIndexOf(' ');
-              if (lastSpace > (cut * 0.6).floor()) {
-                cut = lastSpace;
+              // 确实可以放下，尝试与上一个 TextContent 合并（同一页面内）
+              bool merged = false;
+              if (currentPageItems.isNotEmpty && currentPageItems.last is TextContent) {
+                final lastText = currentPageItems.last as TextContent;
+                // 直接拼接，不添加额外分隔符
+                // 换行符已经在 remaining 中
+                final mergedText = '${lastText.text}$remaining';
+                currentPageItems.removeLast();
+                currentPageItems.add(
+                  TextContent(text: mergedText, startOffset: lastText.startOffset),
+                );
+                merged = true;
               }
+
+              if (!merged) {
+                currentPageItems.add(
+                  TextContent(text: remaining, startOffset: currentOffset),
+                );
+              }
+
+              currentPageHeight += actualLines * lineHeight;
+              remaining = '';
+            } else {
+              print(
+                '[BookLoader] 需要分割: actualLines=$actualLines > remainingLines=$remainingLines',
+              );
+              // 实际行数超过剩余行数，需要按照换行符分割
+              // 按换行符分割文本
+              final lines = remaining.split('\n');
+              int usedLines = 0;
+              int cut = 0;
+
+              print(
+                '[BookLoader] 开始分割: lines.length=${lines.length}, remainingLines=$remainingLines',
+              );
+
+              // 逐行添加，直到填满当前页面
+              for (int i = 0; i < lines.length; i++) {
+                final line = lines[i];
+                print('[BookLoader] 处理第 $i 行: isEmpty=${line.isEmpty}, usedLines=$usedLines/$remainingLines');
+                if (line.isEmpty) {
+                  // 空行也算一行
+                  usedLines += 1;
+                } else {
+                  // 使用 TextPainter 计算这一行在指定宽度下占多少行
+                  textPainterCache!.text = TextSpan(text: line, style: textStyle);
+                  textPainterCache!.layout(maxWidth: availableWidth);
+                  final lineMetrics = textPainterCache!.computeLineMetrics();
+                  usedLines += lineMetrics.length;
+                }
+
+                // 检查是否超出剩余行数
+                if (usedLines > remainingLines && i > 0) {
+                  // 已超出，回退到上一行
+                  print('[BookLoader] 超出行数限制，在第 $i 行停止');
+                  break;
+                }
+
+                // 更新截断位置 - 找到当前行对应的换行符位置
+                // 注意：split('\n') 会在每个换行符处分割，所以需要找到第 i+1 个换行符的位置
+                if (i < lines.length - 1) {
+                  // 不是最后一行，找到第 i+1 个换行符
+                  int newlineCount = 0;
+                  int pos = 0;
+                  while (pos < remaining.length) {
+                    if (remaining[pos] == '\n') {
+                      newlineCount++;
+                      if (newlineCount == i + 1) {
+                        cut = pos + 1;
+                        break;
+                      }
+                    }
+                    pos++;
+                  }
+                } else {
+                  // 最后一行，包含所有剩余文本
+                  cut = remaining.length;
+                }
+              }
+
+              if (cut <= 0) {
+                // 无法分割，强制换页
+                flushCurrentPage();
+                continue;
+              }
+
+              // 截取当前页面的文本
+              // 不使用 trimRight，保留末尾的换行符，确保连续空行能正确显示
+              String part = remaining.substring(0, cut);
+
+              // 尝试与上一个 TextContent 合并（同一页面内）
+              bool merged = false;
+              if (currentPageItems.isNotEmpty && currentPageItems.last is TextContent) {
+                final lastText = currentPageItems.last as TextContent;
+                final mergedText = '${lastText.text}$part';
+                currentPageItems.removeLast();
+                currentPageItems.add(
+                  TextContent(text: mergedText, startOffset: lastText.startOffset),
+                );
+                merged = true;
+              }
+
+              if (!merged) {
+                currentPageItems.add(
+                  TextContent(text: part, startOffset: currentOffset),
+                );
+              }
+
+              currentPageHeight += usedLines * lineHeight;
+              currentOffset += part.length;
+              // 不使用 trimLeft，保留开头的空行
+              remaining = remaining.substring(cut);
+
+              flushCurrentPage();
             }
-
-            cut = cut.clamp(1, remaining.length);
-            String part = remaining.substring(0, cut).trimRight();
-            if (part.isEmpty) {
-              part = remaining.substring(0, 1);
-              cut = 1;
-            }
-
-            currentPageItems.add(
-              TextContent(text: part, startOffset: currentOffset),
-            );
-
-            // 使用估算计算行数
-            final partLines = part.length < 1000
-                ? calculateTextLines(part, availableWidth, textStyle)
-                : (part.length / charsPerLine).ceil();
-
-            currentPageHeight += partLines * lineHeight;
-            currentOffset += part.length;
-            remaining = remaining.substring(cut).trimLeft();
-
-            flushCurrentPage();
           }
-        }
       } else if (item is ImageContent) {
         // 图片高度估算（基于可用高度的 40%），额外增加 4 行空间作为边距
         final extraLines = 4;
@@ -2150,14 +2256,14 @@ class BookLoader {
       // print('[BookLoader] 未通过文本找到页面: linkText="$linkText"，尝试使用offset');
     }
 
-    // 使用offset匹配（允许±2个字符的偏差，因为换行符可能导致轻微差异）
+    // 使用offset匹配（严格匹配，不使用tolerance以避免边界问题）
     for (final page in pages) {
       // 检查页面是否包含目标偏移量
       for (final item in page.contentItems) {
         if (item is TextContent) {
-          final tolerance = 2; // 允许2个字符的偏差
-          if (targetOffset >= item.startOffset - tolerance &&
-              targetOffset < item.startOffset + item.text.length + tolerance) {
+          // 严格匹配：targetOffset 必须在 [item.startOffset, item.startOffset + item.text.length) 范围内
+          if (targetOffset >= item.startOffset &&
+              targetOffset < item.startOffset + item.text.length) {
             print(
               '[BookLoader] 通过offset找到页面: targetOffset=$targetOffset, page=${page.pageIndexInChapter}, item.startOffset=${item.startOffset}, item.text.length=${item.text.length}',
             );
