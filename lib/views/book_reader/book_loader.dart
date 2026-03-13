@@ -289,7 +289,6 @@ class BookLoader {
 
       // 如果缓存的窗口大小为0，认为缓存无效
       if (cachedWidth <= 0 || cachedHeight <= 0) {
-        print('缓存的窗口大小无效 ($cachedWidth x $cachedHeight)，重新生成页面');
         await clearCache();
         return null;
       }
@@ -306,11 +305,6 @@ class BookLoader {
         if (widthDiff / windowSize!.width > 0.05 ||
             heightDiff / windowSize!.height > 0.05 ||
             fontSizeDiff > 0.1) {
-          print('缓存窗口大小不匹配，重新生成页面');
-          print(
-            '  当前: ${windowSize!.width}x${windowSize!.height}, 字体: $fontSize',
-          );
-          print('  缓存: $cachedWidth x $cachedHeight, 字体: $cachedFontSize');
           // 删除无效的缓存文件
           await clearCache();
           return null;
@@ -326,7 +320,6 @@ class BookLoader {
           chapterTexts[int.parse(key)] = value as String;
         });
       }
-      print('[BookLoader] 加载缓存: 章节文本数量=${chapterTexts.length}');
 
       // 从缓存加载页面（包含 TextContentRef）
       final pages = pagesJson.map((json) {
@@ -340,8 +333,6 @@ class BookLoader {
             title: page.title,
             chapterPlainText: chapterTexts[page.chapterIndex],
           );
-        } else {
-          print('[BookLoader] 警告: 章节 $page.chapterIndex 没有纯文本数据');
         }
         return page;
       }).toList();
@@ -371,24 +362,7 @@ class BookLoader {
           });
         }
       }
-      print('[BookLoader] 从缓存重建 _globalLinks: 数量=${_globalLinks.length}');
 
-      // 调试：统计每个章节每个页面的链接数量
-      final linkStats = <String, int>{};
-      for (final link in _globalLinks) {
-        final chapter = link['chapterIndex'] as int?;
-        final page = link['pageIndexInChapter'] as int?;
-        final key = 'chapter$chapter-page$page';
-        linkStats[key] = (linkStats[key] ?? 0) + 1;
-      }
-      print('[BookLoader] 链接分布统计（前10个）:');
-      int count = 0;
-      for (final entry in linkStats.entries) {
-        if (count++ >= 10) break;
-        print('  ${entry.key}: ${entry.value}个链接');
-      }
-
-      print('从缓存加载了 ${resolvedPages.length} 页（链接单独存储版本）');
       return resolvedPages;
     } catch (e) {
       print('从缓存加载页面失败: $e');
@@ -471,16 +445,12 @@ class BookLoader {
             final key = attr.key.toString().toLowerCase();
             if (key.contains('xlink') && key.contains('href')) {
               xlinkHref = attr.value.toString();
-              print('[BookLoader] 通过属性遍历找到 xlink:href: $xlinkHref');
               break;
             }
           }
         }
 
         final result = xlinkHref ?? href;
-        print(
-          '[BookLoader] extractImageSource 结果: $result (xlinkHref=$xlinkHref, href=$href)',
-        );
         return result;
       }
       return null;
@@ -514,12 +484,7 @@ class BookLoader {
     // 判断是否为脚注链接（有 id 和 href）
     bool isFootnoteLink(html_dom.Element node) {
       final href = node.attributes['href'];
-      final result =
-          node.localName == 'a' && href != null && href.contains('#');
-      if (node.localName == 'a') {
-        print('[BookLoader] 检查 a 标签: href=$href, isFootnoteLink=$result');
-      }
-      return result;
+      return node.localName == 'a' && href != null && href.contains('#');
     }
 
     // 处理块级元素内的内容
@@ -530,14 +495,9 @@ class BookLoader {
       final List<ContentItem> blockItems = [];
       StringBuffer blockText = StringBuffer();
 
-      // 遍历子节点
+        // 遍历子节点
       for (final child in node.nodes) {
         if (child is html_dom.Element) {
-          if (htmlFileName!.contains('part0004_split_002')) {
-            print(
-              '$htmlFileName child $child node.localName:${child.localName}',
-            );
-          }
           if (child.localName == 'br') {
             // 处理换行标签 - 添加换行符到文本
             if (blockText.isNotEmpty) {
@@ -618,31 +578,19 @@ class BookLoader {
                 }
                 blockText.write(linkText);
               }
-
-              print(
-                '[BookLoader] 收集链接: chapter=$chapterIndex, href=$href, linkText="$linkText", fullLinkId=$finalLinkId, isFootnote=$isFootnote',
-              );
             } else {
               // 普通行内元素 - 检查是否包含脚注链接
-              print(
-                '[BookLoader] 检查行内元素: ${child.localName}, chapterIndex=$chapterIndex',
-              );
               final footnoteLinks = child.querySelectorAll('a[href*="#"]');
-              print(
-                '[BookLoader] 找到 ${footnoteLinks.length} 个链接在 ${child.localName} 中',
-              );
               bool hasFootnoteLink = false;
               for (final link in footnoteLinks) {
                 final href = link.attributes['href'] ?? '';
 
-                print('[BookLoader] 检查链接: href=$href');
                 if (href.contains('#')) {
                   hasFootnoteLink = true;
                   break;
                 }
               }
               if (hasFootnoteLink) {
-                print('[BookLoader] ${child.localName} 包含脚注链接，递归处理');
                 // 如果包含脚注链接，递归处理子元素中的链接
                 for (final grandchild in child.nodes) {
                   if (grandchild is html_dom.Element) {
@@ -688,9 +636,6 @@ class BookLoader {
                         'targetPageIndexInChapter': null,
                         'targetExplanation': null,
                       });
-                      print(
-                        '[BookLoader] 收集链接(行内元素-子元素): chapter=$chapterIndex, href=$href, linkText="$linkText", fullLinkId=$finalLinkId',
-                      );
                     }
                   }
                 }
@@ -898,9 +843,6 @@ class BookLoader {
                               'targetPageIndexInChapter': null,
                               'targetExplanation': null,
                             });
-                            print(
-                              '[BookLoader] 收集链接(块级-子元素-孙元素): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId',
-                            );
                           }
                         }
                       }
@@ -1099,9 +1041,6 @@ class BookLoader {
                                     'targetPageIndexInChapter': null,
                                     'targetExplanation': null,
                                   });
-                                  print(
-                                    '[BookLoader] 收集链接(块级-子元素-孙元素-曾孙元素): chapter=$chapterIndex, href=$href, fullLinkId=$finalLinkId',
-                                  );
                                 }
                               }
                             }
@@ -1234,16 +1173,16 @@ class BookLoader {
       // 不再在此处合并 TextContent，而是在分页阶段只合并同一页面的 TextContent
       // 直接使用 blockItems，不进行合并
       final List<ContentItem> mergedBlockItems = blockItems;
-
-      print('[BookLoader] processBlockElement 完成: blockItems数量=${blockItems.length}');
-      for (int i = 0; i < blockItems.length && i < 5; i++) {
-        final item = blockItems[i];
-        if (item is TextContent) {
-          print('[BookLoader]   [$i] TextContent: 长度=${item.text.length}, 文本="${item.text.substring(0, item.text.length > 20 ? 20 : item.text.length)}..."');
-        } else {
-          print('[BookLoader]   [$i] ${item.runtimeType}');
-        }
-      }
+      // for (int i = 0; i < blockItems.length && i < 5; i++) {
+      //   final item = blockItems[i];
+      //   if (item is TextContent) {
+      //     print(
+      //       '[BookLoader]   [$i] TextContent: 长度=${item.text.length}, 文本="${item.text.substring(0, item.text.length > 20 ? 20 : item.text.length)}..."',
+      //     );
+      //   } else {
+      //     print('[BookLoader]   [$i] ${item.runtimeType}');
+      //   }
+      // }
 
       // 将块级元素的所有内容添加到主列表
       bool hasTextContent = false;
@@ -1318,7 +1257,6 @@ class BookLoader {
           final src = extractImageSource(node);
           if (src != null && src.isNotEmpty) {
             items.add(ImageContent(source: src));
-            print('[BookLoader] 提取到图片(traverseNode): src=$src');
           }
         } else if (node.localName == 'svg') {
           // SVG 元素 - 递归处理其子节点，查找其中的 image 元素
@@ -1676,7 +1614,6 @@ class BookLoader {
 
     // 即使没有内容项，也创建一个空页面以保留章节
     if (contentItems.isEmpty) {
-      print('[BookLoader] 章节 ${chapter.title} (${chapterIndex}) 没有内容项，创建空页面');
       pages.add(
         PageContent(
           chapterIndex: chapterIndex,
@@ -1717,9 +1654,6 @@ class BookLoader {
 
     void flushCurrentPage() {
       if (currentPageItems.isNotEmpty) {
-        print(
-          '[BookLoader] 创建页面: chapterIndex=$chapterIndex, pageIndexInChapter=$chapterLocalPageIndex, chapter.title=${chapter.title}',
-        );
         pages.add(
           PageContent(
             chapterIndex: chapterIndex,
@@ -1746,10 +1680,6 @@ class BookLoader {
           final remainingHeight = usableHeight - currentPageHeight;
           final remainingLines = (remainingHeight / lineHeight).floor();
 
-          print(
-            '[BookLoader] 循环处理: currentPageHeight=$currentPageHeight, usableHeight=$usableHeight, remainingHeight=$remainingHeight, remainingLines=$remainingLines',
-          );
-
           if (remainingLines <= 0) {
             flushCurrentPage();
             continue;
@@ -1758,137 +1688,130 @@ class BookLoader {
           // 使用估算快速判断，减少精确计算次数
           final estimatedFit = remainingLines * charsPerLine;
 
-          print(
-            '[BookLoader] 分页前判断: remaining.length=${remaining.length}, estimatedFit=$estimatedFit, remainingLines=$remainingLines, charsPerLine=$charsPerLine, newlineCount=${remaining.split('\n').length}',
-          );
-
           // 精确计算实际行数（不管估算结果如何）
-          final actualLines = calculateTextLines(remaining, availableWidth, textStyle);
-
-          print(
-            '[BookLoader] 分页判断: remaining.length=${remaining.length}, estimatedFit=$estimatedFit, remainingLines=$remainingLines, actualLines=$actualLines',
+          final actualLines = calculateTextLines(
+            remaining,
+            availableWidth,
+            textStyle,
           );
 
           if (actualLines <= remainingLines) {
-            print(
-              '[BookLoader] 可以放下: actualLines=$actualLines <= remainingLines=$remainingLines，不分割文本',
-            );
-              // 确实可以放下，尝试与上一个 TextContent 合并（同一页面内）
-              bool merged = false;
-              if (currentPageItems.isNotEmpty && currentPageItems.last is TextContent) {
-                final lastText = currentPageItems.last as TextContent;
-                // 直接拼接，不添加额外分隔符
-                // 换行符已经在 remaining 中
-                final mergedText = '${lastText.text}$remaining';
-                currentPageItems.removeLast();
-                currentPageItems.add(
-                  TextContent(text: mergedText, startOffset: lastText.startOffset),
-                );
-                merged = true;
-              }
-
-              if (!merged) {
-                currentPageItems.add(
-                  TextContent(text: remaining, startOffset: currentOffset),
-                );
-              }
-
-              currentPageHeight += actualLines * lineHeight;
-              remaining = '';
-            } else {
-              print(
-                '[BookLoader] 需要分割: actualLines=$actualLines > remainingLines=$remainingLines',
+            // 确实可以放下，尝试与上一个 TextContent 合并（同一页面内）
+            bool merged = false;
+            if (currentPageItems.isNotEmpty &&
+                currentPageItems.last is TextContent) {
+              final lastText = currentPageItems.last as TextContent;
+              // 直接拼接，不添加额外分隔符
+              // 换行符已经在 remaining 中
+              final mergedText = '${lastText.text}$remaining';
+              currentPageItems.removeLast();
+              currentPageItems.add(
+                TextContent(
+                  text: mergedText,
+                  startOffset: lastText.startOffset,
+                ),
               );
-              // 实际行数超过剩余行数，需要按照换行符分割
-              // 按换行符分割文本
-              final lines = remaining.split('\n');
-              int usedLines = 0;
-              int cut = 0;
-
-              print(
-                '[BookLoader] 开始分割: lines.length=${lines.length}, remainingLines=$remainingLines',
-              );
-
-              // 逐行添加，直到填满当前页面
-              for (int i = 0; i < lines.length; i++) {
-                final line = lines[i];
-                print('[BookLoader] 处理第 $i 行: isEmpty=${line.isEmpty}, usedLines=$usedLines/$remainingLines');
-                if (line.isEmpty) {
-                  // 空行也算一行
-                  usedLines += 1;
-                } else {
-                  // 使用 TextPainter 计算这一行在指定宽度下占多少行
-                  textPainterCache!.text = TextSpan(text: line, style: textStyle);
-                  textPainterCache!.layout(maxWidth: availableWidth);
-                  final lineMetrics = textPainterCache!.computeLineMetrics();
-                  usedLines += lineMetrics.length;
-                }
-
-                // 检查是否超出剩余行数
-                if (usedLines > remainingLines && i > 0) {
-                  // 已超出，回退到上一行
-                  print('[BookLoader] 超出行数限制，在第 $i 行停止');
-                  break;
-                }
-
-                // 更新截断位置 - 找到当前行对应的换行符位置
-                // 注意：split('\n') 会在每个换行符处分割，所以需要找到第 i+1 个换行符的位置
-                if (i < lines.length - 1) {
-                  // 不是最后一行，找到第 i+1 个换行符
-                  int newlineCount = 0;
-                  int pos = 0;
-                  while (pos < remaining.length) {
-                    if (remaining[pos] == '\n') {
-                      newlineCount++;
-                      if (newlineCount == i + 1) {
-                        cut = pos + 1;
-                        break;
-                      }
-                    }
-                    pos++;
-                  }
-                } else {
-                  // 最后一行，包含所有剩余文本
-                  cut = remaining.length;
-                }
-              }
-
-              if (cut <= 0) {
-                // 无法分割，强制换页
-                flushCurrentPage();
-                continue;
-              }
-
-              // 截取当前页面的文本
-              // 不使用 trimRight，保留末尾的换行符，确保连续空行能正确显示
-              String part = remaining.substring(0, cut);
-
-              // 尝试与上一个 TextContent 合并（同一页面内）
-              bool merged = false;
-              if (currentPageItems.isNotEmpty && currentPageItems.last is TextContent) {
-                final lastText = currentPageItems.last as TextContent;
-                final mergedText = '${lastText.text}$part';
-                currentPageItems.removeLast();
-                currentPageItems.add(
-                  TextContent(text: mergedText, startOffset: lastText.startOffset),
-                );
-                merged = true;
-              }
-
-              if (!merged) {
-                currentPageItems.add(
-                  TextContent(text: part, startOffset: currentOffset),
-                );
-              }
-
-              currentPageHeight += usedLines * lineHeight;
-              currentOffset += part.length;
-              // 不使用 trimLeft，保留开头的空行
-              remaining = remaining.substring(cut);
-
-              flushCurrentPage();
+              merged = true;
             }
+
+            if (!merged) {
+              currentPageItems.add(
+                TextContent(text: remaining, startOffset: currentOffset),
+              );
+            }
+
+            currentPageHeight += actualLines * lineHeight;
+            remaining = '';
+          } else {
+            // 实际行数超过剩余行数，需要按照换行符分割
+            // 按换行符分割文本
+            final lines = remaining.split('\n');
+            int usedLines = 0;
+            int cut = 0;
+
+            // 逐行添加，直到填满当前页面
+            for (int i = 0; i < lines.length; i++) {
+              final line = lines[i];
+              if (line.isEmpty) {
+                // 空行也算一行
+                usedLines += 1;
+              } else {
+                // 使用 TextPainter 计算这一行在指定宽度下占多少行
+                textPainterCache!.text = TextSpan(text: line, style: textStyle);
+                textPainterCache!.layout(maxWidth: availableWidth);
+                final lineMetrics = textPainterCache!.computeLineMetrics();
+                usedLines += lineMetrics.length;
+              }
+
+              // 检查是否超出剩余行数
+              if (usedLines > remainingLines && i > 0) {
+                // 已超出，回退到上一行
+                // print('[BookLoader] 超出行数限制，在第 $i 行停止');
+                break;
+              }
+
+              // 更新截断位置 - 找到当前行对应的换行符位置
+              // 注意：split('\n') 会在每个换行符处分割，所以需要找到第 i+1 个换行符的位置
+              if (i < lines.length - 1) {
+                // 不是最后一行，找到第 i+1 个换行符
+                int newlineCount = 0;
+                int pos = 0;
+                while (pos < remaining.length) {
+                  if (remaining[pos] == '\n') {
+                    newlineCount++;
+                    if (newlineCount == i + 1) {
+                      cut = pos + 1;
+                      break;
+                    }
+                  }
+                  pos++;
+                }
+              } else {
+                // 最后一行，包含所有剩余文本
+                cut = remaining.length;
+              }
+            }
+
+            if (cut <= 0) {
+              // 无法分割，强制换页
+              flushCurrentPage();
+              continue;
+            }
+
+            // 截取当前页面的文本
+            // 不使用 trimRight，保留末尾的换行符，确保连续空行能正确显示
+            String part = remaining.substring(0, cut);
+
+            // 尝试与上一个 TextContent 合并（同一页面内）
+            bool merged = false;
+            if (currentPageItems.isNotEmpty &&
+                currentPageItems.last is TextContent) {
+              final lastText = currentPageItems.last as TextContent;
+              final mergedText = '${lastText.text}$part';
+              currentPageItems.removeLast();
+              currentPageItems.add(
+                TextContent(
+                  text: mergedText,
+                  startOffset: lastText.startOffset,
+                ),
+              );
+              merged = true;
+            }
+
+            if (!merged) {
+              currentPageItems.add(
+                TextContent(text: part, startOffset: currentOffset),
+              );
+            }
+
+            currentPageHeight += usedLines * lineHeight;
+            currentOffset += part.length;
+            // 不使用 trimLeft，保留开头的空行
+            remaining = remaining.substring(cut);
+
+            flushCurrentPage();
           }
+        }
       } else if (item is ImageContent) {
         // 图片高度估算（基于可用高度的 40%），额外增加 4 行空间作为边距
         final extraLines = 4;
@@ -1942,8 +1865,6 @@ class BookLoader {
     EpubBook epubBook,
     List<PageContent> allPages,
   ) async {
-    print('[BookLoader] 开始统一处理所有链接，共 ${_globalLinks.length} 个链接');
-
     // 构建章节到页面的映射，用于快速查找
     final Map<int, List<PageContent>> chapterToPagesMap = {};
     for (final page in allPages) {
@@ -1965,9 +1886,6 @@ class BookLoader {
         final correctChapterIndex = _chapterFilenameToIndex[htmlFileName];
         if (correctChapterIndex != null &&
             correctChapterIndex != chapterIndex) {
-          print(
-            '[BookLoader] 修正链接章节索引: fullLinkId=$fullLinkId, htmlFileName=$htmlFileName, 原chapterIndex=$chapterIndex -> 正确chapterIndex=$correctChapterIndex',
-          );
           chapterIndex = correctChapterIndex;
           link['chapterIndex'] = correctChapterIndex;
 
@@ -1979,14 +1897,9 @@ class BookLoader {
           );
           if (newLinkId != oldLinkId) {
             link['fullLinkId'] = newLinkId;
-            print('[BookLoader] 更新链接ID: $oldLinkId -> $newLinkId');
           }
         }
       }
-
-      print(
-        '[BookLoader] 处理链接: fullLinkId=${link['fullLinkId']}, chapterIndex=$chapterIndex, linkText="$linkText", htmlFileName=$htmlFileName',
-      );
 
       // 解析 href 找到目标章节索引和页面索引
       int? targetChapterIndex;
@@ -2008,18 +1921,10 @@ class BookLoader {
 
         final chapterFilename = href.substring(0, hashIndex);
 
-        print(
-          '[BookLoader] 处理跨章节链接: chapter=$chapterIndex, href=$href, chapterFilename=$chapterFilename',
-        );
-
         // 使用预构建的文件名映射查找目标章节
         targetChapterIndex = _chapterFilenameToIndex[chapterFilename];
 
         if (targetChapterIndex == null) {
-          print('[BookLoader] 警告：找不到章节文件 $chapterFilename 对应的索引，href=$href');
-          print(
-            '[BookLoader] 已映射的文件名: ${_chapterFilenameToIndex.keys.join(", ")}',
-          );
           continue;
         }
 
@@ -2052,19 +1957,8 @@ class BookLoader {
                 targetOffset,
                 linkText: targetExplanation,
               );
-              print(
-                '[BookLoader] 跨章节链接找到目标: chapter=$chapterIndex -> $targetChapterIndex, targetId=$targetId, targetOffset=$targetOffset, targetPageIndex=$targetPageIndexInChapter',
-              );
-            } else {
-              print(
-                '[BookLoader] 跨章节链接无法计算目标偏移: chapter=$chapterIndex -> $targetChapterIndex, targetId=$targetId',
-              );
-            }
-          } else {
-            print(
-              '[BookLoader] 跨章节链接未找到目标: chapter=$chapterIndex -> $targetChapterIndex, targetId=$targetId, htmlContent长度=${htmlContent.length}',
-            );
-          }
+            } else {}
+          } else {}
         }
       } else {
         // 章节内链接
@@ -2100,19 +1994,8 @@ class BookLoader {
                 targetOffset,
                 linkText: targetExplanation,
               );
-              print(
-                '[BookLoader] 章节内链接找到目标: chapter=$chapterIndex, targetId=$targetId, targetOffset=$targetOffset, targetPageIndex=$targetPageIndexInChapter',
-              );
-            } else {
-              print(
-                '[BookLoader] 章节内链接无法计算目标偏移: chapter=$chapterIndex, targetId=$targetId',
-              );
-            }
-          } else {
-            print(
-              '[BookLoader] 章节内链接未找到目标: chapter=$chapterIndex, targetId=$targetId, htmlContent长度=${htmlContent.length}',
-            );
-          }
+            } else {}
+          } else {}
         }
       }
 
@@ -2138,16 +2021,11 @@ class BookLoader {
         // 如果在原章节中找不到，说明链接可能属于其他章节
         // 在所有页面中搜索包含此链接文本的页面
         if (linkPageIndex == null) {
-          print('[BookLoader] 在章节$chapterIndex中找不到链接"$linkText"，在所有页面中搜索...');
-
           for (final page in allPages) {
             for (final item in page.contentItems) {
               if (item is TextContent && item.text.contains(linkText)) {
                 actualChapterIndex = page.chapterIndex;
                 linkPageIndex = page.pageIndexInChapter;
-                print(
-                  '[BookLoader] 找到链接"$linkText"在章节$actualChapterIndex第${linkPageIndex}页',
-                );
                 break;
               }
             }
@@ -2157,34 +2035,12 @@ class BookLoader {
 
         // 更新链接的实际章节索引
         if (actualChapterIndex != chapterIndex) {
-          print(
-            '[BookLoader] 修正链接章节: fullLinkId=$fullLinkId, 原chapterIndex=$chapterIndex -> 实际chapterIndex=$actualChapterIndex',
-          );
           link['chapterIndex'] = actualChapterIndex;
         }
 
         link['pageIndexInChapter'] = linkPageIndex;
-
-        // 调试：打印链接的页面索引计算结果
-        if (actualChapterIndex == 1 && linkPageIndex != null) {
-          print(
-            '[BookLoader] 第1章链接页面索引: fullLinkId=$fullLinkId, linkText="$linkText", linkOffset=$linkOffset, pageIndex=$linkPageIndex',
-          );
-        }
-      }
-
-      if (targetExplanation != null) {
-        print(
-          '[BookLoader] 更新链接信息: fullLinkId=$fullLinkId, pageIndexInChapter=${link['pageIndexInChapter']}, targetChapter=$targetChapterIndex, targetPageIndex=$targetPageIndexInChapter, targetExplanation=${targetExplanation.length > 20 ? targetExplanation.substring(0, 20) : targetExplanation}...',
-        );
-      } else {
-        print(
-          '[BookLoader] 更新链接信息: fullLinkId=$fullLinkId, pageIndexInChapter=${link['pageIndexInChapter']}, targetChapter=$targetChapterIndex, targetPageIndex=$targetPageIndexInChapter, targetExplanation=null',
-        );
       }
     }
-
-    print('[BookLoader] 全局链接处理完成');
   }
 
   /// 计算元素在章节中的偏移量
@@ -2237,7 +2093,6 @@ class BookLoader {
     String? linkText,
   }) {
     if (pages.isEmpty) {
-      print('[BookLoader] _findPageIndexByOffset: 页面列表为空');
       return null;
     }
 
@@ -2246,14 +2101,10 @@ class BookLoader {
       for (final page in pages) {
         for (final item in page.contentItems) {
           if (item is TextContent && item.text.contains(linkText)) {
-            print(
-              '[BookLoader] 通过文本找到页面: linkText="$linkText", page=${page.pageIndexInChapter}',
-            );
             return page.pageIndexInChapter;
           }
         }
       }
-      // print('[BookLoader] 未通过文本找到页面: linkText="$linkText"，尝试使用offset');
     }
 
     // 使用offset匹配（严格匹配，不使用tolerance以避免边界问题）
@@ -2326,22 +2177,38 @@ class BookLoader {
     final spineItems = epubBook.schema?.package?.spine?.items;
     final manifestItems = epubBook.schema?.package?.manifest?.items;
 
+    // 从guide中获取封面href
+    String? coverHrefFromGuide;
+    final guide = epubBook.schema?.package?.guide;
+    if (guide != null) {
+      EpubGuideReference? coverRef;
+      for (final item in guide.items) {
+        if (item.type?.toLowerCase() == 'cover') {
+          coverRef = item;
+          break;
+        }
+      }
+      if (coverRef?.href != null) {
+        coverHrefFromGuide = coverRef!.href;
+      }
+    }
+    // 非章节页面索引计数器，从 -1 开始递增
+    int nonChapterPageCounter = -1;
     // 添加封面页
-    // final coverImagePath = getCoverImagePath();
-    // final coverFile = File(coverImagePath);
-    // if (await coverFile.exists()) {
-    //   pages.add(
-    //     PageContent(
-    //       chapterIndex: -1,
-    //       pageIndexInChapter: 0,
-    //       contentItems: [CoverContent(imagePath: coverImagePath)],
-    //       title: '封面',
-    //     ),
-    //   );
-    // }
+    final coverImagePath = getCoverImagePath();
+    final coverFile = File(coverImagePath);
+    if (await coverFile.exists()) {
+      pages.add(
+        PageContent(
+          chapterIndex: nonChapterPageCounter--,
+          pageIndexInChapter: 0,
+          contentItems: [CoverContent(imagePath: coverImagePath)],
+          title: '封面',
+        ),
+      );
+    }
 
     if (spineItems == null || manifestItems == null) {
-      print('[BookLoader] spine 或 manifest 为空，无法处理页面');
       return;
     }
 
@@ -2363,9 +2230,6 @@ class BookLoader {
 
     // print('[BookLoader] 章节文件映射: ${fileNameToChapterMap.keys.join(", ")}');
 
-    // 非章节页面索引计数器，从 -1 开始递增
-    int nonChapterPageCounter = -1;
-
     // 遍历 spine 处理所有页面
     for (int i = 0; i < spineItems.length; i++) {
       final spineItem = spineItems[i];
@@ -2383,15 +2247,19 @@ class BookLoader {
       );
 
       if (manifestItem == null) {
-        print('[BookLoader] 在 manifest 中找不到 idRef=$idRef 的项，跳过');
         continue;
       }
 
       final href = manifestItem.href;
       if (href == null) {
-        print('[BookLoader] manifest item id=$idRef 缺少 href，跳过');
         continue;
       }
+
+      // 如果从guide找到了封面href,跳过该href对应的spine项
+      if (coverHrefFromGuide != null && href == coverHrefFromGuide) {
+        continue;
+      }
+
       // 检查该文件是否有对应的 chapter
       final chapter = fileNameToChapterMap[href];
 
@@ -2435,9 +2303,6 @@ class BookLoader {
             availableWidth,
           );
           pages.addAll(chapterPages);
-          print(
-            '[BookLoader] 处理非章节页面: spine=$i, href=$href, chapterIndex=$nonChapterIndex, htmlContent长度=${htmlContent.length}',
-          );
           // 处理文件名：提取基础文件名（去除路径前缀）
           String? baseFilename = href;
 
@@ -2453,8 +2318,6 @@ class BookLoader {
 
           // 递增非章节页面计数器
           nonChapterPageCounter--;
-        } else {
-          print('[BookLoader] 警告：找不到 HTML 内容，href=$href');
         }
       }
 

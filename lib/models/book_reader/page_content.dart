@@ -57,13 +57,9 @@ class PageContent {
       return item;
     }).toList();
 
-    final textContentCount = contentItems.whereType<TextContent>().length;
-    final linkContentCount = contentItems.whereType<LinkContent>().length;
-    final optimizedLinkCount = optimizedItems.whereType<LinkContent>().length;
-
-    print(
-      '[PageContent] optimizeForCache: chapterIndex=$chapterIndex, chapterPlainText长度=${chapterPlainText?.length ?? 0}, TextContent数量=$textContentCount, LinkContent数量=$linkContentCount, 优化后LinkContent数量=$optimizedLinkCount',
-    );
+    // final textContentCount = contentItems.whereType<TextContent>().length;
+    // final linkContentCount = contentItems.whereType<LinkContent>().length;
+    // final optimizedLinkCount = optimizedItems.whereType<LinkContent>().length;
 
     return PageContent(
       chapterIndex: chapterIndex,

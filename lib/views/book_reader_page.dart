@@ -98,6 +98,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
   // 搜索相关
   bool _showSearchDrawer = false;
   bool _searchDrawerOnRight = true; // 搜索抽屉在右侧显示
+
+  // 大图查看相关
+  bool _isViewingLargeImage = false;
+  Uint8List? _largeImageData;
+  String? _largeImageTitle;
   List<SearchResult> _searchResults = [];
   List<SearchResult> _displaySearchResults = []; // 用于对话框显示的合并后的结果
   int _currentSearchIndex = 0;
@@ -2387,38 +2392,48 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       padding: const EdgeInsets.only(bottom: 8),
                       child: LayoutBuilder(
                         builder: (context, constraints) {
-                          return ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: constraints.maxWidth,
-                              maxHeight: maxHeight,
-                            ),
-                            child: Image.memory(
-                              snapshot.data!,
-                              fit: BoxFit.contain,
-                              width: double.infinity,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  height: maxHeight,
-                                  color: Colors.grey[200],
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.broken_image,
-                                        size: 48,
-                                        color: Colors.grey[400],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        '图片加载失败',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
+                          return GestureDetector(
+                            onDoubleTap: () {
+                              setState(() {
+                                _isViewingLargeImage = true;
+                                _largeImageData = snapshot.data;
+                                _largeImageTitle = '';
+                              });
+                            },
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: constraints.maxWidth,
+                                maxHeight: maxHeight,
+                              ),
+                              child: Image.memory(
+                                snapshot.data!,
+                                fit: BoxFit.contain,
+                                width: double.infinity,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    height: maxHeight,
+                                    color: Colors.grey[200],
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.broken_image,
+                                          size: 48,
+                                          color: Colors.grey[400],
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          '图片加载失败',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           );
                         },
@@ -2473,24 +2488,17 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         borderRadius: BorderRadius.circular(8),
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
-                            maxWidth: (MediaQuery.of(context).size.width * 0.7)
-                                .clamp(200.0, 500.0),
-                            maxHeight: (availableHeight * 0.7).clamp(
-                              300.0,
-                              700.0,
-                            ),
+                            maxWidth: MediaQuery.of(context).size.width * 0.6,
+                            maxHeight: MediaQuery.of(context).size.height * 0.6,
                           ),
                           child: Image.file(
                             File(item.imagePath!),
                             fit: BoxFit.contain,
                             errorBuilder: (context, error, stackTrace) {
                               final coverWidth =
-                                  (MediaQuery.of(context).size.width * 0.7)
-                                      .clamp(200.0, 500.0);
-                              final coverHeight = (availableHeight * 0.7).clamp(
-                                300.0,
-                                700.0,
-                              );
+                                  MediaQuery.of(context).size.width * 0.6;
+                              final coverHeight =
+                                  MediaQuery.of(context).size.height * 0.6;
                               return Container(
                                 width: coverWidth,
                                 height: coverHeight,
@@ -3244,6 +3252,31 @@ class _BookReaderPageState extends State<BookReaderPage> {
               if (_showTableOfContents) _buildTableOfContents(),
               if (_showSearchDrawer) _buildSearchDrawer(),
               if (_showFontSizeSlider) _buildFontSizeSlider(),
+              if (_isViewingLargeImage && _largeImageData != null)
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _isViewingLargeImage = false;
+                      _largeImageData = null;
+                      _largeImageTitle = null;
+                    });
+                  },
+                  child: Container(
+                    color: Colors.black,
+                    width: double.infinity,
+                    height: double.infinity,
+                    child: Center(
+                      child: InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 4.0,
+                        child: Image.memory(
+                          _largeImageData!,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               // 处理中提示（字体变化时显示在页面底部）
               if (_isProcessingPages && _isContentLoaded)
                 Positioned(
