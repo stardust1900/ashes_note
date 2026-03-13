@@ -3,6 +3,7 @@ import 'package:ashes_note/l10n/app_localizations.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:ashes_note/views/flyme_note_view.dart';
+import 'package:ashes_note/views/note_desktop.dart';
 import 'package:ashes_note/views/settings_view.dart';
 import 'package:ashes_note/views/book_library_page.dart';
 import 'package:flutter/material.dart';
@@ -80,6 +81,7 @@ class _AshesNoteAppState extends State<AshesNoteApp>
         builder: (context) {
           //从本地存储中读取工作目录，判断工作目录是否设置
           String? workingDirectory = SPUtil.get<String>('workingDirectory', '');
+
           //web环境不能只判断缓存
           if (workingDirectory.isEmpty || !FileUtil().isHandleGot()) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -161,9 +163,6 @@ class AshesNoteSidebarX extends StatelessWidget {
         // SidebarXItem(
         //   icon: Icons.home,
         //   label: '首页',
-        //   onTap: () {
-        //     print('Home tapped');
-        //   },
         // ),
         SidebarXItem(
           icon: Icons.note,
@@ -203,9 +202,14 @@ class AshesNoteScreens extends StatelessWidget {
       animation: controller,
       builder: (context, child) {
         if (controller.selectedIndex == 0) {
+          final platform = Theme.of(context).platform;
           return Padding(
             padding: const EdgeInsets.all(8.0),
-            child: NotebookHomePage(),
+            child:
+                (platform == TargetPlatform.android ||
+                    platform == TargetPlatform.iOS)
+                ? const NotebookHomePage()
+                : const NotebookDesktopPage(),
           );
         } else if (controller.selectedIndex == 1) {
           return Padding(
