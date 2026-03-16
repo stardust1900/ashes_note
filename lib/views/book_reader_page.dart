@@ -102,7 +102,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
   // 大图查看相关
   bool _isViewingLargeImage = false;
   Uint8List? _largeImageData;
-  String? _largeImageTitle;
+  // String? _largeImageTitle;
   List<SearchResult> _searchResults = [];
   List<SearchResult> _displaySearchResults = []; // 用于对话框显示的合并后的结果
   int _currentSearchIndex = 0;
@@ -2397,7 +2397,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               setState(() {
                                 _isViewingLargeImage = true;
                                 _largeImageData = snapshot.data;
-                                _largeImageTitle = '';
+                                // _largeImageTitle = '';
                               });
                             },
                             child: ConstrainedBox(
@@ -2560,6 +2560,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                   event.logicalKey == LogicalKeyboardKey.pageDown) {
                 _nextPage();
                 return KeyEventResult.handled;
+              } else if (event.logicalKey ==
+                  LogicalKeyboardKey.audioVolumeDown) {
+                _nextPage();
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.audioVolumeUp) {
+                _previousPage();
+                return KeyEventResult.handled;
               }
             }
             return KeyEventResult.ignored;
@@ -2594,6 +2601,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
+                  onHorizontalDragEnd: (details) {
+                    // 左滑下一页，右滑上一页
+                    final velocity = details.primaryVelocity ?? 0;
+                    if (velocity < -300) {
+                      _nextPage();
+                    } else if (velocity > 300) {
+                      _previousPage();
+                    }
+                  },
                   onTapDown: (details) {
                     // 每次新的点击开始时重置标志
                     print('[BookReader] 翻页手势 onTapDown: 重置 _lastTappedLink');
@@ -3258,7 +3274,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                     setState(() {
                       _isViewingLargeImage = false;
                       _largeImageData = null;
-                      _largeImageTitle = null;
+                      // _largeImageTitle = null;
                     });
                   },
                   child: Container(

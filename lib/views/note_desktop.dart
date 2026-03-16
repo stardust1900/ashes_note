@@ -35,6 +35,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   // 笔记本展开状态（支持多个笔记本同时展开）
   final Set<String> _expandedNotebooks = <String>{};
 
+  // 未同步到 git 的笔记 id 集合
+  final Set<String> _unsyncedNoteIds = <String>{};
+
   GitService? git;
   String? remoteUrl;
   bool _isSyncing = false;
@@ -172,6 +175,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
         // 默认选中第一个笔记
         if (_selectedNotebook != null && _selectedNotebook!.notes.isNotEmpty) {
           _selectedNote = _selectedNotebook!.notes.first;
+          _expandedNotebooks.add(_selectedNotebook!.name);
         }
       }
     });
@@ -255,10 +259,13 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
 
     final path = noteId.substring(0, noteId.lastIndexOf('/'));
     final filename = noteId.substring(noteId.lastIndexOf('/') + 1);
-    String sha = git!.hashObject(utf8.encode(note.content));
     FileUtil().deleteFile('$workingDirectory/notes', path, filename);
-    final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
-    git?.deleteFile(owner, repo, noteId, 'Delete note $noteId', sha);
+
+    if (git != null && remoteUrl != null) {
+      String sha = git!.hashObject(utf8.encode(note.content));
+      final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+      git!.deleteFile(owner, repo, noteId, 'Delete note $noteId', sha);
+    }
 
     ScaffoldMessenger.of(
       context,
@@ -312,6 +319,10 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       if (_selectedNote?.id == updatedNote.id) {
         _selectedNote = updatedNote;
       }
+      // 标记为未同步
+      if (git != null && remoteUrl != null) {
+        _unsyncedNoteIds.add(updatedNote.id);
+      }
     });
   }
 
@@ -319,13 +330,19 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     if (git == null || remoteUrl == null) return;
     var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
     String path = note.id;
-    git?.uploadFile(
-      owner,
-      repo,
-      path,
-      utf8.encode(note.content),
-      'Update note ${note.title}',
-    );
+    git
+        ?.uploadFile(
+          owner,
+          repo,
+          path,
+          utf8.encode(note.content),
+          'Update note ${note.title}',
+        )
+        .then((_) {
+          setState(() {
+            _unsyncedNoteIds.remove(note.id);
+          });
+        });
   }
 
   @override
@@ -400,7 +417,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     return _notebooks.isEmpty
         ? _buildEmptySidebar()
         : ListView(
-            padding: EdgeInsets.symmetric(vertical: 8),
+            padding: EdgeInsets.only(top: 4, bottom: 4),
             children: _notebooks.map((notebook) {
               return _buildNotebookItem(notebook);
             }).toList(),
@@ -437,7 +454,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
             },
             borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
             child: Container(
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Row(
                 children: [
                   Icon(
@@ -503,6 +520,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: notebook.notes.map((note) {
                   final noteIsSelected = _selectedNote?.id == note.id;
+                  final isUnsynced = _unsyncedNoteIds.contains(note.id);
                   return InkWell(
                     onTap: () {
                       setState(() {
@@ -525,9 +543,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                           Icon(
                             Icons.description,
                             size: 14,
-                            color: theme.iconTheme.color?.withValues(
-                              alpha: 0.6,
-                            ),
+                            color: isUnsynced
+                                ? Colors.orange
+                                : theme.iconTheme.color?.withValues(alpha: 0.6),
                           ),
                           SizedBox(width: 6),
                           Expanded(
@@ -537,11 +555,21 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                                 fontWeight: noteIsSelected
                                     ? FontWeight.bold
                                     : FontWeight.normal,
+                                color: isUnsynced ? Colors.orange : null,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          if (isUnsynced)
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: Colors.orange,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -551,7 +579,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
             ),
           if (isExpanded && notebook.notes.isEmpty)
             Padding(
-              padding: EdgeInsets.symmetric(horizontal: 36, vertical: 8),
+              padding: EdgeInsets.symmetric(horizontal: 36, vertical: 4),
               child: Text(
                 '暂无笔记',
                 style: theme.textTheme.bodySmall?.copyWith(
@@ -631,11 +659,22 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                         final notebook = _notebooks.firstWhere(
                           (nb) => nb.name == result.notebookName,
                         );
+                        // 从笔记本中找到实际的 note 对象引用
+                        final actualNote = notebook.notes.firstWhere(
+                          (n) => n.id == result.note.id,
+                          orElse: () => result.note,
+                        );
                         setState(() {
                           _selectedNotebook = notebook;
-                          _selectedNote = result.note;
+                          _selectedNote = actualNote;
                           _showSearchResults = false;
                           _searchController.clear();
+                          _currentSearchQuery = '';
+                          _expandedNotebooks.add(notebook.name);
+                        });
+                        // setState 后下一帧释放焦点，确保搜索框已从 widget 树移除
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          FocusManager.instance.primaryFocus?.unfocus();
                         });
                       },
                     );
@@ -794,6 +833,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                               _notebooks[notebookIndex].notes.clear();
                               _notebooks[notebookIndex].notes.addAll(notes);
                               _selectedNote = notes.last;
+                              // 展开笔记本并标记新笔记为未同步
+                              _expandedNotebooks.add(_selectedNotebook!.name);
+                              _unsyncedNoteIds.add(notes.last.id);
                             });
                           });
                     });
@@ -834,6 +876,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
               .then((_) {
                 setState(() {
                   _isSyncing = false;
+                  _unsyncedNoteIds.clear();
                 });
                 scaffoldMessenger.showSnackBar(
                   const SnackBar(content: Text('仓库同步完成')),
@@ -1045,16 +1088,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     final textColor = theme.textTheme.bodyMedium?.color;
 
     if (query.isEmpty || _matches.isEmpty) {
-      _highlightedSpans = [
-        TextSpan(
-          text: text,
-          style: TextStyle(
-            fontSize: 14,
-            height: 1.6,
-            color: textColor ?? Colors.black87,
-          ),
-        ),
-      ];
+      _highlightedSpans = [];
       return;
     }
 
@@ -1143,11 +1177,13 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   void _switchViewMode(String newMode) {
     if (_viewMode == newMode) return;
 
-    // 保存当前内容
+    // 保存当前内容（仅内容有变化时才标记未同步）
     if (_viewMode == 'edit') {
-      widget.note.content = _contentController.text;
+      final newContent = _contentController.text;
+      final changed = newContent != widget.note.content;
+      widget.note.content = newContent;
       _saveContentToFile();
-      widget.onNoteChanged(widget.note);
+      if (changed) widget.onNoteChanged(widget.note);
     }
 
     setState(() {

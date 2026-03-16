@@ -495,7 +495,7 @@ class BookLoader {
       final List<ContentItem> blockItems = [];
       StringBuffer blockText = StringBuffer();
 
-        // 遍历子节点
+      // 遍历子节点
       for (final child in node.nodes) {
         if (child is html_dom.Element) {
           if (child.localName == 'br') {
@@ -542,9 +542,9 @@ class BookLoader {
                   : '';
 
               // 章节内脚注链接（有 # 且无跨章节标识）不记录文本到 blockText
-              final isFootnote =
-                  hashIndex != -1 &&
-                  !(href.contains('/') || href.contains('.html'));
+              // final isFootnote =
+              //     hashIndex != -1 &&
+              //     !(href.contains('/') || href.contains('.html'));
 
               // 计算链接偏移量（在决定是否添加文本之前）
               // 链接文本会被添加到 blockText 的末尾（前面可能需要空格）
@@ -1467,11 +1467,11 @@ class BookLoader {
         totalLines += lineMetrics.length;
       }
 
-      if (i == lines.length - 1) {
-        print(
-          '[BookLoader] calculateTextLines: totalLines=$totalLines, linesCount=${lines.length}',
-        );
-      }
+      // if (i == lines.length - 1) {
+      //   print(
+      //     '[BookLoader] calculateTextLines: totalLines=$totalLines, linesCount=${lines.length}',
+      //   );
+      // }
     }
 
     return totalLines;
@@ -1641,12 +1641,12 @@ class BookLoader {
 
     // 计算每行平均字符数（只计算一次）
     textPainterCache!.layout(maxWidth: availableWidth);
-    final charWidth = textPainterCache!.width;
-    final charsPerLine = (availableWidth / charWidth).floor();
+    // final charWidth = textPainterCache!.width;
+    // final charsPerLine = (availableWidth / charWidth).floor();
 
     // 每页可用高度（减去 padding）
     final usableHeight = availableHeight - 140 - kToolbarHeight;
-    final linesPerPage = (usableHeight / lineHeight).floor();
+    // final linesPerPage = (usableHeight / lineHeight).floor();
 
     List<ContentItem> currentPageItems = [];
     double currentPageHeight = 0;
@@ -1686,7 +1686,7 @@ class BookLoader {
           }
 
           // 使用估算快速判断，减少精确计算次数
-          final estimatedFit = remainingLines * charsPerLine;
+          // final estimatedFit = remainingLines * charsPerLine;
 
           // 精确计算实际行数（不管估算结果如何）
           final actualLines = calculateTextLines(
@@ -2115,29 +2115,29 @@ class BookLoader {
           // 严格匹配：targetOffset 必须在 [item.startOffset, item.startOffset + item.text.length) 范围内
           if (targetOffset >= item.startOffset &&
               targetOffset < item.startOffset + item.text.length) {
-            print(
-              '[BookLoader] 通过offset找到页面: targetOffset=$targetOffset, page=${page.pageIndexInChapter}, item.startOffset=${item.startOffset}, item.text.length=${item.text.length}',
-            );
+            // print(
+            //   '[BookLoader] 通过offset找到页面: targetOffset=$targetOffset, page=${page.pageIndexInChapter}, item.startOffset=${item.startOffset}, item.text.length=${item.text.length}',
+            // );
             return page.pageIndexInChapter;
           }
         }
       }
     }
-    print(
-      '[BookLoader] 未找到目标偏移量对应的页面: targetOffset=$targetOffset, 总页面数=${pages.length}',
-    );
+    // print(
+    //   '[BookLoader] 未找到目标偏移量对应的页面: targetOffset=$targetOffset, 总页面数=${pages.length}',
+    // );
     // 打印所有页面的offset范围以便调试
-    for (final page in pages) {
-      final textItems = page.contentItems.whereType<TextContent>().toList();
-      if (textItems.isNotEmpty) {
-        final firstOffset = textItems.first.startOffset;
-        final lastItem = textItems.last;
-        final lastOffset = lastItem.startOffset + lastItem.text.length;
-        print(
-          '[BookLoader] 页面${page.pageIndexInChapter}: offset范围[$firstOffset, $lastOffset)',
-        );
-      }
-    }
+    // for (final page in pages) {
+    // final textItems = page.contentItems.whereType<TextContent>().toList();
+    // if (textItems.isNotEmpty) {
+    // final firstOffset = textItems.first.startOffset;
+    // final lastItem = textItems.last;
+    // final lastOffset = lastItem.startOffset + lastItem.text.length;
+    // print(
+    //   '[BookLoader] 页面${page.pageIndexInChapter}: offset范围[$firstOffset, $lastOffset)',
+    // );
+    // }
+    // }
     // 如果没有找到，返回第一页作为默认值
     return pages.first.pageIndexInChapter;
   }

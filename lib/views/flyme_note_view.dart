@@ -258,10 +258,13 @@ class NotebookHomePageState extends State<NotebookHomePage> {
 
     final path = noteId.substring(0, noteId.lastIndexOf('/'));
     final filename = noteId.substring(noteId.lastIndexOf('/') + 1);
-    String sha = git!.hashObject(utf8.encode(note.content));
     FileUtil().deleteFile('$workingDirectory/notes', path, filename);
-    final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
-    git?.deleteFile(owner, repo, noteId, 'Delete note $noteId', sha);
+
+    if (git != null && remoteUrl != null) {
+      String sha = git!.hashObject(utf8.encode(note.content));
+      final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+      git!.deleteFile(owner, repo, noteId, 'Delete note $noteId', sha);
+    }
 
     ScaffoldMessenger.of(
       context,
