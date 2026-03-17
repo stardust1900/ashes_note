@@ -172,7 +172,7 @@ class AshesNoteSidebarX extends StatelessWidget {
           },
         ),
         SidebarXItem(
-          icon: Icons.library_books,
+          icon: Icons.menu_book,
           label: '书籍',
           onTap: () {
             _controller.selectIndex(1);
