@@ -1,5 +1,4 @@
-import 'content_item.dart'
-    show ContentItem, TextContent, TextContentRef, LinkContent;
+import 'content_item.dart' show ContentItem, TextContent, TextContentRef;
 
 /// 页面内容
 class PageContent {

@@ -17,6 +17,7 @@ class SelectableTextWithToolbar extends StatefulWidget {
   )
   onTextSelected;
   final VoidCallback onSelectionCleared;
+  final VoidCallback? onTap; // 单击回调，用于显示/隐藏控制栏
 
   const SelectableTextWithToolbar({
     super.key,
@@ -28,6 +29,7 @@ class SelectableTextWithToolbar extends StatefulWidget {
     required this.spans,
     required this.onTextSelected,
     required this.onSelectionCleared,
+    this.onTap,
   });
 
   @override
@@ -35,8 +37,7 @@ class SelectableTextWithToolbar extends StatefulWidget {
       SelectableTextWithToolbarState();
 }
 
-class SelectableTextWithToolbarState
-    extends State<SelectableTextWithToolbar> {
+class SelectableTextWithToolbarState extends State<SelectableTextWithToolbar> {
   final GlobalKey _selectableKey = GlobalKey();
   TextPainter? _cachedTextPainter;
   String? _cachedText;
@@ -90,6 +91,7 @@ class SelectableTextWithToolbarState
     return SelectableText.rich(
       key: _selectableKey,
       TextSpan(children: widget.spans, style: widget.style),
+      onTap: widget.onTap,
       onSelectionChanged: (selection, cause) {
         if (selection.isValid && !selection.isCollapsed) {
           // 用户选择了文本

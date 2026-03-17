@@ -2343,7 +2343,12 @@ class BookLoader {
   }
 
   /// 处理窗口大小变化
-  void onWindowResize(Size newSize, EpubBook epubBook, BuildContext context) {
+  void onWindowResize(
+    Size newSize,
+    EpubBook epubBook,
+    BuildContext context, {
+    int currentChapterIndex = 0,
+  }) {
     if (windowSize == null ||
         (newSize.width != windowSize!.width ||
             newSize.height != windowSize!.height)) {
@@ -2351,7 +2356,7 @@ class BookLoader {
       // 防抖处理：取消之前的定时器，避免频繁重绘
       resizeDebounceTimer?.cancel();
       resizeDebounceTimer = Timer(resizeDebounceDuration, () {
-        processPages(epubBook, context, 0);
+        processPages(epubBook, context, currentChapterIndex);
       });
     }
   }
