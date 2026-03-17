@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
 
@@ -41,6 +43,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   GitService? git;
   String? remoteUrl;
   bool _isSyncing = false;
+  double _sidebarWidth = 300;
 
   @override
   void initState() {
@@ -172,10 +175,16 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
         } else {
           _selectedNotebook = _notebooks[0];
         }
-        // 默认选中第一个笔记
+        // 恢复上次选中的笔记
         if (_selectedNotebook != null && _selectedNotebook!.notes.isNotEmpty) {
-          _selectedNote = _selectedNotebook!.notes.first;
           _expandedNotebooks.add(_selectedNotebook!.name);
+          final lastNoteId = SPUtil.get<String>(PrefKeys.selectedNote, '');
+          _selectedNote = lastNoteId.isNotEmpty
+              ? _selectedNotebook!.notes.firstWhere(
+                  (n) => n.id == lastNoteId,
+                  orElse: () => _selectedNotebook!.notes.first,
+                )
+              : _selectedNotebook!.notes.first;
         }
       }
     });
@@ -351,18 +360,45 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       body: Row(
         children: [
           // 左侧面板：笔记本和笔记树形列表
-          Container(
-            width: 300,
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: Column(
-              children: [
-                _buildSidebarHeader(),
-                Expanded(
-                  child: _showSearchResults
-                      ? _buildSearchResults()
-                      : _buildNoteTree(),
+          SizedBox(
+            width: _sidebarWidth,
+            child: Container(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: Column(
+                children: [
+                  _buildSidebarHeader(),
+                  Expanded(
+                    child: _showSearchResults
+                        ? _buildSearchResults()
+                        : _buildNoteTree(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 可拖动分隔线
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragUpdate: (details) {
+              setState(() {
+                _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
+                  160.0,
+                  600.0,
+                );
+              });
+            },
+            child: MouseRegion(
+              cursor: SystemMouseCursors.resizeColumn,
+              child: Container(
+                width: 6,
+                color: Colors.transparent,
+                child: Center(
+                  child: Container(
+                    width: 1,
+                    color: Theme.of(context).dividerColor,
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
           // 右侧面板：笔记详情
@@ -379,34 +415,68 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   Widget _buildSidebarHeader() {
     final theme = Theme.of(context);
     return Container(
-      padding: EdgeInsets.all(12),
+      padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.note, size: 20, color: theme.primaryColor),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '笔记本',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+          Row(
+            children: [
+              Icon(Icons.note, size: 20, color: theme.primaryColor),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '笔记本',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-            ),
+              if (_selectedNotebook != null)
+                IconButton(
+                  icon: Icon(Icons.add, size: 20),
+                  onPressed: _showCreateNoteDialog,
+                  tooltip: '创建笔记',
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              IconButton(
+                icon: Icon(Icons.sync, size: 20),
+                color: _isSyncing ? Colors.grey : theme.primaryColor,
+                onPressed: _performSync,
+                tooltip: '同步',
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
           ),
-          if (_selectedNotebook != null)
-            IconButton(
-              icon: Icon(Icons.add, size: 20),
-              onPressed: _showCreateNoteDialog,
-              tooltip: '创建笔记',
+          SizedBox(height: 6),
+          TextField(
+            controller: _searchController,
+            style: theme.textTheme.bodySmall,
+            decoration: InputDecoration(
+              hintText: '搜索所有笔记本...',
+              hintStyle: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
+              prefixIcon: Icon(Icons.search, size: 16),
+              suffixIcon: _currentSearchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: Icon(Icons.clear, size: 14),
+                      onPressed: () => _searchController.clear(),
+                      padding: EdgeInsets.zero,
+                      constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             ),
-          IconButton(
-            icon: Icon(Icons.sync, size: 20),
-            color: _isSyncing ? Colors.grey : theme.primaryColor,
-            onPressed: _performSync,
-            tooltip: '同步',
           ),
         ],
       ),
@@ -525,6 +595,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                     onTap: () {
                       setState(() {
                         _selectedNote = note;
+                        SPUtil.set(PrefKeys.selectedNote, note.id);
                       });
                     },
                     borderRadius: BorderRadius.circular(4),
@@ -618,71 +689,37 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   }
 
   Widget _buildSearchResults() {
-    return Column(
-      children: [
-        Container(
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: TextField(
-            controller: _searchController,
-            style: Theme.of(context).textTheme.bodyMedium,
-            decoration: InputDecoration(
-              hintText: '搜索所有笔记本...',
-              prefixIcon: Icon(Icons.search),
-              suffixIcon: _currentSearchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: Icon(Icons.clear),
-                      onPressed: () => _searchController.clear(),
-                    )
-                  : null,
-              border: OutlineInputBorder(),
-              isDense: true,
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
-          ),
-        ),
-        Expanded(
-          child: _searchResults.isEmpty
-              ? Center(child: Text('无搜索结果'))
-              : ListView.builder(
-                  itemCount: _searchResults.length,
-                  itemBuilder: (context, index) {
-                    final result = _searchResults[index];
-                    return ListTile(
-                      leading: Icon(Icons.note),
-                      title: Text(result.note.title),
-                      subtitle: Text(
-                        '${result.notebookName} · ${result.matchType}',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      onTap: () {
-                        // 找到对应的笔记本和笔记
-                        final notebook = _notebooks.firstWhere(
-                          (nb) => nb.name == result.notebookName,
-                        );
-                        // 从笔记本中找到实际的 note 对象引用
-                        final actualNote = notebook.notes.firstWhere(
-                          (n) => n.id == result.note.id,
-                          orElse: () => result.note,
-                        );
-                        setState(() {
-                          _selectedNotebook = notebook;
-                          _selectedNote = actualNote;
-                          _showSearchResults = false;
-                          _searchController.clear();
-                          _currentSearchQuery = '';
-                          _expandedNotebooks.add(notebook.name);
-                        });
-                        // setState 后下一帧释放焦点，确保搜索框已从 widget 树移除
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          FocusManager.instance.primaryFocus?.unfocus();
-                        });
-                      },
-                    );
-                  },
+    return _searchResults.isEmpty
+        ? Center(child: Text('无搜索结果'))
+        : ListView.builder(
+            itemCount: _searchResults.length,
+            itemBuilder: (context, index) {
+              final result = _searchResults[index];
+              return ListTile(
+                leading: Icon(Icons.note),
+                title: Text(result.note.title),
+                subtitle: Text(
+                  '${result.notebookName} · ${result.matchType}',
+                  style: TextStyle(fontSize: 12),
                 ),
-        ),
-      ],
-    );
+                onTap: () {
+                  final notebook = _notebooks.firstWhere(
+                    (nb) => nb.name == result.notebookName,
+                  );
+                  final actualNote = notebook.notes.firstWhere(
+                    (n) => n.id == result.note.id,
+                    orElse: () => result.note,
+                  );
+                  setState(() {
+                    _selectedNotebook = notebook;
+                    _selectedNote = actualNote;
+                    SPUtil.set(PrefKeys.selectedNote, actualNote.id);
+                    _expandedNotebooks.add(notebook.name);
+                  });
+                },
+              );
+            },
+          );
   }
 
   Widget _buildNoteDetail(Note note) {
@@ -693,6 +730,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       onNoteChanged: noteChanged,
       saveNote: saveNote,
       onDeleteNote: _deleteNote,
+      searchQuery: _currentSearchQuery,
       onTitleChanged: (newTitle) {
         noteChanged(note, newTitle: newTitle);
       },
@@ -911,6 +949,7 @@ class _NoteDetailPanel extends StatefulWidget {
   final Function(Note) saveNote;
   final Function(String) onDeleteNote;
   final Function(String) onTitleChanged;
+  final String searchQuery;
 
   const _NoteDetailPanel({
     super.key,
@@ -920,6 +959,7 @@ class _NoteDetailPanel extends StatefulWidget {
     required this.saveNote,
     required this.onDeleteNote,
     required this.onTitleChanged,
+    this.searchQuery = '',
   });
 
   @override
@@ -940,11 +980,15 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   List<TextSelection> _matches = [];
   final FocusNode _findFocusNode = FocusNode();
 
-  // 视图模式：edit(普通编辑), preview(预览)
+  // 视图模式：edit(普通编辑), split(分栏预览), preview(预览)
   String _viewMode = 'edit';
 
-  // 高亮文本的 TextSpan 列表
-  List<TextSpan> _highlightedSpans = [];
+  // 分栏比例（编辑区占比）
+  double _splitRatio = 0.5;
+
+  // 编辑器容器 key，用于获取实际渲染宽度
+  final GlobalKey _editorKey = GlobalKey();
+  double _editorLayoutWidth = 600.0;
 
   @override
   void initState() {
@@ -955,6 +999,12 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     _contentController = TextEditingController(text: widget.note.content);
     _contentController.addListener(_onContentChanged);
     _findController.addListener(_onFindTextChanged);
+    // 有搜索词时自动高亮
+    if (widget.searchQuery.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _findController.text = widget.searchQuery;
+      });
+    }
   }
 
   @override
@@ -969,7 +1019,16 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
       _totalMatches = 0;
       _showFindPanel = false;
       _viewMode = 'edit';
-      _updateHighlightedText();
+
+      // 切换笔记后重新应用搜索高亮
+      if (widget.searchQuery.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _findController.text = widget.searchQuery;
+        });
+      }
+    } else if (oldWidget.searchQuery != widget.searchQuery) {
+      // 搜索词变化（包括清空）
+      _findController.text = widget.searchQuery;
     }
   }
 
@@ -1028,7 +1087,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
         _matches.clear();
         _currentFindIndex = -1;
         _totalMatches = 0;
-        _updateHighlightedText();
       });
       return;
     }
@@ -1046,11 +1104,12 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
           .toList();
       _totalMatches = _matches.length;
       _currentFindIndex = _matches.isNotEmpty ? 0 : -1;
-      _updateHighlightedText();
     });
 
     if (_matches.isNotEmpty) {
-      _scrollToMatch();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToMatch();
+      });
     }
   }
 
@@ -1059,7 +1118,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
 
     setState(() {
       _currentFindIndex = (_currentFindIndex + 1) % _totalMatches;
-      _updateHighlightedText();
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1073,7 +1131,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     setState(() {
       _currentFindIndex =
           (_currentFindIndex - 1 + _totalMatches) % _totalMatches;
-      _updateHighlightedText();
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1081,82 +1138,40 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     });
   }
 
-  void _updateHighlightedText() {
-    final theme = Theme.of(context);
-    final text = _contentController.text;
-    final query = _findController.text.trim();
-    final textColor = theme.textTheme.bodyMedium?.color;
-
-    if (query.isEmpty || _matches.isEmpty) {
-      _highlightedSpans = [];
-      return;
-    }
-
-    final spans = <TextSpan>[];
-    int currentStart = 0;
-
-    for (int i = 0; i < _matches.length; i++) {
-      final match = _matches[i];
-
-      // 添加匹配前的文本
-      if (match.start > currentStart) {
-        spans.add(
-          TextSpan(
-            text: text.substring(currentStart, match.start),
-            style: TextStyle(fontSize: 14, color: textColor),
-          ),
-        );
-      }
-
-      // 添加匹配的文本，当前匹配项用不同颜色
-      final isCurrent = i == _currentFindIndex;
-      spans.add(
-        TextSpan(
-          text: text.substring(match.start, match.end),
-          style: TextStyle(
-            backgroundColor: isCurrent ? Colors.orange : Colors.yellow,
-            color: isCurrent ? Colors.black : Colors.black87,
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-          ),
-        ),
-      );
-
-      currentStart = match.end;
-    }
-
-    // 添加剩余文本
-    if (currentStart < text.length) {
-      spans.add(
-        TextSpan(
-          text: text.substring(currentStart),
-          style: TextStyle(fontSize: 14, height: 1.6, color: textColor),
-        ),
-      );
-    }
-
-    _highlightedSpans = spans;
-  }
-
   void _scrollToMatch() {
     if (_currentFindIndex < 0 || _currentFindIndex >= _matches.length) return;
+    if (!_scrollController.hasClients) return;
 
     final match = _matches[_currentFindIndex];
-    // 使用简单滚动（使用 TextPainter 可能需要更复杂的实现）
-    final linesBeforeMatch = _contentController.text
-        .substring(0, match.start)
-        .split('\n')
-        .length;
-    final lineHeight = 22.0; // 估算的行高
-    final targetOffset = (linesBeforeMatch - 1) * lineHeight;
+    final text = _contentController.text;
+    final theme = Theme.of(context);
 
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
-        duration: Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-    }
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          fontSize: 14,
+          height: 1.6,
+          fontFamily: 'monospace',
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: null,
+    );
+    painter.layout(maxWidth: _editorLayoutWidth);
+
+    final boxes = painter.getBoxesForSelection(match);
+    if (boxes.isEmpty) return;
+
+    final targetOffset = (boxes.first.top - 100).clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
+    _scrollController.animateTo(
+      targetOffset,
+      duration: Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
   }
 
   void _toggleFindPanel() {
@@ -1169,7 +1184,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
         _matches.clear();
         _currentFindIndex = -1;
         _totalMatches = 0;
-        _updateHighlightedText();
       }
     });
   }
@@ -1249,7 +1263,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                 ),
                 SizedBox(width: 16),
                 // 查找按钮
-                if (_viewMode == 'edit')
+                if (_viewMode == 'edit' || _viewMode == 'split')
                   IconButton(
                     icon: Icon(Icons.find_in_page),
                     onPressed: _toggleFindPanel,
@@ -1265,6 +1279,17 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                   ),
                   onPressed: () => _switchViewMode('edit'),
                   tooltip: '普通编辑',
+                ),
+                // 分栏预览按钮
+                IconButton(
+                  icon: Icon(
+                    Icons.vertical_split,
+                    color: _viewMode == 'split'
+                        ? theme.primaryColor
+                        : (isDark ? theme.disabledColor : Colors.grey),
+                  ),
+                  onPressed: () => _switchViewMode('split'),
+                  tooltip: '分栏预览',
                 ),
                 // 预览模式按钮
                 IconButton(
@@ -1287,6 +1312,19 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                   },
                   tooltip: '保存',
                 ),
+                if (_viewMode == 'preview' || _viewMode == 'split')
+                  IconButton(
+                    icon: Icon(Icons.copy_all),
+                    onPressed: () {
+                      Clipboard.setData(
+                        ClipboardData(text: widget.note.content),
+                      );
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text('已复制全文')));
+                    },
+                    tooltip: '复制全文',
+                  ),
                 IconButton(
                   icon: Icon(Icons.delete, color: Colors.red),
                   onPressed: () {
@@ -1320,13 +1358,16 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
             ),
           ),
           // 查找面板
-          if (_showFindPanel && _viewMode == 'edit') _buildFindPanel(),
+          if (_showFindPanel && (_viewMode == 'edit' || _viewMode == 'split'))
+            _buildFindPanel(),
           // 笔记内容编辑区
           Expanded(
             child: Padding(
               padding: EdgeInsets.all(16),
               child: _viewMode == 'edit'
                   ? _buildEditor(theme)
+                  : _viewMode == 'split'
+                  ? _buildSplitView(theme)
                   : _buildPreview(theme),
             ),
           ),
@@ -1407,28 +1448,150 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   }
 
   Widget _buildEditor(ThemeData theme) {
-    return _highlightedSpans.isEmpty
-        ? TextField(
-            controller: _contentController,
-            scrollController: _scrollController,
-            maxLines: null,
-            expands: true,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontSize: 14,
-              height: 1.6,
-              fontFamily: 'monospace',
+    final textStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontSize: 14,
+      height: 1.6,
+      fontFamily: 'monospace',
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 记录编辑器宽度供 _scrollToMatch 使用
+        _editorLayoutWidth = constraints.maxWidth;
+        return SingleChildScrollView(
+          controller: _scrollController,
+          child: _matches.isEmpty
+              ? TextField(
+                  key: _editorKey,
+                  controller: _contentController,
+                  maxLines: null,
+                  selectionHeightStyle: BoxHeightStyle.tight,
+                  selectionWidthStyle: BoxWidthStyle.tight,
+                  style: textStyle,
+                  decoration: InputDecoration(
+                    hintText: '开始编写笔记内容...',
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                )
+              : _buildHighlightedText(theme, textStyle),
+        );
+      },
+    );
+  }
+
+  Widget _buildHighlightedText(ThemeData theme, TextStyle? baseStyle) {
+    final text = _contentController.text;
+    final textColor = baseStyle?.color ?? theme.textTheme.bodyMedium?.color;
+    final spans = <TextSpan>[];
+    int current = 0;
+
+    for (int i = 0; i < _matches.length; i++) {
+      final match = _matches[i];
+      if (match.start > current) {
+        spans.add(
+          TextSpan(
+            text: text.substring(current, match.start),
+            style: TextStyle(fontSize: 14, height: 1.6, color: textColor),
+          ),
+        );
+      }
+      final isCurrent = i == _currentFindIndex;
+      spans.add(
+        TextSpan(
+          text: text.substring(match.start, match.end),
+          style: TextStyle(
+            backgroundColor: isCurrent ? Colors.orange : Colors.yellow,
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            height: 1.6,
+          ),
+        ),
+      );
+      current = match.end;
+    }
+    if (current < text.length) {
+      spans.add(
+        TextSpan(
+          text: text.substring(current),
+          style: TextStyle(fontSize: 14, height: 1.6, color: textColor),
+        ),
+      );
+    }
+
+    return SelectableText.rich(
+      key: _editorKey,
+      TextSpan(children: spans),
+      style: baseStyle,
+    );
+  }
+
+  Widget _buildSplitView(ThemeData theme) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        final dividerWidth = 6.0;
+        final editWidth = (totalWidth - dividerWidth) * _splitRatio;
+        final previewWidth = (totalWidth - dividerWidth) * (1 - _splitRatio);
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: editWidth, child: _buildEditor(theme)),
+            GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onHorizontalDragUpdate: (details) {
+                setState(() {
+                  _splitRatio =
+                      ((_splitRatio * (totalWidth - dividerWidth) +
+                                  details.delta.dx) /
+                              (totalWidth - dividerWidth))
+                          .clamp(0.2, 0.8);
+                });
+              },
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: Container(
+                  width: dividerWidth,
+                  color: Colors.transparent,
+                  child: Center(
+                    child: Container(width: 1, color: theme.dividerColor),
+                  ),
+                ),
+              ),
             ),
-            decoration: InputDecoration(
-              hintText: '开始编写笔记内容...',
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.zero,
+            SizedBox(
+              width: previewWidth,
+              child: Padding(
+                padding: EdgeInsets.only(left: 12),
+                child: fm.Markdown(
+                  data: _contentController.text,
+                  selectable: true,
+                  imageDirectory: SPUtil.get<String>(
+                    PrefKeys.workingDirectory,
+                    '',
+                  ),
+                  styleSheet: fm.MarkdownStyleSheet.fromTheme(theme).copyWith(
+                    p: theme.textTheme.bodyMedium,
+                    h1: theme.textTheme.headlineMedium,
+                    h2: theme.textTheme.titleLarge,
+                    h3: theme.textTheme.titleMedium,
+                    code: theme.textTheme.bodyMedium?.copyWith(
+                      fontFamily: 'monospace',
+                      backgroundColor:
+                          theme.colorScheme.surfaceContainerHighest,
+                    ),
+                    codeblockDecoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+              ),
             ),
-            textAlignVertical: TextAlignVertical.top,
-          )
-        : SingleChildScrollView(
-            controller: _scrollController,
-            child: RichText(text: TextSpan(children: _highlightedSpans)),
-          );
+          ],
+        );
+      },
+    );
   }
 
   Widget _buildPreview(ThemeData theme) {

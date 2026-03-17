@@ -7,6 +7,7 @@ class PrefKeys {
   static const String githubRemoteUrl = 'githubRemoteUrl';
   static const String lastPullTime = 'lastPullTime';
   static const String selectedNotebook = 'selectedNotebook';
+  static const String selectedNote = 'selectedNote';
   static const String themeMode = 'themeMode'; // 主题模式：minimal 或 dark
 }
 
