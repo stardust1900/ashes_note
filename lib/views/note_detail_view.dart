@@ -13,7 +13,6 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
 import 'package:super_editor/super_editor.dart';
 import 'package:ashes_note/views/_toolbar.dart';
 
-
 // 笔记详情页面（包含查找功能）
 class NoteDetailPage extends StatefulWidget {
   final Note note;
@@ -333,12 +332,12 @@ class NoteDetailState extends State<NoteDetailPage> {
         TextSpan(
           text: text.substring(match.start, match.end),
           style: TextStyle(
-            backgroundColor: isCurrent 
-              ? (isDark ? Colors.orange : Colors.yellow)
-              : (isDark ? Colors.yellow : Colors.orange),
-            color: isCurrent 
-              ? (isDark ? Colors.black : Colors.black87)
-              : (isDark ? Colors.black87 : Colors.black),
+            backgroundColor: isCurrent
+                ? (isDark ? Colors.orange : Colors.yellow)
+                : (isDark ? Colors.yellow : Colors.orange),
+            color: isCurrent
+                ? (isDark ? Colors.black : Colors.black87)
+                : (isDark ? Colors.black87 : Colors.black),
             fontWeight: FontWeight.bold,
             fontSize: 14,
           ),
@@ -903,10 +902,10 @@ class NoteDetailState extends State<NoteDetailPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    
+
     // 更新高亮文本样式以匹配当前主题
     _updateHighlightedTextWithTheme(theme, isDark);
-    
+
     return Shortcuts(
       shortcuts: _shortcuts,
       child: Actions(
@@ -922,61 +921,14 @@ class NoteDetailState extends State<NoteDetailPage> {
               leading: IconButton(
                 icon: Icon(Icons.arrow_back),
                 onPressed: () {
-                  // 返回前保存当前视图的内容到文件
                   _saveBeforeSwitch();
-                  // 通知父组件笔记已更新
                   widget.onNoteChanged(note);
-                  // 上传到git
                   widget.saveNote(note);
-                  // 返回并传递 true 表示笔记已更新
                   Navigator.pop(context, true);
                 },
               ),
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: _titleController,
-                    onEditingComplete: () {
-                      widget.onNoteChanged(
-                        note,
-                        newTitle: _titleController.text,
-                      );
-                    },
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      isDense: true,
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      return ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: constraints.maxWidth,
-                        ),
-                        child: FittedBox(
-                          alignment: Alignment.centerLeft,
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            '修改时间: ${note.lastModified.toString().substring(0, 16)}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontSize: 12,
-                              color: isDark ? Colors.grey[400] : Colors.grey[600],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
+              titleSpacing: 0,
+              title: const SizedBox.shrink(),
               actions: [
                 // 查找按钮：普通编辑模式或 SuperEditor 模式
                 if (_viewMode == 'edit' || _viewMode == 'superEditor')
@@ -991,9 +943,9 @@ class NoteDetailState extends State<NoteDetailPage> {
                 IconButton(
                   icon: Icon(
                     Icons.edit_note,
-                    color: _viewMode == 'edit' 
-                      ? theme.primaryColor 
-                      : (isDark ? theme.disabledColor : Colors.grey),
+                    color: _viewMode == 'edit'
+                        ? theme.primaryColor
+                        : (isDark ? theme.disabledColor : Colors.grey),
                   ),
                   onPressed: () {
                     // 切换到普通编辑模式前，先保存当前内容
@@ -1013,9 +965,9 @@ class NoteDetailState extends State<NoteDetailPage> {
                 IconButton(
                   icon: Icon(
                     Icons.preview,
-                    color: _viewMode == 'preview' 
-                      ? theme.primaryColor 
-                      : (isDark ? theme.disabledColor : Colors.grey),
+                    color: _viewMode == 'preview'
+                        ? theme.primaryColor
+                        : (isDark ? theme.disabledColor : Colors.grey),
                   ),
                   onPressed: () {
                     // 切换到预览模式前，先保存当前内容
@@ -1063,6 +1015,42 @@ class NoteDetailState extends State<NoteDetailPage> {
             ),
             body: Column(
               children: [
+                // 标题和修改时间
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: _titleController,
+                        onEditingComplete: () {
+                          widget.onNoteChanged(
+                            note,
+                            newTitle: _titleController.text,
+                          );
+                        },
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                          isDense: true,
+                        ),
+                      ),
+                      Text(
+                        '修改时间: ${note.lastModified.toString().substring(0, 16)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 12,
+                          color: isDark ? Colors.grey[400] : Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Divider(height: 1, color: theme.dividerColor),
+                    ],
+                  ),
+                ),
                 // 查找面板
                 if (_viewMode == 'edit' && _showFindPanel) _buildFindPanel(),
                 if (_viewMode == 'superEditor' && _isSearchVisible)
@@ -1169,16 +1157,16 @@ class NoteDetailState extends State<NoteDetailPage> {
             onPressed: _findPrevious,
             tooltip: '上一个 (Shift+F3)',
             color: _totalMatches > 0
-              ? theme.iconTheme.color
-              : theme.disabledColor,
+                ? theme.iconTheme.color
+                : theme.disabledColor,
           ),
           IconButton(
             icon: Icon(Icons.keyboard_arrow_down, size: 20),
             onPressed: _findNext,
             tooltip: '下一个 (F3)',
             color: _totalMatches > 0
-              ? theme.iconTheme.color
-              : theme.disabledColor,
+                ? theme.iconTheme.color
+                : theme.disabledColor,
           ),
           IconButton(
             icon: Icon(Icons.close, size: 20),
@@ -1197,14 +1185,11 @@ class NoteDetailState extends State<NoteDetailPage> {
   Widget _buildSuperSearchBar() {
     final theme = Theme.of(context);
 
-
     return Container(
       padding: const EdgeInsets.all(8.0),
       decoration: BoxDecoration(
         color: theme.appBarTheme.backgroundColor,
-        border: Border(
-          bottom: BorderSide(color: theme.dividerColor),
-        ),
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
       child: Row(
         children: [
@@ -1315,7 +1300,9 @@ class NoteDetailState extends State<NoteDetailPage> {
                     border: InputBorder.none,
                     hintText: '开始输入内容...',
                     hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.textTheme.bodyMedium?.color?.withOpacity(0.3),
+                      color: theme.textTheme.bodyMedium?.color?.withOpacity(
+                        0.3,
+                      ),
                     ),
                   ),
                   style: theme.textTheme.bodyMedium?.copyWith(
@@ -1392,7 +1379,8 @@ class NoteDetailState extends State<NoteDetailPage> {
                             SuperEditorIosHandlesDocumentLayerBuilder(),
                             SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
                           ],
-                          if (defaultTargetPlatform == TargetPlatform.android) ...[
+                          if (defaultTargetPlatform ==
+                              TargetPlatform.android) ...[
                             SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
                             SuperEditorAndroidHandlesDocumentLayerBuilder(),
                           ],
@@ -1401,7 +1389,9 @@ class NoteDetailState extends State<NoteDetailPage> {
                         selectionStyle: isLight
                             ? defaultSelectionStyle
                             : SelectionStyles(
-                                selectionColor: Colors.red.withValues(alpha: 0.3),
+                                selectionColor: Colors.red.withValues(
+                                  alpha: 0.3,
+                                ),
                               ),
                         stylesheet: defaultStylesheet.copyWith(
                           addRulesAfter: [
@@ -1414,9 +1404,7 @@ class NoteDetailState extends State<NoteDetailPage> {
                               };
                             }),
                             StyleRule(BlockSelector.all, (doc, docNode) {
-                              return {
-                                Styles.maxWidth: constraints.maxWidth,
-                              };
+                              return {Styles.maxWidth: constraints.maxWidth};
                             }),
                           ],
                         ),
@@ -1442,7 +1430,7 @@ class NoteDetailState extends State<NoteDetailPage> {
   Widget _buildPreview() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    
+
     // 使用flutter_markdown包实现真正的Markdown预览
     return fm.Markdown(
       data: note.content,
@@ -1460,10 +1448,7 @@ class NoteDetailState extends State<NoteDetailPage> {
         return _buildLocalImage(path);
       },
       styleSheet: fm.MarkdownStyleSheet(
-        p: theme.textTheme.bodyMedium?.copyWith(
-          fontSize: 14,
-          height: 1.6,
-        ),
+        p: theme.textTheme.bodyMedium?.copyWith(fontSize: 14, height: 1.6),
         h1: theme.textTheme.headlineMedium?.copyWith(
           fontSize: 26,
           fontWeight: FontWeight.bold,
@@ -1595,7 +1580,7 @@ class NoteDetailState extends State<NoteDetailPage> {
   Widget _buildErrorWidget(String message, String path) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    
+
     return Container(
       padding: EdgeInsets.all(8),
       decoration: BoxDecoration(
@@ -1606,9 +1591,9 @@ class NoteDetailState extends State<NoteDetailPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            Icons.broken_image, 
-            color: isDark ? Colors.grey[600] : Colors.grey[400], 
-            size: 48
+            Icons.broken_image,
+            color: isDark ? Colors.grey[600] : Colors.grey[400],
+            size: 48,
           ),
           SizedBox(height: 8),
           Text(

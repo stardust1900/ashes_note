@@ -3,13 +3,15 @@ import 'dart:io';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:ashes_note/ashes_theme.dart';
+import 'package:ashes_note/views/book_reader_page.dart';
 
 class SettingsView extends StatefulWidget {
   final VoidCallback? onThemeChanged;
-  
+
   const SettingsView({super.key, this.onThemeChanged});
 
   @override
@@ -29,8 +31,8 @@ class _SettingsViewState extends State<SettingsView> {
   String? _token;
   String? _remoteUrl;
 
-  String _selectedTheme = ThemeModes.minimal; // 默认极简主题
-
+  String _selectedTheme = ThemeModes.minimal;
+  bool _volumeKeyPageTurn = false;
   bool _isObscure = true;
 
   // TextEditingController? _workingDirectoryController;
@@ -51,6 +53,7 @@ class _SettingsViewState extends State<SettingsView> {
     _githubToken = SPUtil.get<String>(PrefKeys.githubToken, '');
     _githubRemoteUrl = SPUtil.get<String>(PrefKeys.githubRemoteUrl, '');
     _selectedTheme = SPUtil.get<String>(PrefKeys.themeMode, ThemeModes.minimal);
+    _volumeKeyPageTurn = SPUtil.get<bool>(PrefKeys.volumeKeyPageTurn, false);
 
     setState(() {
       if (_gitPlatform == GitPlatforms.gitee) {
@@ -106,6 +109,10 @@ class _SettingsViewState extends State<SettingsView> {
           children: [
             _buildThemeSection(),
             const SizedBox(height: 24),
+            if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) ...[
+              _buildReadingSection(),
+              const SizedBox(height: 24),
+            ],
             _buildWorkingDirectorySection(),
             const SizedBox(height: 24),
             _buildGitConfigSection(),
@@ -152,6 +159,32 @@ class _SettingsViewState extends State<SettingsView> {
               onChanged: (value) {
                 _changeTheme(value ?? ThemeModes.inkMode);
               },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReadingSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('阅读设置', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              title: const Text('音量键翻页'),
+              subtitle: const Text('阅读时按音量键上下翻页'),
+              value: _volumeKeyPageTurn,
+              onChanged: (value) {
+                setState(() => _volumeKeyPageTurn = value);
+                SPUtil.set<bool>(PrefKeys.volumeKeyPageTurn, value);
+                syncVolumeKeyEnabled(value);
+              },
+              contentPadding: EdgeInsets.zero,
             ),
           ],
         ),
@@ -230,7 +263,10 @@ class _SettingsViewState extends State<SettingsView> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).primaryColor,
                 foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -405,7 +441,10 @@ class _SettingsViewState extends State<SettingsView> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).primaryColor,
                       foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -413,7 +452,10 @@ class _SettingsViewState extends State<SettingsView> {
                     ),
                     child: const Text(
                       '保存配置',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -454,7 +496,9 @@ class _SettingsViewState extends State<SettingsView> {
                               },
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.red,
-                                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                               child: const Text('初始化'),
                             ),
@@ -465,7 +509,10 @@ class _SettingsViewState extends State<SettingsView> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue.shade600,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),

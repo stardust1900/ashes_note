@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../utils/const.dart';
+import '../utils/prefs_util.dart';
 import '../services/book_reader/youdao_dictionary_service.dart';
 import '../services/book_reader/free_dictionary_service.dart';
 import '../services/book_reader/hz_dictionary_service.dart';
@@ -21,6 +23,15 @@ import 'book_reader/selectable_text_with_toolbar.dart';
 import 'book_reader/notes_list_dialog.dart';
 import 'book_reader/dictionary_dialog.dart';
 import 'book_reader/book_loader.dart';
+
+const _volumeConfigChannel = MethodChannel('volume_key_config');
+
+/// 同步音量键翻页开关状态到原生层（可在任意位置调用）
+Future<void> syncVolumeKeyEnabled(bool enabled) async {
+  if (!kIsWeb && Platform.isAndroid) {
+    await _volumeConfigChannel.invokeMethod('setEnabled', enabled);
+  }
+}
 
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
@@ -125,7 +136,10 @@ class _BookReaderPageState extends State<BookReaderPage>
   bool get _isDesktop =>
       !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
-  // 移动端翻页滑动动画
+  // 音量键 EventChannel / MethodChannel
+  static const _volumeChannel = EventChannel('volume_key_channel');
+  StreamSubscription? _volumeKeySubscription;
+
   late final AnimationController _pageSlideController;
   double _dragOffset = 0.0; // 当前拖动偏移（跟手）
   int? _nextPageIndex; // 拖动中预备跳转的目标页索引
@@ -136,9 +150,24 @@ class _BookReaderPageState extends State<BookReaderPage>
   double _animStartOffset = 0.0; // 确认翻页动画开始时的拖动偏移
 
   @override
-  @override
   void initState() {
     super.initState();
+    // 全局键盘事件监听（用于移动端音量键翻页）
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
+    // Android 音量键通过原生 EventChannel 监听
+    if (!kIsWeb && Platform.isAndroid) {
+      // 进入阅读页时同步开关状态到原生层
+      final enabled = SPUtil.get<bool>(PrefKeys.volumeKeyPageTurn, false);
+      syncVolumeKeyEnabled(enabled);
+      _volumeKeySubscription = _volumeChannel.receiveBroadcastStream().listen((
+        event,
+      ) {
+        if (event == 'down')
+          _nextPage();
+        else if (event == 'up')
+          _previousPage();
+      });
+    }
     // 初始化翻页滑动动画控制器（仅移动端使用）
     _pageSlideController = AnimationController(
       vsync: this,
@@ -206,8 +235,11 @@ class _BookReaderPageState extends State<BookReaderPage>
   }
 
   @override
-  @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
+    _volumeKeySubscription?.cancel();
+    // 离开阅读页时关闭音量键拦截，恢复系统音量控制
+    syncVolumeKeyEnabled(false);
     _saveReadingPosition(); // 退出前保存阅读位置
     _pageSlideController.dispose();
     _bookLoader.dispose();
@@ -217,6 +249,19 @@ class _BookReaderPageState extends State<BookReaderPage>
     _searchController.dispose(); // 清理搜索控制器
     _hideTextToolbar(); // 清理工具栏
     super.dispose();
+  }
+
+  /// 全局硬件键盘事件处理（用于移动端音量键翻页）
+  bool _handleHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey == LogicalKeyboardKey.audioVolumeDown) {
+      if (mounted) _nextPage();
+      return true; // 拦截，阻止系统调节音量
+    } else if (event.logicalKey == LogicalKeyboardKey.audioVolumeUp) {
+      if (mounted) _previousPage();
+      return true;
+    }
+    return false;
   }
 
   /// 处理链接点击
