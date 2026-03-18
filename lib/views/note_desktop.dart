@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
@@ -10,6 +9,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
+import 'package:re_editor/re_editor.dart';
+import 'package:re_highlight/languages/markdown.dart';
+import 'package:re_highlight/styles/atom-one-dark.dart';
+import 'package:re_highlight/styles/atom-one-light.dart';
 
 class NotebookDesktopPage extends StatefulWidget {
   const NotebookDesktopPage({super.key});
@@ -33,6 +36,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   // 当前选中的笔记（用于右侧显示详情）
   Note? _selectedNote;
   Notebook? _selectedNotebook;
+  final GlobalKey<_NoteDetailPanelState> _detailPanelKey = GlobalKey();
 
   // 笔记本展开状态（支持多个笔记本同时展开）
   final Set<String> _expandedNotebooks = <String>{};
@@ -593,6 +597,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                   final isUnsynced = _unsyncedNoteIds.contains(note.id);
                   return InkWell(
                     onTap: () {
+                      _detailPanelKey.currentState?._saveScrollPosition(
+                        _selectedNote!.id,
+                      );
                       setState(() {
                         _selectedNote = note;
                         SPUtil.set(PrefKeys.selectedNote, note.id);
@@ -710,6 +717,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                     (n) => n.id == result.note.id,
                     orElse: () => result.note,
                   );
+                  _detailPanelKey.currentState?._saveScrollPosition(
+                    _selectedNote!.id,
+                  );
                   setState(() {
                     _selectedNotebook = notebook;
                     _selectedNote = actualNote;
@@ -724,7 +734,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
 
   Widget _buildNoteDetail(Note note) {
     return _NoteDetailPanel(
-      key: ValueKey(note.id),
+      key: _detailPanelKey,
       note: note,
       notebook: _selectedNotebook!,
       onNoteChanged: noteChanged,
@@ -968,17 +978,15 @@ class _NoteDetailPanel extends StatefulWidget {
 
 class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   late TextEditingController _titleController;
-  late TextEditingController _contentController;
+  late CodeLineEditingController _contentController;
+  late CodeFindController _findController;
   Timer? _saveTimer;
 
-  // 查找功能相关变量
-  final TextEditingController _findController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  bool _showFindPanel = false;
-  int _currentFindIndex = -1;
-  int _totalMatches = 0;
-  List<TextSelection> _matches = [];
-  final FocusNode _findFocusNode = FocusNode();
+  late CodeScrollController _codeScrollController;
+  final ScrollController _previewScrollController = ScrollController();
+  bool _isSyncingScroll = false;
+  bool _showLineNumbers = true;
+  Timer? _scrollSaveTimer;
 
   // 视图模式：edit(普通编辑), split(分栏预览), preview(预览)
   String _viewMode = 'edit';
@@ -986,25 +994,27 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   // 分栏比例（编辑区占比）
   double _splitRatio = 0.5;
 
-  // 编辑器容器 key，用于获取实际渲染宽度
-  final GlobalKey _editorKey = GlobalKey();
-  double _editorLayoutWidth = 600.0;
-
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController(
       text: widget.note.title.replaceAll('.md', ''),
     );
-    _contentController = TextEditingController(text: widget.note.content);
+    _contentController = CodeLineEditingController.fromText(
+      widget.note.content,
+    );
+    _showLineNumbers = SPUtil.get<bool>(PrefKeys.showLineNumbers, true);
+    _findController = CodeFindController(_contentController);
+    _codeScrollController = CodeScrollController(
+      verticalScroller: ScrollController(),
+    );
     _contentController.addListener(_onContentChanged);
-    _findController.addListener(_onFindTextChanged);
-    // 有搜索词时自动高亮
-    if (widget.searchQuery.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _findController.text = widget.searchQuery;
-      });
-    }
+    _codeScrollController.verticalScroller.addListener(_onEditorScrolled);
+    _previewScrollController.addListener(_onPreviewScrolled);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 等 scroller 有 clients 后再恢复位置
+      _tryRestoreScrollPosition(widget.note.id, 0);
+    });
   }
 
   @override
@@ -1013,48 +1023,113 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     if (oldWidget.note.id != widget.note.id) {
       _titleController.text = widget.note.title.replaceAll('.md', '');
       _contentController.text = widget.note.content;
-      _findController.clear();
-      _matches.clear();
-      _currentFindIndex = -1;
-      _totalMatches = 0;
-      _showFindPanel = false;
       _viewMode = 'edit';
-
-      // 切换笔记后重新应用搜索高亮
-      if (widget.searchQuery.isNotEmpty) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _findController.text = widget.searchQuery;
-        });
-      }
-    } else if (oldWidget.searchQuery != widget.searchQuery) {
-      // 搜索词变化（包括清空）
-      _findController.text = widget.searchQuery;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _tryRestoreScrollPosition(widget.note.id, 0),
+      );
     }
   }
 
   @override
   void dispose() {
+    // dispose 前 scroller 还有 clients，先保存位置
+    _saveScrollPosition(widget.note.id);
     _saveTimer?.cancel();
+    _scrollSaveTimer?.cancel();
     _contentController.removeListener(_onContentChanged);
-    _findController.removeListener(_onFindTextChanged);
+    _codeScrollController.verticalScroller.removeListener(_onEditorScrolled);
+    _previewScrollController.removeListener(_onPreviewScrolled);
     _titleController.dispose();
     _contentController.dispose();
     _findController.dispose();
-    _scrollController.dispose();
-    _findFocusNode.dispose();
+    _codeScrollController.verticalScroller.dispose();
+    _codeScrollController.dispose();
+    _previewScrollController.dispose();
     super.dispose();
   }
 
+  String _scrollKey(String noteId) =>
+      '${PrefKeys.scrollPosPrefix}${noteId.replaceAll('/', '_')}';
+
+  // 行高 = fontSize * fontHeight = 14 * 1.6
+  static const double _lineHeight = 14 * 1.6;
+
+  void _tryRestoreScrollPosition(String noteId, int attempt) {
+    if (!mounted) return;
+    final scroller = _codeScrollController.verticalScroller;
+    if (!scroller.hasClients) {
+      // 还没渲染好，最多重试 10 次
+      if (attempt < 10) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _tryRestoreScrollPosition(noteId, attempt + 1),
+        );
+      }
+      return;
+    }
+    _restoreScrollPosition(noteId);
+  }
+
+  void _saveScrollPosition(String noteId) {
+    final scroller = _codeScrollController.verticalScroller;
+    if (!scroller.hasClients) return;
+    final firstVisibleLine = (scroller.offset / _lineHeight).floor();
+    if (firstVisibleLine > 0) {
+      SPUtil.set<int>(_scrollKey(noteId), firstVisibleLine);
+    }
+  }
+
+  void _restoreScrollPosition(String noteId) {
+    final line = SPUtil.get<int>(_scrollKey(noteId), 0);
+    if (line <= 0) return;
+    final scroller = _codeScrollController.verticalScroller;
+    if (!scroller.hasClients) return;
+    final targetOffset = line * _lineHeight;
+    scroller.jumpTo(targetOffset);
+  }
+
+  void _onEditorScrolled() {
+    if (_isSyncingScroll) return;
+    final vertScroller = _codeScrollController.verticalScroller;
+    if (!vertScroller.hasClients || !_previewScrollController.hasClients)
+      return;
+    final editorMax = vertScroller.position.maxScrollExtent;
+    if (editorMax <= 0) return;
+    final ratio = vertScroller.offset / editorMax;
+    final previewMax = _previewScrollController.position.maxScrollExtent;
+    _isSyncingScroll = true;
+    _previewScrollController.jumpTo(ratio * previewMax);
+    _isSyncingScroll = false;
+
+    // 节流保存滚动位置（2秒内只写一次）
+    _scrollSaveTimer?.cancel();
+    _scrollSaveTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) _saveScrollPosition(widget.note.id);
+    });
+  }
+
+  void _onPreviewScrolled() {
+    if (_isSyncingScroll) return;
+    final vertScroller = _codeScrollController.verticalScroller;
+    if (!vertScroller.hasClients || !_previewScrollController.hasClients)
+      return;
+    final previewMax = _previewScrollController.position.maxScrollExtent;
+    if (previewMax <= 0) return;
+    final ratio = _previewScrollController.offset / previewMax;
+    final editorMax = vertScroller.position.maxScrollExtent;
+    _isSyncingScroll = true;
+    vertScroller.jumpTo(ratio * editorMax);
+    _isSyncingScroll = false;
+  }
+
   void _onContentChanged() {
-    if (_contentController.text != widget.note.content) {
-      setState(() {
-        widget.note.content = _contentController.text;
-        widget.note.lastModified = DateTime.now();
-        widget.onNoteChanged(widget.note);
-        // 如果正在查找，更新高亮
-        if (_findController.text.isNotEmpty) {
-          _findMatches();
-        }
+    final newContent = _contentController.text;
+    if (newContent != widget.note.content) {
+      widget.note.content = newContent;
+      widget.note.lastModified = DateTime.now();
+
+      // 延迟到 build 完成后再通知父级，避免在 build 阶段触发父级 setState
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onNoteChanged(widget.note);
       });
 
       // 延迟保存
@@ -1075,119 +1150,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     );
   }
 
-  void _onFindTextChanged() {
-    _findMatches();
-  }
-
-  void _findMatches() {
-    final query = _findController.text.trim();
-
-    if (query.isEmpty) {
-      setState(() {
-        _matches.clear();
-        _currentFindIndex = -1;
-        _totalMatches = 0;
-      });
-      return;
-    }
-
-    final text = _contentController.text;
-    final pattern = RegExp(RegExp.escape(query), caseSensitive: false);
-    final matches = pattern.allMatches(text).toList();
-
-    setState(() {
-      _matches = matches
-          .map(
-            (match) =>
-                TextSelection(baseOffset: match.start, extentOffset: match.end),
-          )
-          .toList();
-      _totalMatches = _matches.length;
-      _currentFindIndex = _matches.isNotEmpty ? 0 : -1;
-    });
-
-    if (_matches.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToMatch();
-      });
-    }
-  }
-
-  void _findNext() {
-    if (_totalMatches == 0) return;
-
-    setState(() {
-      _currentFindIndex = (_currentFindIndex + 1) % _totalMatches;
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToMatch();
-    });
-  }
-
-  void _findPrevious() {
-    if (_totalMatches == 0) return;
-
-    setState(() {
-      _currentFindIndex =
-          (_currentFindIndex - 1 + _totalMatches) % _totalMatches;
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToMatch();
-    });
-  }
-
-  void _scrollToMatch() {
-    if (_currentFindIndex < 0 || _currentFindIndex >= _matches.length) return;
-    if (!_scrollController.hasClients) return;
-
-    final match = _matches[_currentFindIndex];
-    final text = _contentController.text;
-    final theme = Theme.of(context);
-
-    final painter = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          fontSize: 14,
-          height: 1.6,
-          fontFamily: 'monospace',
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-      maxLines: null,
-    );
-    painter.layout(maxWidth: _editorLayoutWidth);
-
-    final boxes = painter.getBoxesForSelection(match);
-    if (boxes.isEmpty) return;
-
-    final targetOffset = (boxes.first.top - 100).clamp(
-      0.0,
-      _scrollController.position.maxScrollExtent,
-    );
-    _scrollController.animateTo(
-      targetOffset,
-      duration: Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
-  }
-
-  void _toggleFindPanel() {
-    setState(() {
-      _showFindPanel = !_showFindPanel;
-      if (_showFindPanel) {
-        _findFocusNode.requestFocus();
-      } else {
-        _findController.clear();
-        _matches.clear();
-        _currentFindIndex = -1;
-        _totalMatches = 0;
-      }
-    });
-  }
-
   void _switchViewMode(String newMode) {
     if (_viewMode == newMode) return;
 
@@ -1202,13 +1164,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
 
     setState(() {
       _viewMode = newMode;
-      if (_showFindPanel) {
-        _showFindPanel = false;
-        _findController.clear();
-        _matches.clear();
-        _currentFindIndex = -1;
-        _totalMatches = 0;
-      }
     });
   }
 
@@ -1222,7 +1177,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
         children: [
           // 笔记标题栏
           Container(
-            padding: EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
               border: Border(bottom: BorderSide(color: theme.dividerColor)),
@@ -1262,13 +1217,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                   ),
                 ),
                 SizedBox(width: 16),
-                // 查找按钮
-                if (_viewMode == 'edit' || _viewMode == 'split')
-                  IconButton(
-                    icon: Icon(Icons.find_in_page),
-                    onPressed: _toggleFindPanel,
-                    tooltip: '查找 (Ctrl+F)',
-                  ),
                 // 普通编辑模式按钮
                 IconButton(
                   icon: Icon(
@@ -1357,13 +1305,10 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
               ],
             ),
           ),
-          // 查找面板
-          if (_showFindPanel && (_viewMode == 'edit' || _viewMode == 'split'))
-            _buildFindPanel(),
           // 笔记内容编辑区
           Expanded(
             child: Padding(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
               child: _viewMode == 'edit'
                   ? _buildEditor(theme)
                   : _viewMode == 'split'
@@ -1376,154 +1321,84 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     );
   }
 
-  Widget _buildFindPanel() {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        border: Border(bottom: BorderSide(color: theme.dividerColor)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _findController,
-              focusNode: _findFocusNode,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.textTheme.bodyMedium?.color,
-              ),
-              decoration: InputDecoration(
-                hintText: '查找...',
-                hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.textTheme.bodyMedium?.color?.withValues(
-                    alpha: 0.5,
-                  ),
-                ),
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                isDense: true,
-              ),
-            ),
-          ),
-          SizedBox(width: 12),
-          Text(
-            _totalMatches > 0
-                ? '${_currentFindIndex + 1}/$_totalMatches'
-                : '无匹配',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
-            ),
-          ),
-          SizedBox(width: 8),
-          IconButton(
-            icon: Icon(Icons.keyboard_arrow_up, size: 20),
-            onPressed: _findPrevious,
-            tooltip: '上一个',
-            color: _totalMatches > 0
-                ? theme.iconTheme.color
-                : theme.disabledColor,
-          ),
-          IconButton(
-            icon: Icon(Icons.keyboard_arrow_down, size: 20),
-            onPressed: _findNext,
-            tooltip: '下一个',
-            color: _totalMatches > 0
-                ? theme.iconTheme.color
-                : theme.disabledColor,
-          ),
-          IconButton(
-            icon: Icon(Icons.close, size: 20),
-            onPressed: _toggleFindPanel,
-            tooltip: '关闭',
-            color: theme.iconTheme.color,
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildEditor(ThemeData theme) {
-    final textStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontSize: 14,
-      height: 1.6,
-      fontFamily: 'monospace',
-    );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 记录编辑器宽度供 _scrollToMatch 使用
-        _editorLayoutWidth = constraints.maxWidth;
-        return SingleChildScrollView(
-          controller: _scrollController,
-          child: _matches.isEmpty
-              ? TextField(
-                  key: _editorKey,
-                  controller: _contentController,
-                  maxLines: null,
-                  selectionHeightStyle: BoxHeightStyle.tight,
-                  selectionWidthStyle: BoxWidthStyle.tight,
-                  style: textStyle,
-                  decoration: InputDecoration(
-                    hintText: '开始编写笔记内容...',
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                )
-              : _buildHighlightedText(theme, textStyle),
-        );
-      },
+    final isDark = theme.brightness == Brightness.dark;
+    return CodeEditor(
+      controller: _contentController,
+      scrollController: _codeScrollController,
+      findController: _findController,
+      wordWrap: true,
+      style: CodeEditorStyle(
+        fontSize: 14,
+        fontHeight: 1.6,
+        fontFamily: 'monospace',
+        textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
+        backgroundColor: isDark
+            ? Color.fromARGB(255, 48, 48, 48)
+            : const Color(0xFFFFFFFF),
+        highlightColor: Colors.yellow.withValues(alpha: 0.5),
+        selectionColor: Colors.orange.withValues(alpha: 0.6),
+        codeTheme: CodeHighlightTheme(
+          languages: {'markdown': CodeHighlightThemeMode(mode: langMarkdown)},
+          theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
+        ),
+      ),
+      findBuilder: (context, controller, readOnly) =>
+          _FindPanel(controller: controller),
+      indicatorBuilder:
+          (context, editingController, chunkController, notifier) {
+            return GestureDetector(
+              onSecondaryTapUp: (details) =>
+                  _showLineNumberMenu(details.globalPosition),
+              child: _showLineNumbers
+                  ? Container(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: DefaultCodeLineNumber(
+                        controller: editingController,
+                        notifier: notifier,
+                        textStyle: TextStyle(
+                          fontSize: 12,
+                          color: theme.textTheme.bodySmall?.color?.withValues(
+                            alpha: 0.5,
+                          ),
+                        ),
+                      ),
+                    )
+                  : Container(width: 12, color: Colors.transparent),
+            );
+          },
     );
   }
 
-  Widget _buildHighlightedText(ThemeData theme, TextStyle? baseStyle) {
-    final text = _contentController.text;
-    final textColor = baseStyle?.color ?? theme.textTheme.bodyMedium?.color;
-    final spans = <TextSpan>[];
-    int current = 0;
-
-    for (int i = 0; i < _matches.length; i++) {
-      final match = _matches[i];
-      if (match.start > current) {
-        spans.add(
-          TextSpan(
-            text: text.substring(current, match.start),
-            style: TextStyle(fontSize: 14, height: 1.6, color: textColor),
+  void _showLineNumberMenu(Offset position) {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    showMenu<bool>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem<bool>(
+          value: true,
+          child: Row(
+            children: [
+              Icon(
+                _showLineNumbers ? Icons.visibility_off : Icons.visibility,
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Text(_showLineNumbers ? '隐藏行号' : '显示行号'),
+            ],
           ),
-        );
+        ),
+      ],
+    ).then((selected) {
+      if (selected == true) {
+        setState(() => _showLineNumbers = !_showLineNumbers);
+        SPUtil.set(PrefKeys.showLineNumbers, _showLineNumbers);
       }
-      final isCurrent = i == _currentFindIndex;
-      spans.add(
-        TextSpan(
-          text: text.substring(match.start, match.end),
-          style: TextStyle(
-            backgroundColor: isCurrent ? Colors.orange : Colors.yellow,
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-            height: 1.6,
-          ),
-        ),
-      );
-      current = match.end;
-    }
-    if (current < text.length) {
-      spans.add(
-        TextSpan(
-          text: text.substring(current),
-          style: TextStyle(fontSize: 14, height: 1.6, color: textColor),
-        ),
-      );
-    }
-
-    return SelectableText.rich(
-      key: _editorKey,
-      TextSpan(children: spans),
-      style: baseStyle,
-    );
+    });
   }
 
   Widget _buildSplitView(ThemeData theme) {
@@ -1566,6 +1441,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                 child: fm.Markdown(
                   data: _contentController.text,
                   selectable: true,
+                  controller: _previewScrollController,
                   imageDirectory: SPUtil.get<String>(
                     PrefKeys.workingDirectory,
                     '',
@@ -1626,6 +1502,98 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// 查找面板 UI
+class _FindPanel extends StatefulWidget implements PreferredSizeWidget {
+  final CodeFindController controller;
+
+  const _FindPanel({required this.controller});
+
+  @override
+  Size get preferredSize =>
+      controller.value != null ? const Size.fromHeight(52) : Size.zero;
+
+  @override
+  State<_FindPanel> createState() => _FindPanelState();
+}
+
+class _FindPanelState extends State<_FindPanel> {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ValueListenableBuilder<CodeFindValue?>(
+      valueListenable: widget.controller,
+      builder: (context, value, _) {
+        if (value == null) return const SizedBox.shrink();
+        final result = value.result;
+        final total = result?.matches.length ?? 0;
+        final current = result != null && total > 0 ? (result.index + 1) : 0;
+        return Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: theme.cardColor,
+            border: Border(bottom: BorderSide(color: theme.dividerColor)),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 220,
+                child: TextField(
+                  controller: widget.controller.findInputController,
+                  focusNode: widget.controller.findInputFocusNode,
+                  style: theme.textTheme.bodySmall,
+                  decoration: InputDecoration(
+                    hintText: '查找...',
+                    hintStyle: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                total > 0 ? '$current/$total' : '无匹配',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.hintColor,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+                onPressed: widget.controller.previousMatch,
+                tooltip: '上一个',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              ),
+              IconButton(
+                icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                onPressed: widget.controller.nextMatch,
+                tooltip: '下一个',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: widget.controller.close,
+                tooltip: '关闭',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

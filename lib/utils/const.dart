@@ -9,6 +9,8 @@ class PrefKeys {
   static const String selectedNotebook = 'selectedNotebook';
   static const String selectedNote = 'selectedNote';
   static const String themeMode = 'themeMode'; // 主题模式：minimal 或 dark
+  static const String showLineNumbers = 'showLineNumbers';
+  static const String scrollPosPrefix = 'scroll_pos_';
 }
 
 class GitPlatforms {

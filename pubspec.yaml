@@ -49,6 +49,8 @@ dependencies:
   overlord: ^0.4.2
   logging: ^1.3.0
   follow_the_leader: ^0.5.2
+  re_editor: ^0.8.0
+  re_highlight: ^0.0.3
   epub_plus: ^5.1.0
   flutter_html: ^3.0.0-beta.2
   archive: ^4.0.0
