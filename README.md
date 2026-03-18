@@ -1,5 +1,3 @@
-
-
 # ashes_note（草灰笔记）
 
 一款基于Flutter开发的跨平台笔记应用，专注于提供简洁高效的笔记管理功能。
@@ -145,10 +143,46 @@ flutter build windows
 ## 🙏 致谢
 
 感谢以下开源项目的支持：
-- [Flutter](https://flutter.dev/)
-- [epub_kitty](https://pub.dev/packages/epub_kitty)
-- [sidebarx](https://pub.dev/packages/sidebarx)
-- 所有贡献者和支持者
+
+🔗 开源项目列表
+
+### 核心框架
+- **[Flutter](https://github.com/flutter/flutter)** - Google 开发的跨平台 UI 框架
+- **[Dart SDK](https://github.com/dart-lang/sdk)** - Dart 编程语言运行时
+
+### UI 组件与图标
+- **[sidebarx](https://github.com/FlaviaIT/sidebarx)** - 侧边栏导航组件
+- **[cupertino_icons](https://pub.dev/packages/cupertino_icons)** - iOS 风格图标库
+- **[flutter_markdown_plus](https://pub.dev/packages/flutter_markdown_plus)** - Markdown 渲染组件
+- **[flutter_html](https://pub.dev/packages/flutter_html)** - HTML 渲染组件
+- **[flutter_launcher_icons](https://pub.dev/packages/flutter_launcher_icons)** - 应用图标生成工具
+
+### 编辑器与阅读
+- **[super_editor](https://pub.dev/packages/super_editor)** - 富文本编辑器组件
+- **[re_editor](https://pub.dev/packages/re_editor)** - 代码编辑器组件
+- **[re_highlight](https://pub.dev/packages/re_highlight)** - 代码语法高亮
+- **[epub_plus](https://pub.dev/packages/epub_plus)** - EPUB 电子书解析库
+
+### 文件与数据存储
+- **[file_picker](https://pub.dev/packages/file_picker)** - 文件选择器
+- **[path_provider](https://pub.dev/packages/path_provider)** - 文件路径获取
+- **[shared_preferences](https://pub.dev/packages/shared_preferences)** - 本地键值存储
+- **[archive](https://pub.dev/packages/archive)** - 压缩/解压库
+- **[image](https://pub.dev/packages/image)** - 图片处理库
+
+### 网络与工具
+- **[http](https://pub.dev/packages/http)** - HTTP 客户端库
+- **[crypto](https://pub.dev/packages/crypto)** - 加密算法库
+- **[uuid](https://pub.dev/packages/uuid)** - UUID 生成器
+- **[logging](https://pub.dev/packages/logging)** - 日志工具
+- **[intl](https://pub.dev/packages/intl)** - 国际化支持
+
+### 其他工具
+- **[path](https://pub.dev/packages/path)** - 文件路径操作工具
+- **[html](https://pub.dev/packages/html)** - HTML 解析器
+- **[overlord](https://pub.dev/packages/overlord)** - UI 动画过渡库
+- **[follow_the_leader](https://pub.dev/packages/follow_the_leader)** - 跟随定位组件
+- **[flutter_localization](https://pub.dev/packages/flutter_localization)** - Flutter 本地化工具
 
 ---
 *Made with ❤️ using Flutter*
