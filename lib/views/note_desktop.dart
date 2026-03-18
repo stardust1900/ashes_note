@@ -6,7 +6,7 @@ import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:flutter/services.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
 import 'package:re_editor/re_editor.dart';
@@ -360,58 +360,78 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(
-        children: [
-          // 左侧面板：笔记本和笔记树形列表
-          SizedBox(
-            width: _sidebarWidth,
-            child: Container(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: Column(
-                children: [
-                  _buildSidebarHeader(),
-                  Expanded(
-                    child: _showSearchResults
-                        ? _buildSearchResults()
-                        : _buildNoteTree(),
-                  ),
-                ],
+    return KeyboardListener(
+      focusNode: FocusNode()..requestFocus(),
+      onKeyEvent: (KeyEvent event) {
+        // 处理 Ctrl+S 保存快捷键
+        if (event is KeyDownEvent &&
+            _selectedNote != null &&
+            (HardwareKeyboard.instance.logicalKeysPressed.contains(
+                  LogicalKeyboardKey.controlLeft,
+                ) ||
+                HardwareKeyboard.instance.logicalKeysPressed.contains(
+                  LogicalKeyboardKey.controlRight,
+                )) &&
+            event.logicalKey == LogicalKeyboardKey.keyS) {
+          saveNote(_selectedNote!);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
+        }
+      },
+      child: Scaffold(
+        body: Row(
+          children: [
+            // 左侧面板：笔记本和笔记树形列表
+            SizedBox(
+              width: _sidebarWidth,
+              child: Container(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: Column(
+                  children: [
+                    _buildSidebarHeader(),
+                    Expanded(
+                      child: _showSearchResults
+                          ? _buildSearchResults()
+                          : _buildNoteTree(),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          // 可拖动分隔线
-          GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onHorizontalDragUpdate: (details) {
-              setState(() {
-                _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
-                  160.0,
-                  600.0,
-                );
-              });
-            },
-            child: MouseRegion(
-              cursor: SystemMouseCursors.resizeColumn,
-              child: Container(
-                width: 6,
-                color: Colors.transparent,
-                child: Center(
-                  child: Container(
-                    width: 1,
-                    color: Theme.of(context).dividerColor,
+            // 可拖动分隔线
+            GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onHorizontalDragUpdate: (details) {
+                setState(() {
+                  _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
+                    160.0,
+                    600.0,
+                  );
+                });
+              },
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: Container(
+                  width: 6,
+                  color: Colors.transparent,
+                  child: Center(
+                    child: Container(
+                      width: 1,
+                      color: Theme.of(context).dividerColor,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          // 右侧面板：笔记详情
-          Expanded(
-            child: _selectedNote != null
-                ? _buildNoteDetail(_selectedNote!)
-                : _buildEmptyDetail(),
-          ),
-        ],
+            // 右侧面板：笔记详情
+            Expanded(
+              child: _selectedNote != null
+                  ? _buildNoteDetail(_selectedNote!)
+                  : _buildEmptyDetail(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1088,10 +1108,13 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   }
 
   void _onEditorScrolled() {
-    if (_isSyncingScroll) return;
-    final vertScroller = _codeScrollController.verticalScroller;
-    if (!vertScroller.hasClients || !_previewScrollController.hasClients)
+    if (_isSyncingScroll) {
       return;
+    }
+    final vertScroller = _codeScrollController.verticalScroller;
+    if (!vertScroller.hasClients || !_previewScrollController.hasClients) {
+      return;
+    }
     final editorMax = vertScroller.position.maxScrollExtent;
     if (editorMax <= 0) return;
     final ratio = vertScroller.offset / editorMax;
@@ -1108,10 +1131,13 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   }
 
   void _onPreviewScrolled() {
-    if (_isSyncingScroll) return;
-    final vertScroller = _codeScrollController.verticalScroller;
-    if (!vertScroller.hasClients || !_previewScrollController.hasClients)
+    if (_isSyncingScroll) {
       return;
+    }
+    final vertScroller = _codeScrollController.verticalScroller;
+    if (!vertScroller.hasClients || !_previewScrollController.hasClients) {
+      return;
+    }
     final previewMax = _previewScrollController.position.maxScrollExtent;
     if (previewMax <= 0) return;
     final ratio = _previewScrollController.offset / previewMax;
@@ -1258,7 +1284,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                       context,
                     ).showSnackBar(SnackBar(content: Text('笔记已保存')));
                   },
-                  tooltip: '保存',
+                  tooltip: '保存 (Ctrl+S)',
                 ),
                 if (_viewMode == 'preview' || _viewMode == 'split')
                   IconButton(
@@ -1328,6 +1354,17 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
       scrollController: _codeScrollController,
       findController: _findController,
       wordWrap: true,
+      shortcutOverrideActions: <Type, Action<Intent>>{
+        CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
+          onInvoke: (intent) {
+            widget.saveNote(widget.note);
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
+            return null;
+          },
+        ),
+      },
       style: CodeEditorStyle(
         fontSize: 14,
         fontHeight: 1.6,
