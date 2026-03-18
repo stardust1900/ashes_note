@@ -234,6 +234,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
     for (final file in supportedFiles) {
       final normalizedPath = file.path.replaceAll('\\', '/');
+      final progress = await _getReadingProgress(file);
 
       if (metadataMap.containsKey(normalizedPath)) {
         // 使用缓存
@@ -248,6 +249,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
             title: metadata.title,
             author: metadata.author,
             coverFile: coverFile,
+            readingProgress: progress,
           ),
         );
       } else {
@@ -263,6 +265,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
             title: metadata.title,
             author: metadata.author,
             coverFile: coverFile,
+            readingProgress: progress,
           ),
         );
       }
@@ -692,14 +695,27 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     }
   }
 
+  /// 获取书籍阅读进度（0.0~1.0），未读返回 -1
+  Future<double> _getReadingProgress(File file) async {
+    try {
+      final position = await StorageManager.loadReadingPosition(file.path);
+      if (position == null) return -1;
+      final pageIndex = position['pageIndex'] as int? ?? 0;
+      final totalPages = position['totalPages'] as int? ?? 0;
+      if (pageIndex <= 0 || totalPages <= 0) return -1;
+      return (pageIndex / totalPages).clamp(0.0, 1.0);
+    } catch (_) {
+      return -1;
+    }
+  }
+
   void _openBook(BookInfo book) {
-    // TODO: 实现打开书籍功能
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => BookReaderPage(bookPath: book.file.path),
       ),
-    );
+    ).then((_) => _loadBooks()); // 返回后刷新进度
   }
 }
 
@@ -709,12 +725,14 @@ class BookInfo {
   String title;
   final String author;
   File? coverFile;
+  double readingProgress; // 0.0~1.0，-1 表示未读
 
   BookInfo({
     required this.file,
     required this.title,
     required this.author,
     this.coverFile,
+    this.readingProgress = -1,
   });
 
   static Future<BookInfo> fromFile(File file) async {
@@ -804,18 +822,47 @@ class _BookCardState extends State<_BookCard> {
             // 封面区域
             Expanded(
               flex: 4,
-              child: Container(
-                width: double.infinity,
-                color: Colors.blue.withValues(alpha: 0.1),
-                child: widget.book.coverFile != null
-                    ? Image.file(
-                        widget.book.coverFile!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return _buildDefaultCover();
-                        },
-                      )
-                    : _buildDefaultCover(),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    color: Colors.blue.withValues(alpha: 0.1),
+                    child: widget.book.coverFile != null
+                        ? Image.file(
+                            widget.book.coverFile!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return _buildDefaultCover();
+                            },
+                          )
+                        : _buildDefaultCover(),
+                  ),
+                  // 阅读进度百分比（右上角）
+                  if (widget.book.readingProgress >= 0)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '${(widget.book.readingProgress * 100).round()}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             // 书籍信息

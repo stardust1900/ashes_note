@@ -156,9 +156,11 @@ class _BookReaderPageState extends State<BookReaderPage>
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     // Android 音量键通过原生 EventChannel 监听
     if (!kIsWeb && Platform.isAndroid) {
-      // 进入阅读页时同步开关状态到原生层
-      final enabled = SPUtil.get<bool>(PrefKeys.volumeKeyPageTurn, false);
-      syncVolumeKeyEnabled(enabled);
+      // 延迟同步开关状态，确保 MethodChannel 已注册
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final enabled = SPUtil.get<bool>(PrefKeys.volumeKeyPageTurn, false);
+        syncVolumeKeyEnabled(enabled);
+      });
       _volumeKeySubscription = _volumeChannel.receiveBroadcastStream().listen((
         event,
       ) {
@@ -254,9 +256,12 @@ class _BookReaderPageState extends State<BookReaderPage>
   /// 全局硬件键盘事件处理（用于移动端音量键翻页）
   bool _handleHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+    // 检查音量键翻页开关
+    final enabled = SPUtil.get<bool>(PrefKeys.volumeKeyPageTurn, false);
+    if (!enabled) return false;
     if (event.logicalKey == LogicalKeyboardKey.audioVolumeDown) {
       if (mounted) _nextPage();
-      return true; // 拦截，阻止系统调节音量
+      return true;
     } else if (event.logicalKey == LogicalKeyboardKey.audioVolumeUp) {
       if (mounted) _previousPage();
       return true;
@@ -1956,6 +1961,7 @@ class _BookReaderPageState extends State<BookReaderPage>
       scrollOffset: _scrollController.hasClients
           ? _scrollController.offset
           : 0.0,
+      totalPages: _totalPages,
     );
     print('阅读位置已保存: 第 $_currentPageIndex 页, 章节 $_currentChapterIndex');
   }

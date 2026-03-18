@@ -29,6 +29,7 @@ class StorageManager {
     required int chapterIndex,
     required int pageIndex,
     required double scrollOffset,
+    int totalPages = 0,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -40,10 +41,11 @@ class StorageManager {
         'chapterIndex': chapterIndex,
         'pageIndex': pageIndex,
         'scrollOffset': scrollOffset,
+        'totalPages': totalPages,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
 
-      await prefs.setString(bookKey, positionData.toString());
+      await prefs.setString(bookKey, jsonEncode(positionData));
       await prefs.setString(_lastReadBookKey, bookPath);
     } catch (e) {
       print('保存阅读位置失败: $e');
@@ -68,27 +70,31 @@ class StorageManager {
     }
   }
 
-  /// 解析位置数据字符串
+  /// 解析位置数据字符串（兼容旧 toString() 格式和新 JSON 格式）
   static Map<String, dynamic> _parsePositionData(String data) {
+    // 优先尝试 JSON 解析
+    try {
+      final decoded = jsonDecode(data);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {}
+
+    // 兼容旧的 toString() 格式
     final result = <String, dynamic>{};
     final content = data.substring(1, data.length - 1);
     final pairs = content.split(', ');
 
     for (final pair in pairs) {
-      final parts = pair.split(': ');
-      if (parts.length == 2) {
-        final key = parts[0].trim();
-        final value = parts[1].trim();
+      final colonIdx = pair.indexOf(': ');
+      if (colonIdx < 0) continue;
+      final key = pair.substring(0, colonIdx).trim();
+      final value = pair.substring(colonIdx + 2).trim();
 
-        if (key == 'bookPath' || key == 'bookTitle') {
-          result[key] = value;
-        } else if (key == 'timestamp') {
-          result[key] = int.tryParse(value) ?? 0;
-        } else if (key == 'scrollOffset') {
-          result[key] = double.tryParse(value) ?? 0.0;
-        } else {
-          result[key] = int.tryParse(value) ?? 0;
-        }
+      if (key == 'bookPath' || key == 'bookTitle') {
+        result[key] = value;
+      } else if (key == 'scrollOffset') {
+        result[key] = double.tryParse(value) ?? 0.0;
+      } else {
+        result[key] = int.tryParse(value) ?? 0;
       }
     }
     return result;
