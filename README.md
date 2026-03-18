@@ -1,3 +1,5 @@
+
+
 # ashes_note（草灰笔记）
 
 一款基于Flutter开发的跨平台笔记应用，专注于提供简洁高效的笔记管理功能。
@@ -11,23 +13,21 @@
 - **文档解析阅读** - EPUB格式支持，内置阅读器
 
 ### 🎨 多主题支持 ✨
-现在支持三种精美主题模式：
+
+支持三种精美主题模式：
 
 #### 🌟 极简主题（默认）
-- 清爽明亮的界面风格
-- 蓝灰色调设计
+- 清爽明亮的界面风格，蓝灰色调设计
 - 适合日间阅读和办公场景
 - 支持完整的个性化调节
 
 #### 🌙 暗黑主题
-- 护眼舒适的深色界面
-- 减少蓝光辐射保护视力
+- 护眼舒适的深色界面，减少蓝光辐射
 - 适合夜间阅读和低光环境
 - OLED屏幕更省电
 
 #### ✒️ 墨水屏模式
-- 纯黑白高对比度设计
-- 专为电子墨水屏设备优化
+- 纯黑白高对比度设计，专为电子墨水屏设备优化
 - 禁用动画和渐变效果
 - 模拟真实纸质书阅读体验
 
@@ -46,9 +46,10 @@
 - Android Studio / VS Code
 
 ### 安装步骤
+
 ```bash
 # 克隆项目
-git clone https://gitee.com/your_username/ashes_note.git
+git clone https://gitee.com/wangyidao/ashes_note.git
 cd ashes_note
 
 # 获取依赖
@@ -59,6 +60,7 @@ flutter run
 ```
 
 ### 构建发布
+
 ```bash
 # Android APK
 flutter build apk
@@ -86,6 +88,7 @@ flutter build windows
 - **行间距控制** - 1.0-2.5倍行间距自定义
 - **书签管理** - 彩色书签，时间排序
 - **页面导航** - 目录跳转，快速定位
+- **高亮笔记** - 文本高亮，支持导出笔记
 
 ### 同步配置
 1. 在设置中配置Git仓库
@@ -100,43 +103,12 @@ flutter build windows
 - **Dart** - 编程语言
 - **Material Design** - 设计规范
 
-### 核心组件
-```
-lib/
-├── ashes_theme.dart          # 主题管理系统
-├── main.dart                 # 应用入口
-├── views/                    # UI视图层
-│   ├── book_reader_page.dart # 原始阅读器
-│   ├── book_reader_page_themes.dart # 多主题阅读器 ✨
-│   └── settings_view.dart    # 设置页面
-├── models/                   # 数据模型
-├── services/                 # 业务服务
-└── utils/                    # 工具类
-```
-
-### 主题实现原理
-```dart
-// 主题管理器
-class ThemeManager {
-  static bool isDarkMode() { ... }
-  static bool isInkMode() { ... }
-  static AshesTheme getCurrentTheme() { ... }
-}
-
-// 多主题阅读器核心逻辑
-class ThemedBookReaderPage extends StatefulWidget {
-  @override
-  Widget build(BuildContext context) {
-    final isDarkMode = ThemeManager.isDarkMode();
-    final isInkMode = ThemeManager.isInkMode();
-    
-    // 根据主题动态调整颜色和样式
-    final backgroundColor = _getReaderBackgroundColor(isInkMode, isDarkMode);
-    final textColor = _getReaderTextColor(isInkMode, isDarkMode);
-    // ...
-  }
-}
-```
+### 核心模块
+- **主题系统** - 统一管理极简、暗黑、墨水屏三种主题
+- **阅读器引擎** - 支持EPUB格式解析与渲染
+- **词典服务** - 集成多平台词典API
+- **数据存储** - 本地文件管理与Git同步
+- **国际化** - 多语言支持
 
 ## 📱 平台支持
 
