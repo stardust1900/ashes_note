@@ -12,6 +12,7 @@ class PrefKeys {
   static const String showLineNumbers = 'showLineNumbers';
   static const String scrollPosPrefix = 'scroll_pos_';
   static const String volumeKeyPageTurn = 'volumeKeyPageTurn';
+  static const String unsyncedNoteIds = 'unsyncedNoteIds';
 }
 
 class GitPlatforms {

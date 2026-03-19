@@ -190,6 +190,11 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                 )
               : _selectedNotebook!.notes.first;
         }
+        // 恢复未同步笔记 id 集合
+        final saved = SPUtil.get<String>(PrefKeys.unsyncedNoteIds, '');
+        if (saved.isNotEmpty) {
+          _unsyncedNoteIds.addAll(saved.split(','));
+        }
       }
     });
   }
@@ -285,6 +290,10 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     ).showSnackBar(SnackBar(content: Text('笔记已删除')));
   }
 
+  void _persistUnsyncedIds() {
+    SPUtil.set<String>(PrefKeys.unsyncedNoteIds, _unsyncedNoteIds.join(','));
+  }
+
   void noteChanged(Note updatedNote, {String? newTitle}) {
     setState(() {
       if (newTitle != null && newTitle != updatedNote.title) {
@@ -335,6 +344,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       // 标记为未同步
       if (git != null && remoteUrl != null) {
         _unsyncedNoteIds.add(updatedNote.id);
+        _persistUnsyncedIds();
       }
     });
   }
@@ -354,84 +364,65 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
         .then((_) {
           setState(() {
             _unsyncedNoteIds.remove(note.id);
+            _persistUnsyncedIds();
           });
         });
   }
 
   @override
   Widget build(BuildContext context) {
-    return KeyboardListener(
-      focusNode: FocusNode()..requestFocus(),
-      onKeyEvent: (KeyEvent event) {
-        // 处理 Ctrl+S 保存快捷键
-        if (event is KeyDownEvent &&
-            _selectedNote != null &&
-            (HardwareKeyboard.instance.logicalKeysPressed.contains(
-                  LogicalKeyboardKey.controlLeft,
-                ) ||
-                HardwareKeyboard.instance.logicalKeysPressed.contains(
-                  LogicalKeyboardKey.controlRight,
-                )) &&
-            event.logicalKey == LogicalKeyboardKey.keyS) {
-          saveNote(_selectedNote!);
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
-        }
-      },
-      child: Scaffold(
-        body: Row(
-          children: [
-            // 左侧面板：笔记本和笔记树形列表
-            SizedBox(
-              width: _sidebarWidth,
-              child: Container(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Column(
-                  children: [
-                    _buildSidebarHeader(),
-                    Expanded(
-                      child: _showSearchResults
-                          ? _buildSearchResults()
-                          : _buildNoteTree(),
-                    ),
-                  ],
-                ),
+    return Scaffold(
+      body: Row(
+        children: [
+          // 左侧面板：笔记本和笔记树形列表
+          SizedBox(
+            width: _sidebarWidth,
+            child: Container(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: Column(
+                children: [
+                  _buildSidebarHeader(),
+                  Expanded(
+                    child: _showSearchResults
+                        ? _buildSearchResults()
+                        : _buildNoteTree(),
+                  ),
+                ],
               ),
             ),
-            // 可拖动分隔线
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onHorizontalDragUpdate: (details) {
-                setState(() {
-                  _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
-                    160.0,
-                    600.0,
-                  );
-                });
-              },
-              child: MouseRegion(
-                cursor: SystemMouseCursors.resizeColumn,
-                child: Container(
-                  width: 6,
-                  color: Colors.transparent,
-                  child: Center(
-                    child: Container(
-                      width: 1,
-                      color: Theme.of(context).dividerColor,
-                    ),
+          ),
+          // 可拖动分隔线
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragUpdate: (details) {
+              setState(() {
+                _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
+                  160.0,
+                  600.0,
+                );
+              });
+            },
+            child: MouseRegion(
+              cursor: SystemMouseCursors.resizeColumn,
+              child: Container(
+                width: 6,
+                color: Colors.transparent,
+                child: Center(
+                  child: Container(
+                    width: 1,
+                    color: Theme.of(context).dividerColor,
                   ),
                 ),
               ),
             ),
-            // 右侧面板：笔记详情
-            Expanded(
-              child: _selectedNote != null
-                  ? _buildNoteDetail(_selectedNote!)
-                  : _buildEmptyDetail(),
-            ),
-          ],
-        ),
+          ),
+          // 右侧面板：笔记详情
+          Expanded(
+            child: _selectedNote != null
+                ? _buildNoteDetail(_selectedNote!)
+                : _buildEmptyDetail(),
+          ),
+        ],
       ),
     );
   }
@@ -945,6 +936,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                 setState(() {
                   _isSyncing = false;
                   _unsyncedNoteIds.clear();
+                  _persistUnsyncedIds();
                 });
                 scaffoldMessenger.showSnackBar(
                   const SnackBar(content: Text('仓库同步完成')),
@@ -1349,61 +1341,70 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
 
   Widget _buildEditor(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
-    return CodeEditor(
-      controller: _contentController,
-      scrollController: _codeScrollController,
-      findController: _findController,
-      wordWrap: true,
-      shortcutOverrideActions: <Type, Action<Intent>>{
-        CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
-          onInvoke: (intent) {
-            widget.saveNote(widget.note);
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
-            return null;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportHeight = constraints.maxHeight;
+        return CodeEditor(
+          controller: _contentController,
+          scrollController: _codeScrollController,
+          findController: _findController,
+          wordWrap: true,
+          padding: EdgeInsets.only(bottom: viewportHeight),
+          shortcutOverrideActions: <Type, Action<Intent>>{
+            CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
+              onInvoke: (intent) {
+                widget.saveNote(widget.note);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
+                return null;
+              },
+            ),
           },
-        ),
-      },
-      style: CodeEditorStyle(
-        fontSize: 14,
-        fontHeight: 1.6,
-        fontFamily: 'monospace',
-        textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
-        backgroundColor: isDark
-            ? Color.fromARGB(255, 48, 48, 48)
-            : const Color(0xFFFFFFFF),
-        highlightColor: Colors.yellow.withValues(alpha: 0.5),
-        selectionColor: Colors.orange.withValues(alpha: 0.6),
-        codeTheme: CodeHighlightTheme(
-          languages: {'markdown': CodeHighlightThemeMode(mode: langMarkdown)},
-          theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
-        ),
-      ),
-      findBuilder: (context, controller, readOnly) =>
-          _FindPanel(controller: controller),
-      indicatorBuilder:
-          (context, editingController, chunkController, notifier) {
-            return GestureDetector(
-              onSecondaryTapUp: (details) =>
-                  _showLineNumberMenu(details.globalPosition),
-              child: _showLineNumbers
-                  ? Container(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: DefaultCodeLineNumber(
-                        controller: editingController,
-                        notifier: notifier,
-                        textStyle: TextStyle(
-                          fontSize: 12,
-                          color: theme.textTheme.bodySmall?.color?.withValues(
-                            alpha: 0.5,
+          style: CodeEditorStyle(
+            fontSize: 14,
+            fontHeight: 1.6,
+            fontFamily: 'monospace',
+            textColor: isDark
+                ? const Color(0xFFE8E8E8)
+                : const Color(0xFF1A1A1A),
+            backgroundColor: isDark
+                ? Color.fromARGB(255, 48, 48, 48)
+                : const Color(0xFFFFFFFF),
+            highlightColor: Colors.yellow.withValues(alpha: 0.5),
+            selectionColor: Colors.orange.withValues(alpha: 0.6),
+            codeTheme: CodeHighlightTheme(
+              languages: {
+                'markdown': CodeHighlightThemeMode(mode: langMarkdown),
+              },
+              theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
+            ),
+          ),
+          findBuilder: (context, controller, readOnly) =>
+              _FindPanel(controller: controller),
+          indicatorBuilder:
+              (context, editingController, chunkController, notifier) {
+                return GestureDetector(
+                  onSecondaryTapUp: (details) =>
+                      _showLineNumberMenu(details.globalPosition),
+                  child: _showLineNumbers
+                      ? Container(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: DefaultCodeLineNumber(
+                            controller: editingController,
+                            notifier: notifier,
+                            textStyle: TextStyle(
+                              fontSize: 12,
+                              color: theme.textTheme.bodySmall?.color
+                                  ?.withValues(alpha: 0.5),
+                            ),
                           ),
-                        ),
-                      ),
-                    )
-                  : Container(width: 12, color: Colors.transparent),
-            );
-          },
+                        )
+                      : Container(width: 12, color: Colors.transparent),
+                );
+              },
+        );
+      },
     );
   }
 
