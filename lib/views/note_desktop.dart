@@ -328,58 +328,85 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   }
 
   void noteChanged(Note updatedNote, {String? newTitle}) {
-    setState(() {
-      if (newTitle != null && newTitle != updatedNote.title) {
-        final exists = _selectedNotebook!.notes.any(
-          (note) => note.title == newTitle || note.title == '$newTitle.md',
-        );
-        if (exists) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('笔记已存在，请使用不同的标题')));
-          return;
-        }
+    if (newTitle != null && newTitle != updatedNote.title) {
+      final exists = _selectedNotebook!.notes.any(
+        (note) => note.title == newTitle || note.title == '$newTitle.md',
+      );
+      if (exists) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('笔记已存在，请使用不同的标题')));
+        return;
+      }
 
-        final oldTitle = updatedNote.title.endsWith('.md')
-            ? updatedNote.title
-            : '${updatedNote.title}.md';
-        final newFileName = newTitle.endsWith('.md')
-            ? newTitle
-            : '$newTitle.md';
+      final oldTitle = updatedNote.title.endsWith('.md')
+          ? updatedNote.title
+          : '${updatedNote.title}.md';
+      final newFileName = newTitle.endsWith('.md')
+          ? newTitle
+          : '$newTitle.md';
 
-        updatedNote.title = newTitle;
-        FileUtil()
-            .saveFile(
+      final oldNoteId = '${_selectedNotebook!.name}/$oldTitle';
+
+      updatedNote.title = newTitle;
+      FileUtil()
+          .saveFile(
+            '$workingDirectory/notes',
+            _selectedNotebook!.name,
+            newFileName,
+            utf8.encode(updatedNote.content),
+          )
+          .then((_) {
+            FileUtil().deleteFile(
               '$workingDirectory/notes',
               _selectedNotebook!.name,
-              newFileName,
-              utf8.encode(updatedNote.content),
-            )
-            .then((_) {
-              FileUtil().deleteFile(
-                '$workingDirectory/notes',
-                _selectedNotebook!.name,
-                oldTitle,
-              );
-            });
+              oldTitle,
+            );
+          });
 
-        updatedNote.id = '${_selectedNotebook!.name}/$newFileName';
-      }
-      final index = _selectedNotebook!.notes.indexWhere(
-        (note) => note.id == updatedNote.id,
-      );
-      if (index != -1) {
-        _selectedNotebook!.notes[index] = updatedNote;
-      }
-      if (_selectedNote?.id == updatedNote.id) {
-        _selectedNote = updatedNote;
-      }
-      // 标记为未同步
+      updatedNote.id = '${_selectedNotebook!.name}/$newFileName';
+
+      // 如果 git 已配置，删除远程的旧笔记文件
       if (git != null && remoteUrl != null) {
-        _unsyncedNoteIds.add(updatedNote.id);
-        _persistUnsyncedIds();
+        String sha = git!.hashObject(utf8.encode(updatedNote.content));
+        final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
+        git!.deleteFile(owner, repo, oldNoteId, 'Rename note to $newFileName', sha);
       }
-    });
+
+      setState(() {
+        final index = _selectedNotebook!.notes.indexWhere(
+          (note) => note.id == oldNoteId,
+        );
+        if (index != -1) {
+          _selectedNotebook!.notes[index] = updatedNote;
+        }
+        if (_selectedNote?.id == oldNoteId) {
+          _selectedNote = updatedNote;
+        }
+        // 标记新笔记为未同步
+        if (git != null && remoteUrl != null) {
+          _unsyncedNoteIds.add(updatedNote.id);
+          _persistUnsyncedIds();
+        }
+      });
+    } else {
+      setState(() {
+        final index = _selectedNotebook!.notes.indexWhere(
+          (note) => note.id == updatedNote.id,
+        );
+        if (index != -1) {
+          _selectedNotebook!.notes[index] = updatedNote;
+        }
+        if (_selectedNote?.id == updatedNote.id) {
+          _selectedNote = updatedNote;
+        }
+        // 标记为未同步
+        if (git != null && remoteUrl != null) {
+          _unsyncedNoteIds.add(updatedNote.id);
+          _persistUnsyncedIds();
+        }
+      });
+    }
   }
 
   void saveNote(Note note) {
@@ -1069,12 +1096,18 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   // 分栏比例（编辑区占比）
   double _splitRatio = 0.5;
 
+  // 标题是否已修改
+  bool _isTitleModified = false;
+  // 标题确认按钮是否已点击（用于变灰效果）
+  bool _isTitleConfirmClicked = false;
+
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController(
       text: widget.note.title.replaceAll('.md', ''),
     );
+    _titleController.addListener(_onTitleChanged);
     _contentController = CodeLineEditingController.fromText(
       widget.note.content,
     );
@@ -1099,6 +1132,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
       _titleController.text = widget.note.title.replaceAll('.md', '');
       _contentController.text = widget.note.content;
       _viewMode = 'edit';
+      _isTitleModified = false;
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _tryRestoreScrollPosition(widget.note.id, 0),
       );
@@ -1112,6 +1146,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     _saveTimer?.cancel();
     _scrollSaveTimer?.cancel();
     _contentController.removeListener(_onContentChanged);
+    _titleController.removeListener(_onTitleChanged);
     _codeScrollController.verticalScroller.removeListener(_onEditorScrolled);
     _previewScrollController.removeListener(_onPreviewScrolled);
     _titleController.dispose();
@@ -1221,6 +1256,19 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     }
   }
 
+  void _onTitleChanged() {
+    final currentTitle = _titleController.text;
+    final originalTitle = widget.note.title.replaceAll('.md', '');
+    final isModified = currentTitle != originalTitle && currentTitle.isNotEmpty;
+
+    if (isModified != _isTitleModified) {
+      setState(() {
+        _isTitleModified = isModified;
+        _isTitleConfirmClicked = false;
+      });
+    }
+  }
+
   void _saveContentToFile() {
     final workingDir = SPUtil.get<String>(PrefKeys.workingDirectory, '');
     FileUtil().saveFile(
@@ -1270,22 +1318,57 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      TextField(
-                        controller: _titleController,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: '笔记标题',
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                          isDense: true,
-                        ),
-                        onSubmitted: (value) {
-                          if (value.isNotEmpty) {
-                            widget.onTitleChanged(value);
-                          }
-                        },
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _titleController,
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: '笔记标题',
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.zero,
+                                isDense: true,
+                              ),
+                              onSubmitted: (value) {
+                                if (value.isNotEmpty) {
+                                  widget.onTitleChanged(value);
+                                  setState(() {
+                                    _isTitleModified = false;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                          if (_isTitleModified)
+                            IconButton(
+                              icon: Icon(Icons.check, size: 20),
+                              onPressed: () {
+                                if (_titleController.text.isNotEmpty && !_isTitleConfirmClicked) {
+                                  setState(() {
+                                    _isTitleConfirmClicked = true;
+                                  });
+                                  widget.onTitleChanged(_titleController.text);
+                                  Future.delayed(Duration(milliseconds: 300), () {
+                                    if (mounted) {
+                                      setState(() {
+                                        _isTitleModified = false;
+                                        _isTitleConfirmClicked = false;
+                                      });
+                                    }
+                                  });
+                                }
+                              },
+                              color: _isTitleConfirmClicked
+                                  ? (isDark ? Colors.grey[700] : Colors.grey[400])
+                                  : theme.primaryColor,
+                              tooltip: '确认修改标题',
+                              padding: EdgeInsets.zero,
+                              constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                            ),
+                        ],
                       ),
                       SizedBox(height: 4),
                       Text(

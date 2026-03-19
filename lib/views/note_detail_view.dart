@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
+import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -78,6 +79,11 @@ class NoteDetailState extends State<NoteDetailPage> {
   double targetPosition = 0.0;
   DocumentSelection? targetSelection;
 
+  // 标题是否已修改
+  bool _isTitleModified = false;
+  // 标题确认按钮是否已点击（用于变灰效果）
+  bool _isTitleConfirmClicked = false;
+
   // 快捷键支持
   final Map<LogicalKeySet, Intent> _shortcuts = {
     LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyF):
@@ -98,6 +104,7 @@ class NoteDetailState extends State<NoteDetailPage> {
 
     _textController.addListener(_onTextChanged);
     _findController.addListener(_onFindTextChanged);
+    _titleController.addListener(_onTitleChanged);
 
     // 初始化 SuperEditor
     _initSuperEditor();
@@ -118,6 +125,7 @@ class NoteDetailState extends State<NoteDetailPage> {
   void dispose() {
     _textController.removeListener(_onTextChanged);
     _findController.removeListener(_onFindTextChanged);
+    _titleController.removeListener(_onTitleChanged);
     _titleController.dispose();
     _textController.dispose();
     _findController.dispose();
@@ -229,6 +237,70 @@ class NoteDetailState extends State<NoteDetailPage> {
   void _onFindTextChanged() {
     _findMatches();
   }
+
+  void _onTitleChanged() {
+    final currentTitle = _titleController.text;
+    final originalTitle = note.title.replaceAll('.md', '');
+    final isModified = currentTitle != originalTitle && currentTitle.isNotEmpty;
+
+    if (isModified != _isTitleModified) {
+      setState(() {
+        _isTitleModified = isModified;
+        _isTitleConfirmClicked = false;
+      });
+    }
+  }
+
+  void _updateNoteTitle(String newTitle) {
+    final oldTitle = note.title;
+    final newFileName = newTitle.endsWith('.md') ? newTitle : '$newTitle.md';
+    final oldNoteId = note.id;
+    
+    note.title = newFileName;
+    note.id = '${note.id.substring(0, note.id.lastIndexOf('/') + 1)}$newFileName';
+    
+    // 保存新笔记到文件
+    final workingDir = SPUtil.get<String>(PrefKeys.workingDirectory, '');
+    final notebookDir = note.id.substring(0, note.id.lastIndexOf('/'));
+    FileUtil().saveFile(
+      '$workingDir/notes',
+      notebookDir.substring(notebookDir.lastIndexOf('/') + 1),
+      newFileName,
+      utf8.encode(note.content),
+    );
+    
+    // 通知父组件笔记已更改
+    widget.onNoteChanged(note);
+    
+    // 删除本地旧文件
+    FileUtil().deleteFile(
+      '$workingDir/notes',
+      notebookDir.substring(notebookDir.lastIndexOf('/') + 1),
+      oldTitle,
+    );
+    
+    // 如果 git 已配置，删除远程的旧笔记文件
+    final gitPlatform = SPUtil.get<String>(PrefKeys.gitPlatform, '');
+    final remoteUrl = SPUtil.get<String>(gitPlatform == GitPlatforms.github 
+        ? PrefKeys.githubRemoteUrl 
+        : PrefKeys.giteeRemoteUrl, '');
+    final token = SPUtil.get<String>(gitPlatform == GitPlatforms.github 
+        ? PrefKeys.githubToken 
+        : PrefKeys.giteeToken, '');
+    
+    if (gitPlatform.isNotEmpty && remoteUrl.isNotEmpty && token.isNotEmpty) {
+      try {
+        final git = GitFactory.getGitService(gitPlatform, token);
+        String sha = git.hashObject(utf8.encode(note.content));
+        final (owner, repo) = git.getOwnerRepoFromUrl(remoteUrl);
+        git.deleteFile(owner, repo, oldNoteId, 'Rename note to $newFileName', sha);
+      } catch (e) {
+        print('删除 Git 旧笔记失败: $e');
+      }
+    }
+  }
+
+
 
   void _findMatches() {
     final query = _findController.text.trim();
@@ -1021,23 +1093,54 @@ class NoteDetailState extends State<NoteDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      TextField(
-                        controller: _titleController,
-                        onEditingComplete: () {
-                          widget.onNoteChanged(
-                            note,
-                            newTitle: _titleController.text,
-                          );
-                        },
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        decoration: const InputDecoration(
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                          isDense: true,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _titleController,
+                              onSubmitted: (value) {
+                                if (value.isNotEmpty) {
+                                  _updateNoteTitle(value);
+                                }
+                              },
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              decoration: const InputDecoration(
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.zero,
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          if (_isTitleModified)
+                            IconButton(
+                              icon: Icon(Icons.check, size: 20),
+                              onPressed: () {
+                                if (_titleController.text.isNotEmpty && !_isTitleConfirmClicked) {
+                                  setState(() {
+                                    _isTitleConfirmClicked = true;
+                                  });
+                                  _updateNoteTitle(_titleController.text);
+                                  Future.delayed(Duration(milliseconds: 300), () {
+                                    if (mounted) {
+                                      setState(() {
+                                        _isTitleModified = false;
+                                        _isTitleConfirmClicked = false;
+                                      });
+                                    }
+                                  });
+                                }
+                              },
+                              color: _isTitleConfirmClicked
+                                  ? (isDark ? Colors.grey[700] : Colors.grey[400])
+                                  : theme.primaryColor,
+                              tooltip: '确认修改标题',
+                              padding: EdgeInsets.zero,
+                              constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                            ),
+                        ],
                       ),
                       Text(
                         '修改时间: ${note.lastModified.toString().substring(0, 16)}',
