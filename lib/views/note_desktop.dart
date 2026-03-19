@@ -49,11 +49,15 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   bool _isSyncing = false;
   double _sidebarWidth = 300;
 
+  // 笔记排序模式：'name'(名称), 'modified'(修改时间)
+  String _noteSortMode = 'name';
+
   @override
   void initState() {
     super.initState();
     workingDirectory = SPUtil.get<String>(PrefKeys.workingDirectory, '');
     String gitPlatform = SPUtil.get<String>(PrefKeys.gitPlatform, '');
+    _noteSortMode = SPUtil.get<String>(PrefKeys.noteSortMode, 'name');
 
     final notesDir = Directory('$workingDirectory/notes');
 
@@ -139,6 +143,35 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
           );
         }
       }
+    }
+  }
+
+  List<Note> _sortNotes(List<Note> notes) {
+    final sortedNotes = List<Note>.from(notes);
+    if (_noteSortMode == 'name') {
+      sortedNotes.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    } else {
+      sortedNotes.sort((a, b) => b.lastModified.compareTo(a.lastModified));
+    }
+    return sortedNotes;
+  }
+
+  String _formatModifiedTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inDays == 0) {
+      return '今天';
+    } else if (difference.inDays == 1) {
+      return '昨天';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays}天前';
+    } else if (difference.inDays < 30) {
+      return '${difference.inDays ~/ 7}周前';
+    } else if (difference.inDays < 365) {
+      return '${difference.inDays ~/ 30}月前';
+    } else {
+      return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')}';
     }
   }
 
@@ -450,6 +483,23 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                   ),
                 ),
               ),
+              // 排序按钮
+              IconButton(
+                icon: Icon(
+                  _noteSortMode == 'name' ? Icons.sort_by_alpha : Icons.access_time,
+                  size: 20,
+                  color: theme.primaryColor,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _noteSortMode = _noteSortMode == 'name' ? 'modified' : 'name';
+                    SPUtil.set(PrefKeys.noteSortMode, _noteSortMode);
+                  });
+                },
+                tooltip: _noteSortMode == 'name' ? '按名称排序' : '按时间排序',
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
               if (_selectedNotebook != null)
                 IconButton(
                   icon: Icon(Icons.add, size: 20),
@@ -603,67 +653,80 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
               padding: EdgeInsets.only(left: 36, right: 4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: notebook.notes.map((note) {
-                  final noteIsSelected = _selectedNote?.id == note.id;
-                  final isUnsynced = _unsyncedNoteIds.contains(note.id);
-                  return InkWell(
-                    onTap: () {
-                      _detailPanelKey.currentState?._saveScrollPosition(
-                        _selectedNote!.id,
-                      );
-                      setState(() {
-                        _selectedNote = note;
-                        SPUtil.set(PrefKeys.selectedNote, note.id);
-                      });
-                    },
-                    borderRadius: BorderRadius.circular(4),
-                    child: Container(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: noteIsSelected
-                            ? theme.colorScheme.secondaryContainer.withValues(
-                                alpha: 0.3,
-                              )
-                            : null,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.description,
-                            size: 14,
-                            color: isUnsynced
-                                ? Colors.orange
-                                : theme.iconTheme.color?.withValues(alpha: 0.6),
-                          ),
-                          SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              note.title,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: noteIsSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                color: isUnsynced ? Colors.orange : null,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                children: [
+                  ..._sortNotes(notebook.notes).map((note) {
+                    final noteIsSelected = _selectedNote?.id == note.id;
+                    final isUnsynced = _unsyncedNoteIds.contains(note.id);
+                    return InkWell(
+                      onTap: () {
+                        _detailPanelKey.currentState?._saveScrollPosition(
+                          _selectedNote!.id,
+                        );
+                        setState(() {
+                          _selectedNote = note;
+                          SPUtil.set(PrefKeys.selectedNote, note.id);
+                        });
+                      },
+                      borderRadius: BorderRadius.circular(4),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: noteIsSelected
+                              ? theme.colorScheme.secondaryContainer.withValues(
+                                  alpha: 0.3,
+                                )
+                              : null,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.description,
+                              size: 14,
+                              color: isUnsynced
+                                  ? Colors.orange
+                                  : theme.iconTheme.color?.withValues(alpha: 0.6),
                             ),
-                          ),
-                          if (isUnsynced)
-                            Container(
-                              width: 6,
-                              height: 6,
-                              decoration: BoxDecoration(
-                                color: Colors.orange,
-                                shape: BoxShape.circle,
+                            SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                note.title,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontWeight: noteIsSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  color: isUnsynced ? Colors.orange : null,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                        ],
+                            if (_noteSortMode == 'modified')
+                              Padding(
+                                padding: EdgeInsets.only(left: 4),
+                                child: Text(
+                                  _formatModifiedTime(note.lastModified),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.disabledColor,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ),
+                            if (isUnsynced)
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: Colors.orange,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                }).toList(),
+                    );
+                  }),
+                ],
               ),
             ),
           if (isExpanded && notebook.notes.isEmpty)
