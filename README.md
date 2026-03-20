@@ -1,5 +1,6 @@
 # ashes_note（草灰笔记）
-![logo](assets/icons/ashes_note_logo.png){:width="50%"}
+
+![logo](android/app/src/main/res/mipmap-mdpi/ic_launcher.png)
 
 一款基于Flutter开发的跨平台笔记应用，专注于提供简洁高效的笔记管理功能。  
 同时还是一款epub阅读器，可以读书笔记以markdown格式直接导出到笔记管理中。
