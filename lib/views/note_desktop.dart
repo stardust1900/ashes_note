@@ -1505,42 +1505,71 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     );
   }
 
+  Widget _buildMarkdownPreview(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    return fm.Markdown(
+      data: _contentController.text,
+      selectable: true,
+      controller: _previewScrollController,
+      imageDirectory: SPUtil.get<String>(PrefKeys.workingDirectory, ''),
+      styleSheet: fm.MarkdownStyleSheet.fromTheme(theme).copyWith(
+        p: theme.textTheme.bodyMedium,
+        h1: theme.textTheme.headlineMedium,
+        h2: theme.textTheme.titleLarge,
+        h3: theme.textTheme.titleMedium,
+        code: theme.textTheme.bodyMedium?.copyWith(
+          fontFamily: 'monospace',
+          backgroundColor: theme.colorScheme.surfaceContainerHighest,
+        ),
+        codeblockDecoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        blockquote: theme.textTheme.bodyMedium?.copyWith(
+          color: isDark ? const Color(0xFFADB5BD) : const Color(0xFF6C757D),
+          fontStyle: FontStyle.italic,
+        ),
+        blockquoteDecoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF8F9FA),
+          border: Border(
+            left: BorderSide(
+              color: isDark ? const Color(0xFF4A5568) : const Color(0xFFCED4DA),
+              width: 3,
+            ),
+          ),
+        ),
+        blockquotePadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 4,
+        ),
+        del: theme.textTheme.bodyMedium?.copyWith(
+          decoration: TextDecoration.lineThrough,
+          decorationColor: isDark ? Colors.red[300] : Colors.red[600],
+          decorationThickness: 2,
+        ),
+      ),
+    );
+  }
+
   Widget _buildContentArea(ThemeData theme) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final totalWidth = constraints.maxWidth;
-        final totalHeight = constraints.maxHeight;
-        final dividerWidth = 6.0;
+        const dividerWidth = 6.0;
         final isSplit = _viewMode == 'split';
         final isPreview = _viewMode == 'preview';
-        final editWidth = isSplit
+
+        final editorWidth = isSplit
             ? (totalWidth - dividerWidth) * _splitRatio
-            : isPreview
-            ? 0.0
             : totalWidth;
-        final previewWidth = isSplit
-            ? (totalWidth - dividerWidth) * (1 - _splitRatio)
-            : isPreview
-            ? totalWidth
-            : 0.0;
 
         return Stack(
           children: [
-            // 编辑器：始终在树中，用 Positioned 保持存活；preview 模式移出可见区域
-            Positioned(
-              left: isPreview ? -totalWidth : 0,
-              top: 0,
-              width: isSplit ? editWidth : totalWidth,
-              height: totalHeight,
-              child: _buildEditor(theme, totalHeight),
-            ),
-            // 覆盖层 Row（分隔线 + 预览区）
+            // 编辑器始终在树中，始终有正确宽度，不会被 deactivate
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!isPreview) SizedBox(width: editWidth),
-                // 分栏拖动分隔线
-                if (isSplit)
+                SizedBox(width: editorWidth, child: _buildEditor(theme)),
+                if (isSplit) ...[
                   GestureDetector(
                     behavior: HitTestBehavior.translucent,
                     onHorizontalDragUpdate: (details) {
@@ -1554,156 +1583,103 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                     },
                     child: MouseRegion(
                       cursor: SystemMouseCursors.resizeColumn,
-                      child: Container(
+                      child: SizedBox(
                         width: dividerWidth,
-                        color: Colors.transparent,
                         child: Center(
                           child: Container(width: 1, color: theme.dividerColor),
                         ),
                       ),
                     ),
                   ),
-                // 预览区：split 或 preview 模式显示
-                if (isSplit || isPreview)
                   SizedBox(
-                    width: previewWidth,
-                    height: totalHeight,
+                    width: totalWidth - editorWidth - dividerWidth,
                     child: Padding(
-                      padding: EdgeInsets.only(left: isSplit ? 12 : 0),
-                      child: fm.Markdown(
-                        data: _contentController.text,
-                        selectable: true,
-                        controller: _previewScrollController,
-                        imageDirectory: SPUtil.get<String>(
-                          PrefKeys.workingDirectory,
-                          '',
-                        ),
-                        styleSheet: fm.MarkdownStyleSheet.fromTheme(theme)
-                            .copyWith(
-                              p: theme.textTheme.bodyMedium,
-                              h1: theme.textTheme.headlineMedium,
-                              h2: theme.textTheme.titleLarge,
-                              h3: theme.textTheme.titleMedium,
-                              code: theme.textTheme.bodyMedium?.copyWith(
-                                fontFamily: 'monospace',
-                                backgroundColor:
-                                    theme.colorScheme.surfaceContainerHighest,
-                              ),
-                              codeblockDecoration: BoxDecoration(
-                                color:
-                                    theme.colorScheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              blockquote: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.brightness == Brightness.dark
-                                    ? const Color(0xFFADB5BD)
-                                    : const Color(0xFF6C757D),
-                                fontStyle: FontStyle.italic,
-                              ),
-                              blockquoteDecoration: BoxDecoration(
-                                color: theme.brightness == Brightness.dark
-                                    ? const Color(0xFF2A2A2A)
-                                    : const Color(0xFFF8F9FA),
-                                border: Border(
-                                  left: BorderSide(
-                                    color: theme.brightness == Brightness.dark
-                                        ? const Color(0xFF4A5568)
-                                        : const Color(0xFFCED4DA),
-                                    width: 3,
-                                  ),
-                                ),
-                              ),
-                              blockquotePadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 4,
-                              ),
-                            ),
-                      ),
+                      padding: const EdgeInsets.only(left: 12),
+                      child: _buildMarkdownPreview(theme),
                     ),
                   ),
+                ],
               ],
             ),
+            // preview 模式：全屏预览覆盖在编辑器上方
+            if (isPreview)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: theme.scaffoldBackgroundColor,
+                  child: _buildMarkdownPreview(theme),
+                ),
+              ),
           ],
         );
       },
     );
   }
 
-  Widget _buildEditor(ThemeData theme, [double? viewportHeight]) {
+  Widget _buildEditor(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final height = viewportHeight ?? constraints.maxHeight;
-        return CodeEditor(
-          controller: _contentController,
-          scrollController: _codeScrollController,
-          findController: _findController,
-          wordWrap: true,
-          padding: EdgeInsets.only(bottom: height),
-          shortcutOverrideActions: <Type, Action<Intent>>{
-            CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
-              onInvoke: (intent) {
-                widget.saveNote(widget.note);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
-                return null;
-              },
+    return CodeEditor(
+      controller: _contentController,
+      scrollController: _codeScrollController,
+      findController: _findController,
+      wordWrap: true,
+      padding: const EdgeInsets.only(bottom: 300),
+      shortcutOverrideActions: <Type, Action<Intent>>{
+        CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
+          onInvoke: (intent) {
+            widget.saveNote(widget.note);
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
+            return null;
+          },
+        ),
+      },
+      style: CodeEditorStyle(
+        fontSize: 14,
+        fontHeight: 1.6,
+        fontFamily: 'monospace',
+        textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
+        backgroundColor: isDark
+            ? Color.fromARGB(255, 48, 48, 48)
+            : const Color(0xFFFFFFFF),
+        highlightColor: Colors.yellow.withValues(alpha: 0.5),
+        selectionColor: Colors.orange.withValues(alpha: 0.6),
+        codeTheme: CodeHighlightTheme(
+          languages: {'markdown': CodeHighlightThemeMode(mode: langMarkdown)},
+          theme: {
+            ...(isDark ? atomOneDarkTheme : atomOneLightTheme),
+            // blockquote (quote token) 颜色覆盖，提升对比度
+            'quote': TextStyle(
+              color: isDark ? const Color(0xFF9ECBFF) : const Color(0xFF5C6370),
+              fontStyle: FontStyle.italic,
             ),
           },
-          style: CodeEditorStyle(
-            fontSize: 14,
-            fontHeight: 1.6,
-            fontFamily: 'monospace',
-            textColor: isDark
-                ? const Color(0xFFE8E8E8)
-                : const Color(0xFF1A1A1A),
-            backgroundColor: isDark
-                ? Color.fromARGB(255, 48, 48, 48)
-                : const Color(0xFFFFFFFF),
-            highlightColor: Colors.yellow.withValues(alpha: 0.5),
-            selectionColor: Colors.orange.withValues(alpha: 0.6),
-            codeTheme: CodeHighlightTheme(
-              languages: {
-                'markdown': CodeHighlightThemeMode(mode: langMarkdown),
-              },
-              theme: {
-                ...(isDark ? atomOneDarkTheme : atomOneLightTheme),
-                // blockquote (quote token) 颜色覆盖，提升对比度
-                'quote': TextStyle(
-                  color: isDark
-                      ? const Color(0xFF9ECBFF)
-                      : const Color(0xFF5C6370),
-                  fontStyle: FontStyle.italic,
-                ),
-              },
-            ),
-          ),
-          findBuilder: (context, controller, readOnly) =>
-              _FindPanel(controller: controller),
-          indicatorBuilder:
-              (context, editingController, chunkController, notifier) {
-                return GestureDetector(
-                  onSecondaryTapUp: (details) =>
-                      _showLineNumberMenu(details.globalPosition),
-                  child: _showLineNumbers
-                      ? Container(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: DefaultCodeLineNumber(
-                            controller: editingController,
-                            notifier: notifier,
-                            textStyle: TextStyle(
-                              fontSize: 12,
-                              color: theme.textTheme.bodySmall?.color
-                                  ?.withValues(alpha: 0.5),
-                            ),
+        ),
+      ),
+      findBuilder: (context, controller, readOnly) =>
+          _FindPanel(controller: controller),
+      indicatorBuilder:
+          (context, editingController, chunkController, notifier) {
+            return GestureDetector(
+              onSecondaryTapUp: (details) =>
+                  _showLineNumberMenu(details.globalPosition),
+              child: _showLineNumbers
+                  ? Container(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: DefaultCodeLineNumber(
+                        controller: editingController,
+                        notifier: notifier,
+                        textStyle: TextStyle(
+                          fontSize: 12,
+                          color: theme.textTheme.bodySmall?.color?.withValues(
+                            alpha: 0.5,
                           ),
-                        )
-                      : Container(width: 12, color: Colors.transparent),
-                );
-              },
-        );
-      },
+                        ),
+                      ),
+                    )
+                  : Container(width: 12, color: Colors.transparent),
+            );
+          },
     );
   }
 
