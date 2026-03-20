@@ -149,7 +149,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   List<Note> _sortNotes(List<Note> notes) {
     final sortedNotes = List<Note>.from(notes);
     if (_noteSortMode == 'name') {
-      sortedNotes.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      sortedNotes.sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+      );
     } else {
       sortedNotes.sort((a, b) => b.lastModified.compareTo(a.lastModified));
     }
@@ -342,9 +344,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       final oldTitle = updatedNote.title.endsWith('.md')
           ? updatedNote.title
           : '${updatedNote.title}.md';
-      final newFileName = newTitle.endsWith('.md')
-          ? newTitle
-          : '$newTitle.md';
+      final newFileName = newTitle.endsWith('.md') ? newTitle : '$newTitle.md';
 
       final oldNoteId = '${_selectedNotebook!.name}/$oldTitle';
 
@@ -370,7 +370,13 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       if (git != null && remoteUrl != null) {
         String sha = git!.hashObject(utf8.encode(updatedNote.content));
         final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
-        git!.deleteFile(owner, repo, oldNoteId, 'Rename note to $newFileName', sha);
+        git!.deleteFile(
+          owner,
+          repo,
+          oldNoteId,
+          'Rename note to $newFileName',
+          sha,
+        );
       }
 
       setState(() {
@@ -513,13 +519,17 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
               // 排序按钮
               IconButton(
                 icon: Icon(
-                  _noteSortMode == 'name' ? Icons.sort_by_alpha : Icons.access_time,
+                  _noteSortMode == 'name'
+                      ? Icons.sort_by_alpha
+                      : Icons.access_time,
                   size: 20,
                   color: theme.primaryColor,
                 ),
                 onPressed: () {
                   setState(() {
-                    _noteSortMode = _noteSortMode == 'name' ? 'modified' : 'name';
+                    _noteSortMode = _noteSortMode == 'name'
+                        ? 'modified'
+                        : 'name';
                     SPUtil.set(PrefKeys.noteSortMode, _noteSortMode);
                   });
                 },
@@ -696,7 +706,10 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                       },
                       borderRadius: BorderRadius.circular(4),
                       child: Container(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
                           color: noteIsSelected
                               ? theme.colorScheme.secondaryContainer.withValues(
@@ -712,7 +725,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                               size: 14,
                               color: isUnsynced
                                   ? Colors.orange
-                                  : theme.iconTheme.color?.withValues(alpha: 0.6),
+                                  : theme.iconTheme.color?.withValues(
+                                      alpha: 0.6,
+                                    ),
                             ),
                             SizedBox(width: 6),
                             Expanded(
@@ -1346,27 +1361,36 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                             IconButton(
                               icon: Icon(Icons.check, size: 20),
                               onPressed: () {
-                                if (_titleController.text.isNotEmpty && !_isTitleConfirmClicked) {
+                                if (_titleController.text.isNotEmpty &&
+                                    !_isTitleConfirmClicked) {
                                   setState(() {
                                     _isTitleConfirmClicked = true;
                                   });
                                   widget.onTitleChanged(_titleController.text);
-                                  Future.delayed(Duration(milliseconds: 300), () {
-                                    if (mounted) {
-                                      setState(() {
-                                        _isTitleModified = false;
-                                        _isTitleConfirmClicked = false;
-                                      });
-                                    }
-                                  });
+                                  Future.delayed(
+                                    Duration(milliseconds: 300),
+                                    () {
+                                      if (mounted) {
+                                        setState(() {
+                                          _isTitleModified = false;
+                                          _isTitleConfirmClicked = false;
+                                        });
+                                      }
+                                    },
+                                  );
                                 }
                               },
                               color: _isTitleConfirmClicked
-                                  ? (isDark ? Colors.grey[700] : Colors.grey[400])
+                                  ? (isDark
+                                        ? Colors.grey[700]
+                                        : Colors.grey[400])
                                   : theme.primaryColor,
                               tooltip: '确认修改标题',
                               padding: EdgeInsets.zero,
-                              constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                              constraints: BoxConstraints(
+                                minWidth: 28,
+                                minHeight: 28,
+                              ),
                             ),
                         ],
                       ),
@@ -1473,11 +1497,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-              child: _viewMode == 'edit'
-                  ? _buildEditor(theme)
-                  : _viewMode == 'split'
-                  ? _buildSplitView(theme)
-                  : _buildPreview(theme),
+              child: _buildContentArea(theme),
             ),
           ),
         ],
@@ -1485,17 +1505,141 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     );
   }
 
-  Widget _buildEditor(ThemeData theme) {
+  Widget _buildContentArea(ThemeData theme) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        final totalHeight = constraints.maxHeight;
+        final dividerWidth = 6.0;
+        final isSplit = _viewMode == 'split';
+        final isPreview = _viewMode == 'preview';
+        final editWidth = isSplit
+            ? (totalWidth - dividerWidth) * _splitRatio
+            : isPreview
+            ? 0.0
+            : totalWidth;
+        final previewWidth = isSplit
+            ? (totalWidth - dividerWidth) * (1 - _splitRatio)
+            : isPreview
+            ? totalWidth
+            : 0.0;
+
+        return Stack(
+          children: [
+            // 编辑器：始终在树中，用 Positioned 保持存活；preview 模式移出可见区域
+            Positioned(
+              left: isPreview ? -totalWidth : 0,
+              top: 0,
+              width: isSplit ? editWidth : totalWidth,
+              height: totalHeight,
+              child: _buildEditor(theme, totalHeight),
+            ),
+            // 覆盖层 Row（分隔线 + 预览区）
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!isPreview) SizedBox(width: editWidth),
+                // 分栏拖动分隔线
+                if (isSplit)
+                  GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragUpdate: (details) {
+                      setState(() {
+                        _splitRatio =
+                            ((_splitRatio * (totalWidth - dividerWidth) +
+                                        details.delta.dx) /
+                                    (totalWidth - dividerWidth))
+                                .clamp(0.2, 0.8);
+                      });
+                    },
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.resizeColumn,
+                      child: Container(
+                        width: dividerWidth,
+                        color: Colors.transparent,
+                        child: Center(
+                          child: Container(width: 1, color: theme.dividerColor),
+                        ),
+                      ),
+                    ),
+                  ),
+                // 预览区：split 或 preview 模式显示
+                if (isSplit || isPreview)
+                  SizedBox(
+                    width: previewWidth,
+                    height: totalHeight,
+                    child: Padding(
+                      padding: EdgeInsets.only(left: isSplit ? 12 : 0),
+                      child: fm.Markdown(
+                        data: _contentController.text,
+                        selectable: true,
+                        controller: _previewScrollController,
+                        imageDirectory: SPUtil.get<String>(
+                          PrefKeys.workingDirectory,
+                          '',
+                        ),
+                        styleSheet: fm.MarkdownStyleSheet.fromTheme(theme)
+                            .copyWith(
+                              p: theme.textTheme.bodyMedium,
+                              h1: theme.textTheme.headlineMedium,
+                              h2: theme.textTheme.titleLarge,
+                              h3: theme.textTheme.titleMedium,
+                              code: theme.textTheme.bodyMedium?.copyWith(
+                                fontFamily: 'monospace',
+                                backgroundColor:
+                                    theme.colorScheme.surfaceContainerHighest,
+                              ),
+                              codeblockDecoration: BoxDecoration(
+                                color:
+                                    theme.colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              blockquote: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.brightness == Brightness.dark
+                                    ? const Color(0xFFADB5BD)
+                                    : const Color(0xFF6C757D),
+                                fontStyle: FontStyle.italic,
+                              ),
+                              blockquoteDecoration: BoxDecoration(
+                                color: theme.brightness == Brightness.dark
+                                    ? const Color(0xFF2A2A2A)
+                                    : const Color(0xFFF8F9FA),
+                                border: Border(
+                                  left: BorderSide(
+                                    color: theme.brightness == Brightness.dark
+                                        ? const Color(0xFF4A5568)
+                                        : const Color(0xFFCED4DA),
+                                    width: 3,
+                                  ),
+                                ),
+                              ),
+                              blockquotePadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 4,
+                              ),
+                            ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildEditor(ThemeData theme, [double? viewportHeight]) {
     final isDark = theme.brightness == Brightness.dark;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final viewportHeight = constraints.maxHeight;
+        final height = viewportHeight ?? constraints.maxHeight;
         return CodeEditor(
           controller: _contentController,
           scrollController: _codeScrollController,
           findController: _findController,
           wordWrap: true,
-          padding: EdgeInsets.only(bottom: viewportHeight),
+          padding: EdgeInsets.only(bottom: height),
           shortcutOverrideActions: <Type, Action<Intent>>{
             CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
               onInvoke: (intent) {
@@ -1523,7 +1667,16 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
               languages: {
                 'markdown': CodeHighlightThemeMode(mode: langMarkdown),
               },
-              theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
+              theme: {
+                ...(isDark ? atomOneDarkTheme : atomOneLightTheme),
+                // blockquote (quote token) 颜色覆盖，提升对比度
+                'quote': TextStyle(
+                  color: isDark
+                      ? const Color(0xFF9ECBFF)
+                      : const Color(0xFF5C6370),
+                  fontStyle: FontStyle.italic,
+                ),
+              },
             ),
           ),
           findBuilder: (context, controller, readOnly) =>
@@ -1583,110 +1736,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
         SPUtil.set(PrefKeys.showLineNumbers, _showLineNumbers);
       }
     });
-  }
-
-  Widget _buildSplitView(ThemeData theme) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final totalWidth = constraints.maxWidth;
-        final dividerWidth = 6.0;
-        final editWidth = (totalWidth - dividerWidth) * _splitRatio;
-        final previewWidth = (totalWidth - dividerWidth) * (1 - _splitRatio);
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(width: editWidth, child: _buildEditor(theme)),
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onHorizontalDragUpdate: (details) {
-                setState(() {
-                  _splitRatio =
-                      ((_splitRatio * (totalWidth - dividerWidth) +
-                                  details.delta.dx) /
-                              (totalWidth - dividerWidth))
-                          .clamp(0.2, 0.8);
-                });
-              },
-              child: MouseRegion(
-                cursor: SystemMouseCursors.resizeColumn,
-                child: Container(
-                  width: dividerWidth,
-                  color: Colors.transparent,
-                  child: Center(
-                    child: Container(width: 1, color: theme.dividerColor),
-                  ),
-                ),
-              ),
-            ),
-            SizedBox(
-              width: previewWidth,
-              child: Padding(
-                padding: EdgeInsets.only(left: 12),
-                child: fm.Markdown(
-                  data: _contentController.text,
-                  selectable: true,
-                  controller: _previewScrollController,
-                  imageDirectory: SPUtil.get<String>(
-                    PrefKeys.workingDirectory,
-                    '',
-                  ),
-                  styleSheet: fm.MarkdownStyleSheet.fromTheme(theme).copyWith(
-                    p: theme.textTheme.bodyMedium,
-                    h1: theme.textTheme.headlineMedium,
-                    h2: theme.textTheme.titleLarge,
-                    h3: theme.textTheme.titleMedium,
-                    code: theme.textTheme.bodyMedium?.copyWith(
-                      fontFamily: 'monospace',
-                      backgroundColor:
-                          theme.colorScheme.surfaceContainerHighest,
-                    ),
-                    codeblockDecoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildPreview(ThemeData theme) {
-    return fm.Markdown(
-      data: widget.note.content,
-      selectable: true,
-      imageDirectory: SPUtil.get<String>(PrefKeys.workingDirectory, ''),
-      styleSheet: fm.MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-        p: theme.textTheme.bodyMedium,
-        h1: theme.textTheme.headlineMedium,
-        h2: theme.textTheme.titleLarge,
-        h3: theme.textTheme.titleMedium,
-        code: theme.textTheme.bodyMedium?.copyWith(
-          fontFamily: 'monospace',
-          backgroundColor: theme.colorScheme.surfaceContainerHighest,
-        ),
-        codeblockDecoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        blockquote: theme.textTheme.bodyMedium?.copyWith(
-          fontStyle: FontStyle.italic,
-          color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.8),
-        ),
-        listBullet: theme.textTheme.bodyMedium?.copyWith(
-          color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
-        ),
-        blockquoteDecoration: BoxDecoration(
-          border: Border(left: BorderSide(color: theme.primaryColor, width: 4)),
-          color: theme.colorScheme.surfaceContainerHighest.withValues(
-            alpha: 0.3,
-          ),
-        ),
-      ),
-    );
   }
 }
 
