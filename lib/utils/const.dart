@@ -10,6 +10,7 @@ class PrefKeys {
   static const String selectedNote = 'selectedNote';
   static const String themeMode = 'themeMode'; // 主题模式：minimal 或 dark
   static const String showLineNumbers = 'showLineNumbers';
+  static const String autoWrap = 'autoWrap';
   static const String scrollPosPrefix = 'scroll_pos_';
   static const String volumeKeyPageTurn = 'volumeKeyPageTurn';
   static const String unsyncedNoteIds = 'unsyncedNoteIds';

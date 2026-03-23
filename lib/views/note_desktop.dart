@@ -1103,6 +1103,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   final ScrollController _previewScrollController = ScrollController();
   bool _isSyncingScroll = false;
   bool _showLineNumbers = true;
+  bool _autoWrap = true;
   Timer? _scrollSaveTimer;
 
   // 视图模式：edit(普通编辑), split(分栏预览), preview(预览)
@@ -1127,6 +1128,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
       widget.note.content,
     );
     _showLineNumbers = SPUtil.get<bool>(PrefKeys.showLineNumbers, true);
+    _autoWrap = SPUtil.get<bool>(PrefKeys.autoWrap, true);
     _findController = CodeFindController(_contentController);
     _codeScrollController = CodeScrollController(
       verticalScroller: ScrollController(),
@@ -1405,6 +1407,22 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                   ),
                 ),
                 SizedBox(width: 16),
+                // 自动换行按钮
+                IconButton(
+                  icon: Icon(
+                    Icons.wrap_text,
+                    color: _autoWrap
+                        ? theme.primaryColor
+                        : (isDark ? theme.disabledColor : Colors.grey),
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _autoWrap = !_autoWrap;
+                      SPUtil.set(PrefKeys.autoWrap, _autoWrap);
+                    });
+                  },
+                  tooltip: _autoWrap ? '自动换行' : '取消自动换行',
+                ),
                 // 普通编辑模式按钮
                 IconButton(
                   icon: Icon(
@@ -1621,7 +1639,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
       controller: _contentController,
       scrollController: _codeScrollController,
       findController: _findController,
-      wordWrap: true,
+      wordWrap: _autoWrap,
       padding: const EdgeInsets.only(bottom: 300),
       shortcutOverrideActions: <Type, Action<Intent>>{
         CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
