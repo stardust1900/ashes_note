@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:ashes_note/services/book_reader/book_reader_services.dart';
+import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:ashes_note/views/book_reader/storage_manager.dart';
 import 'package:crypto/crypto.dart' as crypto;
@@ -25,26 +26,39 @@ class BookMetadata {
     this.coverPath,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'filePath': filePath,
-      'title': title,
-      'author': author,
-      'coverPath': coverPath,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+    'filePath': filePath,
+    'title': title,
+    'author': author,
+    'coverPath': coverPath,
+  };
 
-  factory BookMetadata.fromJson(Map<String, dynamic> json) {
-    return BookMetadata(
-      filePath: (json['filePath'] as String).replaceAll('\\', '/'),
-      title: json['title'] as String,
-      author: json['author'] as String,
-      coverPath: json['coverPath'] as String?,
-    );
-  }
+  factory BookMetadata.fromJson(Map<String, dynamic> json) => BookMetadata(
+    filePath: (json['filePath'] as String).replaceAll('\\', '/'),
+    title: json['title'] as String,
+    author: json['author'] as String,
+    coverPath: json['coverPath'] as String?,
+  );
 }
 
-/// 书籍库页面 - 展示所有导入的书籍
+/// 书籍信息模型
+class BookInfo {
+  File file;
+  String title;
+  final String author;
+  File? coverFile;
+  double readingProgress;
+
+  BookInfo({
+    required this.file,
+    required this.title,
+    required this.author,
+    this.coverFile,
+    this.readingProgress = -1,
+  });
+}
+
+/// 书籍库页面
 class BookLibraryPage extends StatefulWidget {
   const BookLibraryPage({super.key});
 
@@ -54,130 +68,85 @@ class BookLibraryPage extends StatefulWidget {
 
 class _BookLibraryPageState extends State<BookLibraryPage> {
   List<BookInfo> _books = [];
+  String _viewMode = 'grid'; // grid / list
+  String _gridSize = 'medium'; // small / medium / large
+  String _sortMode = 'name'; // name / imported
 
   @override
   void initState() {
     super.initState();
+    _viewMode = SPUtil.get<String>(PrefKeys.bookViewMode, 'grid');
+    _gridSize = SPUtil.get<String>(PrefKeys.bookGridSize, 'medium');
+    _sortMode = SPUtil.get<String>(PrefKeys.bookSortMode, 'name');
     _loadBooks();
-    // 异步清理无效的元数据缓存
     _cleanMetadataCache();
   }
 
-  /// 获取元数据缓存文件路径
   Future<File> _getMetadataCacheFile() async {
     final workingDir = SPUtil.get<String>('workingDirectory', '');
     final cacheDir = Directory('$workingDir/books/.cache');
-    if (!await cacheDir.exists()) {
-      await cacheDir.create(recursive: true);
-    }
+    if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
     return File('${cacheDir.path}/books_metadata.json');
   }
 
-  /// 从缓存加载书籍元数据
   Future<Map<String, BookMetadata>> _loadMetadataCache() async {
     try {
       final cacheFile = await _getMetadataCacheFile();
-      if (!await cacheFile.exists()) {
-        return {};
-      }
-
-      final jsonString = await cacheFile.readAsString();
-      final jsonData = jsonDecode(jsonString) as List<dynamic>;
-
-      final metadataMap = <String, BookMetadata>{};
+      if (!await cacheFile.exists()) return {};
+      final jsonData =
+          jsonDecode(await cacheFile.readAsString()) as List<dynamic>;
+      final map = <String, BookMetadata>{};
       for (final item in jsonData) {
-        final metadata = BookMetadata.fromJson(item as Map<String, dynamic>);
-        // 规范化路径为统一的格式（使用正斜杠）
-        final normalizedPath = metadata.filePath.replaceAll('\\', '/');
-        metadataMap[normalizedPath] = metadata;
+        final m = BookMetadata.fromJson(item as Map<String, dynamic>);
+        map[m.filePath] = m;
       }
-
-      return metadataMap;
-    } catch (e) {
+      return map;
+    } catch (_) {
       return {};
     }
   }
 
-  /// 保存书籍元数据到缓存
-  Future<void> _saveMetadataCache(Map<String, BookMetadata> metadataMap) async {
+  Future<void> _saveMetadataCache(Map<String, BookMetadata> map) async {
     try {
       final cacheFile = await _getMetadataCacheFile();
-      final jsonData = metadataMap.values.map((m) => m.toJson()).toList();
-      final jsonString = jsonEncode(jsonData);
-      await cacheFile.writeAsString(jsonString);
+      await cacheFile.writeAsString(
+        jsonEncode(map.values.map((m) => m.toJson()).toList()),
+      );
     } catch (e) {
-      print('保存元数据缓存失败：$e');
+      debugPrint('保存元数据缓存失败：$e');
     }
   }
 
-  /// 更新单本书籍的元数据缓存
-  Future<void> _updateBookMetadata(BookMetadata metadata) async {
-    final metadataMap = await _loadMetadataCache();
-    // 规范化路径为统一的格式（使用正斜杠）
-    final normalizedPath = metadata.filePath.replaceAll('\\', '/');
-    // 使用规范化路径创建新的 metadata 对象
-    final normalizedMetadata = BookMetadata(
-      filePath: normalizedPath,
-      title: metadata.title,
-      author: metadata.author,
-      coverPath: metadata.coverPath?.replaceAll('\\', '/'),
-    );
-    metadataMap[normalizedPath] = normalizedMetadata;
-    await _saveMetadataCache(metadataMap);
-  }
-
-  /// 解析书籍元数据（带缓存）
   Future<BookMetadata> _parseBookMetadata(File file) async {
-    // 先检查缓存
     final metadataMap = await _loadMetadataCache();
-    // 规范化路径为统一的格式（使用正斜杠）
     final normalizedPath = file.path.replaceAll('\\', '/');
+    if (metadataMap.containsKey(normalizedPath))
+      return metadataMap[normalizedPath]!;
 
-    if (metadataMap.containsKey(normalizedPath)) {
-      // 检查文件是否仍然存在
-      final cached = metadataMap[normalizedPath]!;
-      return cached;
-    }
-
-    // 缓存中没有，需要解析
     final filename = file.uri.pathSegments.last;
-    String title = filename.replaceAll(
-      RegExp(r'\.epub$'),
-      '',
-    );
+    String title = filename.replaceAll(RegExp(r'\.epub$'), '');
     String author = '未知作者';
     File? coverFile;
 
-    // 尝试使用 epub_plus 解析书籍元数据
     if (filename.toLowerCase().endsWith('.epub')) {
       try {
         final bytes = await file.readAsBytes();
         final epub = await EpubReader.readBook(bytes);
-
-        if (epub.title != null && epub.title!.isNotEmpty) {
-          title = epub.title!;
-        }
-        if (epub.author != null && epub.author!.isNotEmpty) {
+        if (epub.title != null && epub.title!.isNotEmpty) title = epub.title!;
+        if (epub.author != null && epub.author!.isNotEmpty)
           author = epub.author!;
-        }
-
-        // 提取封面
         if (epub.coverImage != null) {
           final workingDir = SPUtil.get<String>('workingDirectory', '');
           final cacheDir = Directory('$workingDir/books/.cache');
-          if (!await cacheDir.exists()) {
-            await cacheDir.create(recursive: true);
-          }
-          final coverFilePath =
+          if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
+          final coverPath =
               '${cacheDir.path}/cover_${normalizedPath.hashCode}.jpg';
-          final coverData = Uint8List.fromList(img.encodeJpg(epub.coverImage!));
-          await File(coverFilePath).writeAsBytes(coverData);
-          coverFile = File(coverFilePath);
+          await File(
+            coverPath,
+          ).writeAsBytes(Uint8List.fromList(img.encodeJpg(epub.coverImage!)));
+          coverFile = File(coverPath);
         }
-
-        print('[BookLibrary] 解析 EPUB 元数据成功: $title, $author');
       } catch (e) {
-        print('[BookLibrary] 解析 EPUB 元数据失败: $e');
         throw Exception('解析书籍元数据失败：$e');
       }
     } else {
@@ -185,535 +154,59 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     }
 
     final metadata = BookMetadata(
-      filePath: file.path,
+      filePath: normalizedPath,
       title: title,
       author: author,
-      coverPath: coverFile?.path,
+      coverPath: coverFile?.path.replaceAll('\\', '/'),
     );
-
-    // 保存到缓存
-    await _updateBookMetadata(metadata);
-
+    metadataMap[normalizedPath] = metadata;
+    await _saveMetadataCache(metadataMap);
     return metadata;
   }
 
   Future<void> _loadBooks() async {
     final workingDir = SPUtil.get<String>('workingDirectory', '');
-    if (workingDir.isEmpty) {
-      return;
-    }
-
+    if (workingDir.isEmpty) return;
     final booksDir = Directory('$workingDir/books');
-    if (!await booksDir.exists()) {
-      await booksDir.create(recursive: true);
-    }
+    if (!await booksDir.exists()) await booksDir.create(recursive: true);
 
-    final files = await booksDir.list().toList();
-
-    // 过滤出支持的电子书格式（仅支持 EPUB）
-    final supportedFiles = files
+    final files = (await booksDir.list().toList())
         .whereType<File>()
         .where((f) => f.path.endsWith('.epub'))
         .toList();
 
-    if (supportedFiles.isEmpty) {
-      setState(() {
-        _books = [];
-      });
+    if (files.isEmpty) {
+      setState(() => _books = []);
       return;
     }
 
-    // 一次性加载所有缓存
     final metadataMap = await _loadMetadataCache();
-
     final List<BookInfo> bookInfos = [];
 
-    for (final file in supportedFiles) {
+    for (final file in files) {
       final normalizedPath = file.path.replaceAll('\\', '/');
       final progress = await _getReadingProgress(file);
-
+      BookMetadata metadata;
       if (metadataMap.containsKey(normalizedPath)) {
-        // 使用缓存
-        final metadata = metadataMap[normalizedPath]!;
-        final coverFile = metadata.coverPath != null
-            ? File(metadata.coverPath!)
-            : null;
-
-        bookInfos.add(
-          BookInfo(
-            file: file,
-            title: metadata.title,
-            author: metadata.author,
-            coverFile: coverFile,
-            readingProgress: progress,
-          ),
-        );
+        metadata = metadataMap[normalizedPath]!;
       } else {
-        // 缓存中没有，需要解析
-        final metadata = await _parseBookMetadata(file);
-        final coverFile = metadata.coverPath != null
-            ? File(metadata.coverPath!)
-            : null;
-
-        bookInfos.add(
-          BookInfo(
-            file: file,
-            title: metadata.title,
-            author: metadata.author,
-            coverFile: coverFile,
-            readingProgress: progress,
-          ),
-        );
+        metadata = await _parseBookMetadata(file);
       }
-    }
-
-    setState(() {
-      _books = bookInfos;
-    });
-  }
-
-  Future<void> _importBook() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['epub'],
-        allowMultiple: true,
+      bookInfos.add(
+        BookInfo(
+          file: file,
+          title: metadata.title,
+          author: metadata.author,
+          coverFile: metadata.coverPath != null
+              ? File(metadata.coverPath!)
+              : null,
+          readingProgress: progress,
+        ),
       );
-
-      if (result == null || result.files.isEmpty) {
-        return;
-      }
-
-      final workingDir = SPUtil.get<String>('workingDirectory', '');
-      if (workingDir.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('请先设置工作目录')));
-        }
-        return;
-      }
-
-      final booksDir = Directory('$workingDir/books');
-      if (!await booksDir.exists()) {
-        await booksDir.create(recursive: true);
-      }
-
-      int importedCount = 0;
-      int failedCount = 0;
-      List<String> failedFiles = [];
-
-      for (var file in result.files) {
-        if (file.path != null) {
-          final sourceFile = File(file.path!);
-          final destFile = File('${booksDir.path}/${file.name}');
-
-          if (!await destFile.exists()) {
-            await sourceFile.copy(destFile.path);
-            importedCount++;
-
-            // 立即解析并缓存元数据
-            try {
-              await _parseBookMetadata(destFile);
-            } catch (e) {
-              failedCount++;
-              failedFiles.add('${file.name}: $e');
-              print('缓存元数据失败：$e');
-            }
-          }
-        }
-      }
-
-      await _loadBooks();
-
-      if (importedCount > 0 && failedCount == 0) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('成功导入 $importedCount 本书籍')));
-        }
-      } else if (importedCount > 0 && failedCount > 0) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '成功导入 $importedCount 本书籍，失败 $failedCount 本（仅支持 EPUB 格式）',
-              ),
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('选择的书籍已存在')));
-        }
-      }
-    } catch (e, stackTrace) {
-      print('导入失败：$e');
-      print('堆栈：$stackTrace');
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
-      }
     }
+    setState(() => _books = bookInfos);
   }
 
-  Future<void> _renameBook(BookInfo book, String newTitle) async {
-    if (newTitle.isEmpty || newTitle == book.title) return;
-
-    try {
-      final oldFile = book.file;
-      final oldCoverFile = book.coverFile;
-      final oldTitle = book.title;
-
-      // 获取文件扩展名
-      final ext = oldFile.path.split('.').last;
-      final dir = oldFile.parent.path;
-
-      // 生成新文件名（去除特殊字符）
-      final safeNewTitle = newTitle.replaceAll(RegExp(r'[<>"/\\|?*]'), '_');
-      final newFileName = '$safeNewTitle.$ext';
-      final newFilePath = '$dir${Platform.pathSeparator}$newFileName';
-
-      // 检查新文件名是否已存在
-      final newFile = File(newFilePath);
-      if (await newFile.exists()) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('该名称的书籍已存在')));
-        }
-        return;
-      }
-
-      // 重命名书籍文件
-      await oldFile.rename(newFilePath);
-
-      // 更新书籍列表中的信息
-      setState(() {
-        book.title = newTitle;
-        book.file = newFile;
-      });
-
-      // 迁移阅读进度（使用新的文件路径哈希）
-      final oldBookKey = 'reading_position_${oldFile.path.hashCode}';
-      final newBookKey = 'reading_position_${newFile.path.hashCode}';
-      final position = SPUtil.get<String>(oldBookKey, '');
-      if (position.isNotEmpty) {
-        await SPUtil.set<String>(newBookKey, position);
-        await SPUtil.remove(oldBookKey);
-      }
-
-      // 检查并更新 last_read_book
-      final lastReadBook = SPUtil.get<String>('last_read_book', '');
-      if (lastReadBook == oldFile.path) {
-        await SPUtil.set<String>('last_read_book', newFile.path);
-      }
-
-      // 迁移页面缓存
-      try {
-        // final appDir = await getApplicationDocumentsDirectory();
-        final workingDir = SPUtil.get<String>('workingDirectory', '');
-        final cacheDir = Directory('$workingDir/books/.cache');
-        if (await cacheDir.exists()) {
-          final oldCacheKey = oldFile.path.hashCode.toString();
-          final newCacheKey = newFile.path.hashCode.toString();
-          final oldCacheFile = File('${cacheDir.path}/$oldCacheKey.json');
-          final newCacheFile = File('${cacheDir.path}/$newCacheKey.json');
-          if (await oldCacheFile.exists()) {
-            await oldCacheFile.rename(newCacheFile.path);
-          }
-        }
-      } catch (e) {
-        // 缓存迁移失败不影响主流程
-      }
-
-      // 迁移高亮和笔记数据（使用新的存储服务）
-      try {
-        await BookStorageService().migrateBookData(oldFile.path, newFile.path);
-      } catch (e) {
-        // 数据迁移失败不影响主流程
-      }
-
-      // 重命名封面文件（如果存在且是独立文件）
-      if (oldCoverFile != null && await oldCoverFile.exists()) {
-        final coverDir = oldCoverFile.parent.path;
-        final coverExt = oldCoverFile.path.split('.').last;
-        final newCoverFileName = '$safeNewTitle.$coverExt';
-        final newCoverPath =
-            '$coverDir${Platform.pathSeparator}$newCoverFileName';
-
-        // 只有当旧封面文件名包含旧标题时才重命名
-        if (oldCoverFile.path.contains(oldTitle)) {
-          await oldCoverFile.rename(newCoverPath);
-          setState(() {
-            book.coverFile = File(newCoverPath);
-          });
-        }
-      }
-
-      // 更新元数据缓存
-      try {
-        final metadataMap = await _loadMetadataCache();
-        if (metadataMap.containsKey(oldFile.path)) {
-          final metadata = metadataMap[oldFile.path]!;
-          metadataMap.remove(oldFile.path);
-          metadataMap[newFile.path] = BookMetadata(
-            filePath: newFile.path,
-            title: newTitle,
-            author: metadata.author,
-            coverPath: book.coverFile?.path,
-          );
-          await _saveMetadataCache(metadataMap);
-        }
-      } catch (e) {
-        print('更新元数据缓存失败：$e');
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('已重命名为《$newTitle》')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('重命名失败：$e')));
-      }
-    }
-  }
-
-  Future<void> _deleteBook(BookInfo book) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('确认删除'),
-        content: Text('确定要删除《${book.title}》吗？\n\n此操作将删除书籍文件及其缓存数据。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    try {
-      // 在删除书籍文件之前，先计算缓存键并删除页面缓存
-      String cacheKey;
-      try {
-        final bytes = await book.file.readAsBytes();
-        final digest = crypto.md5.convert(bytes);
-        cacheKey = digest.toString();
-      } catch (e) {
-        // 如果读取失败，使用路径和修改时间
-        try {
-          final stat = await book.file.stat();
-          cacheKey =
-              '${book.file.path.hashCode}_${stat.modified.millisecondsSinceEpoch}';
-        } catch (e2) {
-          cacheKey = book.file.path.hashCode.toString();
-        }
-      }
-
-      // 删除页面缓存（在删除书籍文件之前）
-      try {
-        final workingDir = SPUtil.get<String>('workingDirectory', '');
-        final cacheDir = Directory('$workingDir/books/.cache');
-        if (await cacheDir.exists()) {
-          final cacheFile = File('${cacheDir.path}/$cacheKey.json');
-          if (await cacheFile.exists()) {
-            await cacheFile.delete();
-          }
-        }
-      } catch (e) {
-        print('删除页面缓存失败：$e');
-      }
-
-      // 删除书籍文件
-      if (await book.file.exists()) {
-        await book.file.delete();
-      }
-
-      // 删除封面缓存（book.coverFile 应该已经指向缓存目录中的封面文件）
-      if (book.coverFile != null && await book.coverFile!.exists()) {
-        await book.coverFile!.delete();
-      }
-
-      // 删除所有书籍相关数据（阅读位置、书签、高亮、字体大小等）
-      try {
-        await BookStorageService().deleteBookData(book.file.path);
-        await StorageManager.deleteBookData(book.file.path);
-      } catch (e) {
-        print('删除书籍数据失败：$e');
-      }
-
-      // 从元数据缓存中移除
-      try {
-        final metadataMap = await _loadMetadataCache();
-        final normalizedPath = book.file.path.replaceAll('\\', '/');
-        if (metadataMap.containsKey(normalizedPath)) {
-          metadataMap.remove(normalizedPath);
-          // 如果缓存为空，直接删除缓存文件
-          if (metadataMap.isEmpty) {
-            final cacheFile = await _getMetadataCacheFile();
-            if (await cacheFile.exists()) {
-              await cacheFile.delete();
-            }
-          } else {
-            await _saveMetadataCache(metadataMap);
-          }
-        }
-      } catch (e) {
-        print('删除元数据缓存失败：$e');
-      }
-
-      // 检查并清理 last_read_book（如果删除的是最后阅读的书籍）
-      final lastReadBook = SPUtil.get<String>('last_read_book', '');
-      if (lastReadBook == book.file.path) {
-        await SPUtil.remove('last_read_book');
-      }
-
-      // 刷新书籍列表
-      await _loadBooks();
-
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('《${book.title}》已删除')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('书籍库'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.upload_file),
-            onPressed: _importBook,
-            tooltip: '导入 EPUB 书籍',
-          ),
-        ],
-      ),
-      body: _books.isEmpty
-          ? _buildEmptyState()
-          : GridView.builder(
-              padding: const EdgeInsets.all(8),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 5,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 0.7,
-              ),
-              itemCount: _books.length,
-              itemBuilder: (context, index) {
-                return _BookCard(
-                  book: _books[index],
-                  onTap: () => _openBook(_books[index]),
-                  onDelete: () => _deleteBook(_books[index]),
-                  onRename: (newTitle) => _renameBook(_books[index], newTitle),
-                );
-              },
-            ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.library_books, size: 64, color: Colors.grey[400]),
-          const SizedBox(height: 16),
-          const Text(
-            '暂无书籍',
-            style: TextStyle(fontSize: 16, color: Colors.grey),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '仅支持导入 EPUB 格式',
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _importBook,
-            icon: const Icon(Icons.upload_file),
-            label: const Text('导入书籍'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 检查并清理无效的元数据缓存（文件已被删除）
-  Future<void> _cleanMetadataCache() async {
-    try {
-      final metadataMap = await _loadMetadataCache();
-      if (metadataMap.isEmpty) {
-        return;
-      }
-
-      final workingDir = SPUtil.get<String>('workingDirectory', '');
-      if (workingDir.isEmpty) return;
-
-      final booksDir = Directory('$workingDir/books');
-      if (!await booksDir.exists()) return;
-
-      final files = await booksDir.list().toList();
-
-      // 只获取支持的电子书文件，并统一路径格式
-      final validFilePaths = files
-          .whereType<File>()
-          .where(
-            (f) =>
-                f.path.endsWith('.epub') ||
-                f.path.endsWith('.mobi') ||
-                f.path.endsWith('.azw3') ||
-                f.path.endsWith('.kfx') ||
-                f.path.endsWith('.pdf'),
-          )
-          .map((f) => f.path.replaceAll('\\', '/')) // 统一使用正斜杠
-          .toSet();
-
-      bool hasInvalid = false;
-      final invalidKeys = metadataMap.keys
-          .where((filePath) => !validFilePaths.contains(filePath))
-          .toList();
-
-      for (final invalidKey in invalidKeys) {
-        metadataMap.remove(invalidKey);
-        hasInvalid = true;
-      }
-
-      if (hasInvalid) {
-        await _saveMetadataCache(metadataMap);
-      }
-    } catch (e) {
-      print('清理元数据缓存失败：$e');
-    }
-  }
-
-  /// 获取书籍阅读进度（0.0~1.0），未读返回 -1
   Future<double> _getReadingProgress(File file) async {
     try {
       final position = await StorageManager.loadReadingPosition(file.path);
@@ -727,92 +220,635 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     }
   }
 
+  Future<void> _cleanMetadataCache() async {
+    try {
+      final metadataMap = await _loadMetadataCache();
+      if (metadataMap.isEmpty) return;
+      final workingDir = SPUtil.get<String>('workingDirectory', '');
+      if (workingDir.isEmpty) return;
+      final booksDir = Directory('$workingDir/books');
+      if (!await booksDir.exists()) return;
+      final validPaths = (await booksDir.list().toList())
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.epub'))
+          .map((f) => f.path.replaceAll('\\', '/'))
+          .toSet();
+      final invalid = metadataMap.keys
+          .where((k) => !validPaths.contains(k))
+          .toList();
+      if (invalid.isNotEmpty) {
+        for (final k in invalid) metadataMap.remove(k);
+        await _saveMetadataCache(metadataMap);
+      }
+    } catch (e) {
+      debugPrint('清理元数据缓存失败：$e');
+    }
+  }
+
+  Future<void> _importBook() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['epub'],
+        allowMultiple: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final workingDir = SPUtil.get<String>('workingDirectory', '');
+      if (workingDir.isEmpty) {
+        if (mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('请先设置工作目录')));
+        return;
+      }
+      final booksDir = Directory('$workingDir/books');
+      if (!await booksDir.exists()) await booksDir.create(recursive: true);
+
+      int imported = 0, failed = 0;
+      for (final f in result.files) {
+        if (f.path == null) continue;
+        final dest = File('${booksDir.path}/${f.name}');
+        if (!await dest.exists()) {
+          await File(f.path!).copy(dest.path);
+          imported++;
+          try {
+            await _parseBookMetadata(dest);
+          } catch (_) {
+            failed++;
+          }
+        }
+      }
+      await _loadBooks();
+      if (mounted) {
+        final msg = failed == 0
+            ? '成功导入 $imported 本书籍'
+            : '成功导入 $imported 本，失败 $failed 本';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
+    }
+  }
+
+  Future<void> _renameBook(BookInfo book, String newTitle) async {
+    if (newTitle.isEmpty || newTitle == book.title) return;
+    try {
+      final oldFile = book.file;
+      final ext = oldFile.path.split('.').last;
+      final safeTitle = newTitle.replaceAll(RegExp(r'[<>"/\\|?*]'), '_');
+      final newFile = File(
+        '${oldFile.parent.path}${Platform.pathSeparator}$safeTitle.$ext',
+      );
+      if (await newFile.exists()) {
+        if (mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('该名称的书籍已存在')));
+        return;
+      }
+      await oldFile.rename(newFile.path);
+      setState(() {
+        book.title = newTitle;
+        book.file = newFile;
+      });
+
+      // 迁移阅读进度
+      final oldKey = 'reading_position_${oldFile.path.hashCode}';
+      final newKey = 'reading_position_${newFile.path.hashCode}';
+      final pos = SPUtil.get<String>(oldKey, '');
+      if (pos.isNotEmpty) {
+        await SPUtil.set<String>(newKey, pos);
+        await SPUtil.remove(oldKey);
+      }
+      if (SPUtil.get<String>('last_read_book', '') == oldFile.path) {
+        await SPUtil.set<String>('last_read_book', newFile.path);
+      }
+
+      // 迁移缓存
+      try {
+        final workingDir = SPUtil.get<String>('workingDirectory', '');
+        final cacheDir = Directory('$workingDir/books/.cache');
+        if (await cacheDir.exists()) {
+          final oldCache = File(
+            '${cacheDir.path}/${oldFile.path.hashCode}.json',
+          );
+          final newCache = File(
+            '${cacheDir.path}/${newFile.path.hashCode}.json',
+          );
+          if (await oldCache.exists()) await oldCache.rename(newCache.path);
+        }
+      } catch (_) {}
+
+      try {
+        await BookStorageService().migrateBookData(oldFile.path, newFile.path);
+      } catch (_) {}
+
+      // 更新元数据缓存
+      final metadataMap = await _loadMetadataCache();
+      final oldNorm = oldFile.path.replaceAll('\\', '/');
+      final newNorm = newFile.path.replaceAll('\\', '/');
+      if (metadataMap.containsKey(oldNorm)) {
+        final m = metadataMap.remove(oldNorm)!;
+        metadataMap[newNorm] = BookMetadata(
+          filePath: newNorm,
+          title: newTitle,
+          author: m.author,
+          coverPath: m.coverPath,
+        );
+        await _saveMetadataCache(metadataMap);
+      }
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('已重命名为《$newTitle》')));
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('重命名失败：$e')));
+    }
+  }
+
+  Future<void> _deleteBook(BookInfo book) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除《${book.title}》吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      // 删除页面缓存
+      try {
+        String cacheKey;
+        try {
+          cacheKey = crypto.md5
+              .convert(await book.file.readAsBytes())
+              .toString();
+        } catch (_) {
+          cacheKey = book.file.path.hashCode.toString();
+        }
+        final workingDir = SPUtil.get<String>('workingDirectory', '');
+        final cf = File('$workingDir/books/.cache/$cacheKey.json');
+        if (await cf.exists()) await cf.delete();
+      } catch (_) {}
+
+      if (await book.file.exists()) await book.file.delete();
+      if (book.coverFile != null && await book.coverFile!.exists())
+        await book.coverFile!.delete();
+
+      try {
+        await BookStorageService().deleteBookData(book.file.path);
+      } catch (_) {}
+      try {
+        await StorageManager.deleteBookData(book.file.path);
+      } catch (_) {}
+
+      final metadataMap = await _loadMetadataCache();
+      final norm = book.file.path.replaceAll('\\', '/');
+      if (metadataMap.containsKey(norm)) {
+        metadataMap.remove(norm);
+        if (metadataMap.isEmpty) {
+          final cf = await _getMetadataCacheFile();
+          if (await cf.exists()) await cf.delete();
+        } else {
+          await _saveMetadataCache(metadataMap);
+        }
+      }
+      if (SPUtil.get<String>('last_read_book', '') == book.file.path)
+        await SPUtil.remove('last_read_book');
+      await _loadBooks();
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('《${book.title}》已删除')));
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+    }
+  }
+
   void _openBook(BookInfo book) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => BookReaderPage(bookPath: book.file.path),
+        builder: (_) => BookReaderPage(bookPath: book.file.path),
       ),
-    ).then((_) => _loadBooks()); // 返回后刷新进度
+    ).then((_) => _loadBooks());
   }
+
+  List<BookInfo> get _sortedBooks {
+    final list = List<BookInfo>.from(_books);
+    if (_sortMode == 'name') list.sort((a, b) => a.title.compareTo(b.title));
+    return list;
+  }
+
+  int get _crossAxisCount {
+    switch (_gridSize) {
+      case 'small':
+        return 5;
+      case 'large':
+        return 2;
+      default:
+        return 3;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final books = _sortedBooks;
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('书籍库'),
+        actions: [
+          // 排序
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.sort),
+            tooltip: '排序',
+            initialValue: _sortMode,
+            onSelected: (v) {
+              setState(() => _sortMode = v);
+              SPUtil.set(PrefKeys.bookSortMode, v);
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'name',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.sort_by_alpha,
+                      size: 18,
+                      color: _sortMode == 'name' ? theme.primaryColor : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '按名称',
+                      style: TextStyle(
+                        color: _sortMode == 'name' ? theme.primaryColor : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'imported',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.access_time,
+                      size: 18,
+                      color: _sortMode == 'imported'
+                          ? theme.primaryColor
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '按导入时间',
+                      style: TextStyle(
+                        color: _sortMode == 'imported'
+                            ? theme.primaryColor
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // 图标大小（仅网格模式）
+          if (_viewMode == 'grid')
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.photo_size_select_large),
+              tooltip: '图标大小',
+              initialValue: _gridSize,
+              onSelected: (v) {
+                setState(() => _gridSize = v);
+                SPUtil.set(PrefKeys.bookGridSize, v);
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'small',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.grid_view,
+                        size: 14,
+                        color: _gridSize == 'small' ? theme.primaryColor : null,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '小',
+                        style: TextStyle(
+                          color: _gridSize == 'small'
+                              ? theme.primaryColor
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'medium',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.grid_view,
+                        size: 18,
+                        color: _gridSize == 'medium'
+                            ? theme.primaryColor
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '中',
+                        style: TextStyle(
+                          color: _gridSize == 'medium'
+                              ? theme.primaryColor
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'large',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.grid_view,
+                        size: 22,
+                        color: _gridSize == 'large' ? theme.primaryColor : null,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '大',
+                        style: TextStyle(
+                          color: _gridSize == 'large'
+                              ? theme.primaryColor
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          // 视图切换
+          IconButton(
+            icon: Icon(_viewMode == 'grid' ? Icons.view_list : Icons.grid_view),
+            tooltip: _viewMode == 'grid' ? '列表视图' : '网格视图',
+            onPressed: () {
+              final next = _viewMode == 'grid' ? 'list' : 'grid';
+              setState(() => _viewMode = next);
+              SPUtil.set(PrefKeys.bookViewMode, next);
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.upload_file),
+            onPressed: _importBook,
+            tooltip: '导入 EPUB',
+          ),
+        ],
+      ),
+      body: books.isEmpty
+          ? _buildEmptyState()
+          : _viewMode == 'grid'
+          ? GridView.builder(
+              padding: const EdgeInsets.all(8),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: _crossAxisCount,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 0.62,
+              ),
+              itemCount: books.length,
+              itemBuilder: (_, i) => _BookCard(
+                book: books[i],
+                onTap: () => _openBook(books[i]),
+                onDelete: () => _deleteBook(books[i]),
+                onRename: (t) => _renameBook(books[i], t),
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(8),
+              itemCount: books.length,
+              itemBuilder: (_, i) => _BookListTile(
+                book: books[i],
+                onTap: () => _openBook(books[i]),
+                onDelete: () => _deleteBook(books[i]),
+                onRename: (t) => _renameBook(books[i], t),
+              ),
+            ),
+    );
+  }
+
+  Widget _buildEmptyState() => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.library_books, size: 64, color: Colors.grey[400]),
+        const SizedBox(height: 16),
+        const Text('暂无书籍', style: TextStyle(fontSize: 16, color: Colors.grey)),
+        const SizedBox(height: 8),
+        Text(
+          '仅支持导入 EPUB 格式',
+          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+        ),
+        const SizedBox(height: 16),
+        ElevatedButton.icon(
+          onPressed: _importBook,
+          icon: const Icon(Icons.upload_file),
+          label: const Text('导入书籍'),
+        ),
+      ],
+    ),
+  );
 }
 
-/// 书籍信息模型
-class BookInfo {
-  File file;
-  String title;
-  final String author;
-  File? coverFile;
-  double readingProgress; // 0.0~1.0，-1 表示未读
-
-  BookInfo({
-    required this.file,
-    required this.title,
-    required this.author,
-    this.coverFile,
-    this.readingProgress = -1,
-  });
-
-  static Future<BookInfo> fromFile(File file) async {
-    final filename = file.uri.pathSegments.last;
-    // 默认使用文件名作为标题
-    String title = filename.replaceAll(
-      RegExp(r'\.(epub|mobi|azw3|kfx|pdf)$'),
-      '',
-    );
-    String author = '未知作者';
-
-    // 尝试使用 epub_plus 解析书籍元数据
-    if (filename.toLowerCase().endsWith('.epub')) {
-      try {
-        final bytes = await file.readAsBytes();
-        final epub = await EpubReader.readBook(bytes);
-        if (epub.title != null && epub.title!.isNotEmpty) {
-          title = epub.title!;
-        }
-        if (epub.author != null && epub.author!.isNotEmpty) {
-          author = epub.author!;
-        }
-      } catch (e) {
-        print('解析 EPUB 元数据失败：$e');
-      }
-    }
-
-    // 尝试查找对应的封面图片
-    final bookDir = file.parent;
-    File? coverFile;
-    final possibleCoverNames = [
-      '${title}.jpg',
-      '${title}.png',
-      '${title}.jpeg',
-      '${title}.webp',
-      'cover.jpg',
-      'cover.png',
-    ];
-
-    for (var coverName in possibleCoverNames) {
-      final coverFileCandidate = File('${bookDir.path}/$coverName');
-      if (await coverFileCandidate.exists()) {
-        coverFile = coverFileCandidate;
-        break;
-      }
-    }
-
-    return BookInfo(
-      file: file,
-      title: title,
-      author: author,
-      coverFile: coverFile,
-    );
-  }
-}
-
-/// 书籍卡片组件
-class _BookCard extends StatefulWidget {
+/// 列表视图项
+class _BookListTile extends StatelessWidget {
   final BookInfo book;
   final VoidCallback onTap;
   final VoidCallback onDelete;
-  final Function(String newTitle) onRename;
+  final Function(String) onRename;
+
+  const _BookListTile({
+    required this.book,
+    required this.onTap,
+    required this.onDelete,
+    required this.onRename,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: SizedBox(
+                  width: 56,
+                  height: 80,
+                  child: book.coverFile != null
+                      ? Image.file(
+                          book.coverFile!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _defaultCover(),
+                        )
+                      : _defaultCover(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      book.title,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      book.author,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.hintColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (book.readingProgress >= 0) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(2),
+                              child: LinearProgressIndicator(
+                                value: book.readingProgress,
+                                minHeight: 4,
+                                backgroundColor: theme.dividerColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${(book.readingProgress * 100).round()}%',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 18),
+                onSelected: (v) {
+                  if (v == 'rename') _showRenameDialog(context);
+                  if (v == 'delete') onDelete();
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'rename',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit, size: 16),
+                        SizedBox(width: 8),
+                        Text('重命名'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, size: 16, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('删除', style: TextStyle(color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _defaultCover() => Container(
+    color: Colors.blue.withValues(alpha: 0.1),
+    child: const Center(child: Icon(Icons.menu_book, color: Colors.blue)),
+  );
+
+  void _showRenameDialog(BuildContext context) {
+    final ctrl = TextEditingController(text: book.title);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('修改书名'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '书名'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final t = ctrl.text.trim();
+              Navigator.pop(ctx);
+              if (t.isNotEmpty) onRename(t);
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 网格卡片组件
+class _BookCard extends StatelessWidget {
+  final BookInfo book;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+  final Function(String) onRename;
 
   const _BookCard({
     required this.book,
@@ -822,42 +858,32 @@ class _BookCard extends StatefulWidget {
   });
 
   @override
-  State<_BookCard> createState() => _BookCardState();
-}
-
-class _BookCardState extends State<_BookCard> {
-  @override
   Widget build(BuildContext context) {
     return Card(
       elevation: 2,
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       child: InkWell(
-        onTap: widget.onTap,
+        onTap: onTap,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 封面区域
             Expanded(
               flex: 4,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   Container(
-                    width: double.infinity,
                     color: Colors.blue.withValues(alpha: 0.1),
-                    child: widget.book.coverFile != null
+                    child: book.coverFile != null
                         ? Image.file(
-                            widget.book.coverFile!,
+                            book.coverFile!,
                             fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return _buildDefaultCover();
-                            },
+                            errorBuilder: (_, __, ___) => _buildDefaultCover(),
                           )
                         : _buildDefaultCover(),
                   ),
-                  // 阅读进度百分比（右上角）
-                  if (widget.book.readingProgress >= 0)
+                  if (book.readingProgress >= 0)
                     Positioned(
                       top: 4,
                       right: 4,
@@ -871,7 +897,7 @@ class _BookCardState extends State<_BookCard> {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          '${(widget.book.readingProgress * 100).round()}%',
+                          '${(book.readingProgress * 100).round()}%',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 10,
@@ -883,7 +909,6 @@ class _BookCardState extends State<_BookCard> {
                 ],
               ),
             ),
-            // 书籍信息
             Expanded(
               flex: 2,
               child: Padding(
@@ -897,7 +922,7 @@ class _BookCardState extends State<_BookCard> {
                       children: [
                         Flexible(
                           child: Text(
-                            widget.book.title,
+                            book.title,
                             style: const TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
@@ -908,13 +933,12 @@ class _BookCardState extends State<_BookCard> {
                         ),
                         Flexible(
                           child: Text(
-                            widget.book.author,
+                            book.author,
                             style: TextStyle(
                               fontSize: 9,
                               color: Theme.of(
                                 context,
                               ).textTheme.bodyMedium?.color,
-                              fontWeight: FontWeight.w500,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -922,7 +946,6 @@ class _BookCardState extends State<_BookCard> {
                         ),
                       ],
                     ),
-                    // 右下角三个水平点菜单按钮
                     Positioned(
                       bottom: 0,
                       right: 0,
@@ -953,16 +976,35 @@ class _BookCardState extends State<_BookCard> {
     );
   }
 
-  /// 显示操作菜单
+  Widget _buildDefaultCover() => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.menu_book,
+          size: 24,
+          color: Colors.blue.withValues(alpha: 0.5),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          book.file.path.split('.').last.toUpperCase(),
+          style: TextStyle(
+            fontSize: 8,
+            color: Colors.grey[600],
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    ),
+  );
+
   void _showActionMenu(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-        contentPadding: const EdgeInsets.symmetric(vertical: 8),
         title: Text(
-          widget.book.title,
+          book.title,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
@@ -970,7 +1012,7 @@ class _BookCardState extends State<_BookCard> {
         actions: [
           TextButton.icon(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(ctx);
               _showRenameDialog(context);
             },
             icon: const Icon(Icons.edit, size: 18),
@@ -979,15 +1021,15 @@ class _BookCardState extends State<_BookCard> {
           ),
           TextButton.icon(
             onPressed: () {
-              Navigator.pop(context);
-              widget.onDelete();
+              Navigator.pop(ctx);
+              onDelete();
             },
             icon: const Icon(Icons.delete, size: 18),
             label: const Text('删除'),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(ctx),
             child: const Text('取消'),
           ),
         ],
@@ -995,103 +1037,28 @@ class _BookCardState extends State<_BookCard> {
     );
   }
 
-  Widget _buildDefaultCover() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.menu_book,
-            size: 24,
-            color: Colors.blue.withValues(alpha: 0.5),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _getFileIcon(),
-            style: TextStyle(
-              fontSize: 8,
-              color: Colors.grey[600],
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _getFileIcon() {
-    final ext = widget.book.file.path.split('.').last.toLowerCase();
-    switch (ext) {
-      case 'epub':
-        return 'EPUB';
-      case 'mobi':
-        return 'MOBI';
-      case 'azw3':
-        return 'AZW3';
-      case 'kfx':
-        return 'KFX';
-      case 'pdf':
-        return 'PDF';
-      default:
-        return ext.toUpperCase();
-    }
-  }
-
-  /// 显示重命名对话框
   void _showRenameDialog(BuildContext context) {
-    final controller = TextEditingController(text: widget.book.title);
-
+    final ctrl = TextEditingController(text: book.title);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.edit, color: Colors.blue),
-            SizedBox(width: 12),
-            Text('修改书名', style: TextStyle(fontSize: 18)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '请输入新的书名：',
-              style: TextStyle(fontSize: 14, color: Colors.black87),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: '书名',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-              ),
-              style: const TextStyle(fontSize: 14),
-            ),
-          ],
+      builder: (ctx) => AlertDialog(
+        title: const Text('修改书名'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '书名'),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(ctx),
             child: const Text('取消'),
           ),
           FilledButton(
             onPressed: () {
-              final newTitle = controller.text.trim();
-              Navigator.pop(context);
-              if (newTitle.isNotEmpty) {
-                widget.onRename(newTitle);
-              }
+              final t = ctrl.text.trim();
+              Navigator.pop(ctx);
+              if (t.isNotEmpty) onRename(t);
             },
-            style: FilledButton.styleFrom(backgroundColor: Colors.blue),
             child: const Text('保存'),
           ),
         ],

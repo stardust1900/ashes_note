@@ -15,6 +15,9 @@ class PrefKeys {
   static const String volumeKeyPageTurn = 'volumeKeyPageTurn';
   static const String unsyncedNoteIds = 'unsyncedNoteIds';
   static const String noteSortMode = 'noteSortMode';
+  static const String bookViewMode = 'bookViewMode'; // grid / list
+  static const String bookGridSize = 'bookGridSize'; // small / medium / large
+  static const String bookSortMode = 'bookSortMode'; // name / imported
 }
 
 class GitPlatforms {
