@@ -6,6 +6,7 @@ import 'package:ashes_note/views/flyme_note_view.dart';
 import 'package:ashes_note/views/note_desktop.dart';
 import 'package:ashes_note/views/settings_view.dart';
 import 'package:ashes_note/views/book_library_page.dart';
+import 'package:ashes_note/views/about_page.dart';
 import 'package:flutter/material.dart';
 import 'package:sidebarx/sidebarx.dart';
 
@@ -185,6 +186,13 @@ class AshesNoteSidebarX extends StatelessWidget {
             _controller.selectIndex(2);
           },
         ),
+        SidebarXItem(
+          icon: Icons.info,
+          label: '关于',
+          onTap: () {
+            _controller.selectIndex(3);
+          },
+        ),
       ],
     );
   }
@@ -230,6 +238,8 @@ class AshesNoteScreens extends StatelessWidget {
               },
             ),
           );
+        } else if (controller.selectedIndex == 3) {
+          return const AboutPage();
         } else {
           return Padding(
             padding: const EdgeInsets.all(16.0),

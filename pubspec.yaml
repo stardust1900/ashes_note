@@ -44,6 +44,7 @@ dependencies:
   crypto: ^3.0.7
   uuid: ^4.5.1
   path_provider: ^2.1.5
+  yaml: ^3.1.2
   super_editor: ^0.3.0-dev.47
   flutter_localization: ^0.3.3
   overlord: ^0.4.2
@@ -56,6 +57,7 @@ dependencies:
   archive: ^4.0.0
   image: ^4.8.0
   html: ^0.15.6
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

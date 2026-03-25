@@ -142,7 +142,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     // 缓存中没有，需要解析
     final filename = file.uri.pathSegments.last;
     String title = filename.replaceAll(
-      RegExp(r'\.(epub|mobi|azw3|kfx|pdf)$'),
+      RegExp(r'\.epub$'),
       '',
     );
     String author = '未知作者';
@@ -178,7 +178,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
         print('[BookLibrary] 解析 EPUB 元数据成功: $title, $author');
       } catch (e) {
         print('[BookLibrary] 解析 EPUB 元数据失败: $e');
+        throw Exception('解析书籍元数据失败：$e');
       }
+    } else {
+      throw Exception('不支持的文件格式，仅支持 EPUB 格式');
     }
 
     final metadata = BookMetadata(
@@ -207,17 +210,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
     final files = await booksDir.list().toList();
 
-    // 过滤出支持的电子书格式
+    // 过滤出支持的电子书格式（仅支持 EPUB）
     final supportedFiles = files
         .whereType<File>()
-        .where(
-          (f) =>
-              f.path.endsWith('.epub') ||
-              f.path.endsWith('.mobi') ||
-              f.path.endsWith('.azw3') ||
-              f.path.endsWith('.kfx') ||
-              f.path.endsWith('.pdf'),
-        )
+        .where((f) => f.path.endsWith('.epub'))
         .toList();
 
     if (supportedFiles.isEmpty) {
@@ -280,7 +276,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['epub', 'mobi', 'azw3', 'kfx', 'pdf'],
+        allowedExtensions: ['epub'],
         allowMultiple: true,
       );
 
@@ -304,6 +300,9 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       }
 
       int importedCount = 0;
+      int failedCount = 0;
+      List<String> failedFiles = [];
+
       for (var file in result.files) {
         if (file.path != null) {
           final sourceFile = File(file.path!);
@@ -317,18 +316,32 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
             try {
               await _parseBookMetadata(destFile);
             } catch (e) {
+              failedCount++;
+              failedFiles.add('${file.name}: $e');
               print('缓存元数据失败：$e');
             }
           }
         }
       }
 
-      if (importedCount > 0) {
-        await _loadBooks();
+      await _loadBooks();
+
+      if (importedCount > 0 && failedCount == 0) {
         if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text('成功导入 $importedCount 本书籍')));
+        }
+      } else if (importedCount > 0 && failedCount > 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '成功导入 $importedCount 本书籍，失败 $failedCount 本（仅支持 EPUB 格式）',
+              ),
+              duration: const Duration(seconds: 4),
+            ),
+          );
         }
       } else {
         if (mounted) {
@@ -598,7 +611,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           IconButton(
             icon: const Icon(Icons.upload_file),
             onPressed: _importBook,
-            tooltip: '导入书籍',
+            tooltip: '导入 EPUB 书籍',
           ),
         ],
       ),
@@ -635,6 +648,11 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           const Text(
             '暂无书籍',
             style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '仅支持导入 EPUB 格式',
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
           ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
