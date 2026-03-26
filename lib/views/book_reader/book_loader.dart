@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:epub_plus/epub_plus.dart';
 import 'package:image/image.dart' as img show encodeJpg;
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
@@ -18,6 +19,235 @@ import '../../models/book_reader/content_item.dart'
         CoverContent,
         HeaderContent,
         LinkContent;
+
+/// 批量解析入参
+class _ParseHtmlBatchTask {
+  final List<_ParseHtmlTask> tasks;
+  const _ParseHtmlBatchTask(this.tasks);
+}
+
+/// 批量解析（单个 Isolate 处理所有章节，避免重复启动开销）
+List<_ParseHtmlResult> _parseHtmlBatchIsolate(_ParseHtmlBatchTask batch) {
+  return batch.tasks.map((t) => _parseHtmlIsolate(t)).toList();
+}
+
+/// Isolate 入参：HTML 解析任务
+class _ParseHtmlTask {
+  final String html;
+  final int chapterIndex;
+  final String? htmlFileName;
+  const _ParseHtmlTask(this.html, this.chapterIndex, this.htmlFileName);
+}
+
+/// Isolate 出参：解析结果
+class _ParseHtmlResult {
+  final List<Map<String, dynamic>> items; // ContentItem 序列化为 Map
+  final String plainText;
+  final List<Map<String, dynamic>> links;
+  const _ParseHtmlResult(this.items, this.plainText, this.links);
+}
+
+/// 顶层函数，供 compute() 调用（不能是实例方法）
+_ParseHtmlResult _parseHtmlIsolate(_ParseHtmlTask task) {
+  final result = _parseHtmlStatic(
+    task.html,
+    task.chapterIndex,
+    task.htmlFileName,
+  );
+  return result;
+}
+
+/// 静态 HTML 解析（不依赖 BookLoader 实例状态，可在 Isolate 中运行）
+_ParseHtmlResult _parseHtmlStatic(
+  String html,
+  int chapterIndex,
+  String? htmlFileName,
+) {
+  final RegExp _spaceTabRegex = RegExp(r'[ \t]+');
+
+  final List<Map<String, dynamic>> itemMaps = [];
+  final List<Map<String, dynamic>> links = [];
+  final StringBuffer plainTextBuffer = StringBuffer();
+
+  if (html.isEmpty) return _ParseHtmlResult([], '', []);
+
+  final cleanedHtml = html.replaceAll(_spaceTabRegex, ' ').trim();
+  final document = html_parser.parse(cleanedHtml);
+
+  String? extractImageSource(html_dom.Element element) {
+    if (element.localName == 'img') return element.attributes['src'];
+    if (element.localName == 'image') {
+      var xlinkHref = element.attributes['xlink:href'];
+      if (xlinkHref == null) {
+        for (var attr in element.attributes.entries) {
+          final key = attr.key.toString().toLowerCase();
+          if (key.contains('xlink') && key.contains('href')) {
+            xlinkHref = attr.value.toString();
+            break;
+          }
+        }
+      }
+      return xlinkHref ?? element.attributes['href'];
+    }
+    return null;
+  }
+
+  bool isHeaderElement(html_dom.Element node) =>
+      RegExp(r'^h([1-6])$').hasMatch(node.localName ?? '');
+
+  bool isInlineElement(html_dom.Element node) {
+    final name = node.localName ?? '';
+    return ['span', 'i', 'b', 'strong', 'em', 'a', 'sup', 'sub'].contains(name);
+  }
+
+  bool isFootnoteLink(html_dom.Element node) {
+    final href = node.attributes['href'];
+    return node.localName == 'a' && href != null && href.contains('#');
+  }
+
+  void addLink(
+    String href,
+    String? linkId,
+    String linkText,
+    String? finalLinkId,
+  ) {
+    final hashIndex = href.indexOf('#');
+    final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+    final offset = plainTextBuffer.length;
+    links.add({
+      'chapterIndex': chapterIndex,
+      'href': href,
+      'targetId': targetId,
+      'fullLinkId': finalLinkId ?? 'chapter$chapterIndex#link_${links.length}',
+      'linkText': linkText,
+      'linkId': linkId,
+      'htmlFileName': htmlFileName,
+      'pageIndexInChapter': null,
+      'offset': offset,
+      'length': linkText.length,
+      'targetChapterIndex': null,
+      'targetPageIndexInChapter': null,
+      'targetExplanation': null,
+    });
+  }
+
+  void addText(String text, {bool isParagraph = false}) {
+    if (text.isEmpty) return;
+    final offset = plainTextBuffer.length;
+    plainTextBuffer.write(text);
+    itemMaps.add({'type': 'text', 'text': text, 'startOffset': offset});
+  }
+
+  void addImage(String source) {
+    itemMaps.add({'type': 'image', 'source': source});
+  }
+
+  void addHeader(String text, int level) {
+    itemMaps.add({'type': 'header', 'text': text, 'level': level});
+  }
+
+  void processNode(html_dom.Node node) {
+    if (node is html_dom.Element) {
+      final name = node.localName ?? '';
+      if (name == 'br') {
+        if (plainTextBuffer.isNotEmpty) {
+          plainTextBuffer.write('\n');
+          if (itemMaps.isNotEmpty && itemMaps.last['type'] == 'text') {
+            itemMaps.last['text'] = '${itemMaps.last['text']}\n';
+          }
+        }
+      } else if (name == 'img' || name == 'image') {
+        final src = extractImageSource(node);
+        if (src != null && src.isNotEmpty) addImage(src);
+      } else if (isHeaderElement(node)) {
+        final text = node.text.trim();
+        if (text.isNotEmpty) {
+          final level = int.parse(RegExp(r'(\d)').firstMatch(name)!.group(1)!);
+          plainTextBuffer.write(text);
+          addHeader(text, level);
+        }
+      } else if (name == 'p') {
+        // paragraph
+        final buf = StringBuffer();
+        void collectText(html_dom.Node n) {
+          if (n is html_dom.Text) {
+            final t = n.text.trim();
+            if (t.isNotEmpty) {
+              if (buf.isNotEmpty) buf.write(' ');
+              buf.write(t);
+            }
+          } else if (n is html_dom.Element) {
+            if (n.localName == 'img' || n.localName == 'image') {
+              if (buf.isNotEmpty) {
+                addText(buf.toString());
+                buf.clear();
+              }
+              final src = extractImageSource(n);
+              if (src != null) addImage(src);
+            } else if (isFootnoteLink(n)) {
+              final href = n.attributes['href']!;
+              final linkId = n.attributes['id'];
+              final lt = n.text.trim();
+              final fid = linkId != null && linkId.isNotEmpty
+                  ? 'chapter$chapterIndex#$linkId'
+                  : 'chapter$chapterIndex#link_${links.length}';
+              addLink(href, linkId, lt, fid);
+              if (lt.isNotEmpty) {
+                if (buf.isNotEmpty) buf.write(' ');
+                buf.write(lt);
+              }
+            } else {
+              for (final c in n.nodes) collectText(c);
+            }
+          }
+        }
+
+        for (final c in node.nodes) collectText(c);
+        if (buf.isNotEmpty) {
+          final text = '${buf.toString()}\n\n';
+          addText(text);
+        }
+      } else if (name == 'div') {
+        for (final c in node.nodes) processNode(c);
+      } else if (isInlineElement(node)) {
+        if (isFootnoteLink(node)) {
+          final href = node.attributes['href']!;
+          final linkId = node.attributes['id'];
+          final lt = node.text.trim();
+          final fid = linkId != null && linkId.isNotEmpty
+              ? 'chapter$chapterIndex#$linkId'
+              : 'chapter$chapterIndex#link_${links.length}';
+          addLink(href, linkId, lt, fid);
+          if (lt.isNotEmpty) addText(lt);
+        } else {
+          final t = node.text.trim();
+          if (t.isNotEmpty) addText(t);
+        }
+      } else {
+        for (final c in node.nodes) processNode(c);
+      }
+    } else if (node is html_dom.Text) {
+      final t = node.text.trim();
+      if (t.isNotEmpty) addText(t);
+    }
+  }
+
+  processNode(document.body ?? document.documentElement!);
+
+  // 合并相邻 TextContent
+  final merged = <Map<String, dynamic>>[];
+  for (final item in itemMaps) {
+    if (item['type'] == 'text' &&
+        merged.isNotEmpty &&
+        merged.last['type'] == 'text') {
+      merged.last['text'] = '${merged.last['text']}${item['text']}';
+    } else {
+      merged.add(item);
+    }
+  }
+
+  return _ParseHtmlResult(merged, plainTextBuffer.toString(), links);
+}
 
 /// 图书加载器 - 负责图书的加载、处理和缓存
 class BookLoader {
@@ -1583,6 +1813,211 @@ class BookLoader {
     return estimatedChars.clamp(1, text.length);
   }
 
+  /// 将 Map 列表还原为 ContentItem 列表
+  List<ContentItem> _mapsToContentItems(List<Map<String, dynamic>> maps) {
+    return maps.map((m) {
+      switch (m['type'] as String) {
+        case 'text':
+          return TextContent(
+            text: m['text'] as String,
+            startOffset: m['startOffset'] as int,
+          );
+        case 'image':
+          return ImageContent(source: m['source'] as String);
+        case 'header':
+          return HeaderContent(
+            text: m['text'] as String,
+            level: m['level'] as int,
+          );
+        default:
+          return TextContent(text: '', startOffset: 0);
+      }
+    }).toList();
+  }
+
+  /// 对已解析的内容项做 TextPainter 分页（主线程）
+  List<PageContent> _splitParsedChapter(
+    EpubChapter chapter,
+    int chapterIndex,
+    List<ContentItem> contentItems,
+    String chapterPlainText,
+    double availableHeight,
+    double availableWidth,
+  ) {
+    final pages = <PageContent>[];
+
+    if (contentItems.isEmpty) {
+      pages.add(
+        PageContent(
+          chapterIndex: chapterIndex,
+          pageIndexInChapter: 0,
+          contentItems: [],
+          title: chapter.title,
+          chapterPlainText: chapterPlainText,
+        ),
+      );
+      return pages;
+    }
+
+    final textStyle = TextStyle(
+      fontSize: fontSize,
+      height: 1.5,
+      color: Colors.black87,
+    );
+    textPainterCache ??= TextPainter(textDirection: TextDirection.ltr);
+    textPainterCache!.text = TextSpan(text: '中', style: textStyle);
+    textPainterCache!.layout();
+    final lineHeight = textPainterCache!.height;
+
+    final usableHeight = availableHeight - 40 - kToolbarHeight;
+
+    List<ContentItem> currentPageItems = [];
+    double currentPageHeight = 0;
+    int chapterLocalPageIndex = 0;
+
+    void flushCurrentPage() {
+      if (currentPageItems.isNotEmpty) {
+        pages.add(
+          PageContent(
+            chapterIndex: chapterIndex,
+            pageIndexInChapter: chapterLocalPageIndex,
+            contentItems: List.from(currentPageItems),
+            title: chapter.title,
+            chapterPlainText: chapterPlainText,
+          ),
+        );
+        chapterLocalPageIndex++;
+        currentPageItems = [];
+        currentPageHeight = 0;
+      }
+    }
+
+    for (final item in contentItems) {
+      if (item is TextContent) {
+        String remaining = item.text;
+        int currentOffset = item.startOffset;
+
+        while (remaining.isNotEmpty) {
+          final remainingHeight = usableHeight - currentPageHeight;
+          final remainingLines = (remainingHeight / lineHeight).floor();
+
+          if (remainingLines <= 0) {
+            flushCurrentPage();
+            continue;
+          }
+
+          final actualLines = calculateTextLines(
+            remaining,
+            availableWidth,
+            textStyle,
+          );
+
+          if (actualLines <= remainingLines) {
+            if (currentPageItems.isNotEmpty &&
+                currentPageItems.last is TextContent) {
+              final last = currentPageItems.last as TextContent;
+              currentPageItems.removeLast();
+              currentPageItems.add(
+                TextContent(
+                  text: '${last.text}$remaining',
+                  startOffset: last.startOffset,
+                ),
+              );
+            } else {
+              currentPageItems.add(
+                TextContent(text: remaining, startOffset: currentOffset),
+              );
+            }
+            currentPageHeight += actualLines * lineHeight;
+            remaining = '';
+          } else {
+            final lines = remaining.split('\n');
+            int usedLines = 0;
+            int cut = 0;
+
+            for (int i = 0; i < lines.length; i++) {
+              final line = lines[i];
+              if (line.isEmpty) {
+                usedLines += 1;
+              } else {
+                textPainterCache!.text = TextSpan(text: line, style: textStyle);
+                textPainterCache!.layout(maxWidth: availableWidth);
+                usedLines += textPainterCache!.computeLineMetrics().length;
+              }
+              if (usedLines > remainingLines && i > 0) break;
+
+              if (i < lines.length - 1) {
+                int newlineCount = 0;
+                for (int pos = 0; pos < remaining.length; pos++) {
+                  if (remaining[pos] == '\n') {
+                    newlineCount++;
+                    if (newlineCount == i + 1) {
+                      cut = pos + 1;
+                      break;
+                    }
+                  }
+                }
+              } else {
+                cut = remaining.length;
+              }
+            }
+
+            if (cut <= 0) {
+              flushCurrentPage();
+              continue;
+            }
+
+            final part = remaining.substring(0, cut);
+            if (currentPageItems.isNotEmpty &&
+                currentPageItems.last is TextContent) {
+              final last = currentPageItems.last as TextContent;
+              currentPageItems.removeLast();
+              currentPageItems.add(
+                TextContent(
+                  text: '${last.text}$part',
+                  startOffset: last.startOffset,
+                ),
+              );
+            } else {
+              currentPageItems.add(
+                TextContent(text: part, startOffset: currentOffset),
+              );
+            }
+            currentPageHeight += usedLines * lineHeight;
+            currentOffset += part.length;
+            remaining = remaining.substring(cut);
+            flushCurrentPage();
+          }
+        }
+      } else if (item is ImageContent) {
+        final imageHeight = usableHeight * 0.4 + 4 * lineHeight;
+        if (currentPageItems.isNotEmpty &&
+            currentPageHeight + imageHeight > usableHeight)
+          flushCurrentPage();
+        currentPageItems.add(item);
+        currentPageHeight += imageHeight;
+        if (imageHeight >= usableHeight) flushCurrentPage();
+      } else if (item is HeaderContent) {
+        final headerHeight = 3 * lineHeight;
+        if (currentPageItems.isNotEmpty &&
+            currentPageHeight + headerHeight > usableHeight)
+          flushCurrentPage();
+        currentPageItems.add(item);
+        currentPageHeight += headerHeight;
+      } else if (item is LinkContent) {
+        currentPageItems.add(item);
+      } else if (item is CoverContent) {
+        if (currentPageItems.isNotEmpty) flushCurrentPage();
+        currentPageItems.add(item);
+        currentPageHeight = usableHeight;
+        flushCurrentPage();
+      }
+    }
+
+    if (currentPageItems.isNotEmpty) flushCurrentPage();
+    return pages;
+  }
+
   /// 将章节分割成页面
   List<PageContent> splitChapterIntoPages(
     EpubChapter chapter,
@@ -1644,8 +2079,8 @@ class BookLoader {
     // final charWidth = textPainterCache!.width;
     // final charsPerLine = (availableWidth / charWidth).floor();
 
-    // 每页可用高度（减去 padding）
-    final usableHeight = availableHeight - 140 - kToolbarHeight;
+    // 每页可用高度：减去内容区 padding(上下各10) 和底部 SizedBox(20)
+    final usableHeight = availableHeight - 40 - kToolbarHeight;
     // final linesPerPage = (usableHeight / lineHeight).floor();
 
     List<ContentItem> currentPageItems = [];
@@ -2164,8 +2599,8 @@ class BookLoader {
   ) async {
     final size = MediaQuery.of(context).size;
     windowSize = size;
-
-    final availableHeight = size.height - 20;
+    final padding = MediaQuery.of(context).padding;
+    final availableHeight = size.height - padding.top - padding.bottom;
     final availableWidth = size.width - 48;
 
     final pages = <PageContent>[];
@@ -2230,101 +2665,113 @@ class BookLoader {
 
     // print('[BookLoader] 章节文件映射: ${fileNameToChapterMap.keys.join(", ")}');
 
-    // 遍历 spine 处理所有页面
+    // ── 第一步：并行解析所有章节 HTML（Isolate，不含 TextPainter）──
+    // 收集所有需要处理的 spine 项
+    final List<
+      ({
+        int spineIndex,
+        EpubChapter? chapter,
+        String href,
+        String? htmlContent,
+        int chapterIndex,
+      })
+    >
+    spineJobs = [];
+
     for (int i = 0; i < spineItems.length; i++) {
       final spineItem = spineItems[i];
       final idRef = spineItem.idRef;
+      if (idRef == null) continue;
 
-      if (idRef == null) {
-        print('[BookLoader] spine item $i 缺少 idRef，跳过');
-        continue;
-      }
-
-      // 在 manifest 中查找对应的 item
       final manifestItem = manifestItems.cast<EpubManifestItem?>().firstWhere(
         (item) => item?.id == idRef,
         orElse: () => null,
       );
-
-      if (manifestItem == null) {
-        continue;
-      }
+      if (manifestItem == null) continue;
 
       final href = manifestItem.href;
-      if (href == null) {
-        continue;
-      }
+      if (href == null) continue;
+      if (coverHrefFromGuide != null && href == coverHrefFromGuide) continue;
 
-      // 如果从guide找到了封面href,跳过该href对应的spine项
-      if (coverHrefFromGuide != null && href == coverHrefFromGuide) {
-        continue;
-      }
-
-      // 检查该文件是否有对应的 chapter
       final chapter = fileNameToChapterMap[href];
-
       if (chapter != null) {
-        // 有对应的 chapter，按原方式处理
-        String? baseFilename = getBaseFileName(chapter.contentFileName);
+        final baseFilename = getBaseFileName(chapter.contentFileName);
         final chapterIndex = _chapterFilenameToIndex[baseFilename];
-
-        print(
-          '[BookLoader] 处理章节: spine=$i, href=$href, chapter.title=${chapter.title}, chapterIndex=$chapterIndex',
-        );
-        final chapterPages = splitChapterIntoPages(
-          chapter,
-          chapterIndex!,
-          availableHeight,
-          availableWidth,
-        );
-        pages.addAll(chapterPages);
-        print(
-          '[BookLoader] 处理章节完成: spine=$i, href=$href, chapterIndex=$chapterIndex, 生成页面数=${chapterPages.length}',
-        );
+        if (chapterIndex == null) continue;
+        spineJobs.add((
+          spineIndex: i,
+          chapter: chapter,
+          href: href,
+          htmlContent: chapter.htmlContent,
+          chapterIndex: chapterIndex,
+        ));
       } else {
-        // 没有对应的 chapter，从 epubBook.content.html 获取内容
         final htmlContent = epubBook.content?.html[href]?.content;
-        if (htmlContent != null && htmlContent.isNotEmpty) {
-          // 创建临时 chapter 用于处理
-          final tempChapter = EpubChapter(
-            title: manifestItem.id ?? '页面 ${i + 1}',
-            contentFileName: href,
-            htmlContent: htmlContent,
+        if (htmlContent == null || htmlContent.isEmpty) continue;
+        final nonChapterIndex = nonChapterPageCounter;
+        nonChapterPageCounter--;
+        // 更新文件名映射
+        String baseFilename = href;
+        final sep = href.contains('\\') ? '\\' : '/';
+        final idx = href.lastIndexOf(sep);
+        if (idx != -1) baseFilename = href.substring(idx + 1);
+        _chapterFilenameToIndex[baseFilename] = nonChapterIndex;
+        spineJobs.add((
+          spineIndex: i,
+          chapter: null,
+          href: href,
+          htmlContent: htmlContent,
+          chapterIndex: nonChapterIndex,
+        ));
+      }
+    }
+
+    // ── 第一步：单个 Isolate 批量解析所有章节 HTML ──
+    final tasks = spineJobs
+        .map(
+          (job) => _ParseHtmlTask(
+            job.htmlContent ?? '',
+            job.chapterIndex,
+            job.chapter?.contentFileName ?? job.href,
+          ),
+        )
+        .toList();
+
+    final parseResults = await compute(
+      _parseHtmlBatchIsolate,
+      _ParseHtmlBatchTask(tasks),
+    );
+
+    // ── 第二步：主线程串行做 TextPainter 分页 ──
+    for (int j = 0; j < spineJobs.length; j++) {
+      final job = spineJobs[j];
+      final parsed = parseResults[j];
+
+      // 将 Map 还原为 ContentItem
+      final contentItems = _mapsToContentItems(parsed.items);
+      // 收集链接到 _globalLinks
+      _globalLinks.addAll(parsed.links);
+      _chapterPlainTextMap[job.chapterIndex] = parsed.plainText;
+
+      final chapter =
+          job.chapter ??
+          EpubChapter(
+            title: '页面 ${job.spineIndex + 1}',
+            contentFileName: job.href,
+            htmlContent: job.htmlContent,
           );
 
-          // 非章节页面使用负数索引，避免与章节索引冲突
-          // 使用单独计数器，使非章节页面索引连续递增：-1, -2, -3...
-          final nonChapterIndex = nonChapterPageCounter;
+      final chapterPages = _splitParsedChapter(
+        chapter,
+        job.chapterIndex,
+        contentItems,
+        parsed.plainText,
+        availableHeight,
+        availableWidth,
+      );
+      pages.addAll(chapterPages);
 
-          final chapterPages = splitChapterIntoPages(
-            tempChapter,
-            nonChapterIndex,
-            availableHeight,
-            availableWidth,
-          );
-          pages.addAll(chapterPages);
-          // 处理文件名：提取基础文件名（去除路径前缀）
-          String? baseFilename = href;
-
-          // 如果包含路径分隔符，提取最后的部分
-          final pathSeparator = href.contains('\\') ? '\\' : '/';
-          final lastSlashIndex = href.lastIndexOf(pathSeparator);
-
-          if (lastSlashIndex != -1) {
-            baseFilename = href.substring(lastSlashIndex + 1);
-          }
-
-          _chapterFilenameToIndex[baseFilename] = nonChapterIndex;
-
-          // 递增非章节页面计数器
-          nonChapterPageCounter--;
-        }
-      }
-
-      // 每处理几个页面让出时间片
-      if (i % 5 == 0) {
-        await Future.delayed(const Duration(milliseconds: 5));
-      }
+      if (j % 5 == 0) await Future.delayed(const Duration(milliseconds: 1));
     }
 
     // 重新处理所有链接（在 onPagesUpdated 之前）

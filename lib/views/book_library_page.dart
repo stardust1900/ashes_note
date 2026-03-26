@@ -141,13 +141,18 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
           final coverPath =
               '${cacheDir.path}/cover_${normalizedPath.hashCode}.jpg';
-          await File(
-            coverPath,
-          ).writeAsBytes(Uint8List.fromList(img.encodeJpg(epub.coverImage!)));
-          coverFile = File(coverPath);
+          try {
+            await File(
+              coverPath,
+            ).writeAsBytes(Uint8List.fromList(img.encodeJpg(epub.coverImage!)));
+            coverFile = File(coverPath);
+          } catch (e) {
+            debugPrint('封面提取失败（忽略）：$e');
+          }
         }
       } catch (e) {
-        throw Exception('解析书籍元数据失败：$e');
+        // epub 解析失败时降级：用文件名，不抛出异常
+        debugPrint('EPUB 元数据解析失败，使用文件名：$e');
       }
     } else {
       throw Exception('不支持的文件格式，仅支持 EPUB 格式');
@@ -264,7 +269,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       final booksDir = Directory('$workingDir/books');
       if (!await booksDir.exists()) await booksDir.create(recursive: true);
 
-      int imported = 0, failed = 0;
+      int imported = 0;
       for (final f in result.files) {
         if (f.path == null) continue;
         final dest = File('${booksDir.path}/${f.name}');
@@ -273,19 +278,18 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           imported++;
           try {
             await _parseBookMetadata(dest);
-          } catch (_) {
-            failed++;
+          } catch (e) {
+            debugPrint('元数据解析失败（不影响导入）：$e');
           }
         }
       }
       await _loadBooks();
       if (mounted) {
-        final msg = failed == 0
-            ? '成功导入 $imported 本书籍'
-            : '成功导入 $imported 本，失败 $failed 本';
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(imported > 0 ? '成功导入 $imported 本书籍' : '选择的书籍已存在'),
+          ),
+        );
       }
     } catch (e) {
       if (mounted)

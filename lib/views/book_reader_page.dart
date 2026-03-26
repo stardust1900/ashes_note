@@ -191,6 +191,7 @@ class _BookReaderPageState extends State<BookReaderPage>
             setState(() {
               _pages = pages;
               _totalPages = totalPages;
+              _isProcessingPages = false;
               // 从 BookLoader 获取全局链接
               _globalLinks.clear();
               _globalLinks.addAll(_bookLoader.globalLinks);
@@ -2038,17 +2039,18 @@ class _BookReaderPageState extends State<BookReaderPage>
         (newSize.width != _windowSize!.width ||
             newSize.height != _windowSize!.height)) {
       _windowSize = newSize;
-      // 保存当前阅读位置，resize 完成后恢复
       final savedPageIndex = _currentPageIndex;
       final savedChapterIndex = _currentChapterIndex;
+      // 标记处理中，避免旧分页数据在新尺寸下溢出
+      setState(() {
+        _isProcessingPages = true;
+      });
       _bookLoader.onWindowResize(
         newSize,
         _epubBook!,
         context,
         currentChapterIndex: savedChapterIndex,
       );
-      // onPagesUpdated 回调会触发，但我们需要在那之后恢复位置
-      // 用标志位告知回调这是 resize 触发的，需要恢复位置
       _pendingRestorePageIndex = savedPageIndex;
       _pendingRestoreChapterIndex = savedChapterIndex;
     }
@@ -2272,362 +2274,367 @@ class _BookReaderPageState extends State<BookReaderPage>
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 10, 24, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: page.contentItems.map((item) {
-          if (item is TextContent) {
-            // TextContent的startOffset已经是章节内的全局偏移量
-            final textStartOffset = item.startOffset;
-            final textEndOffset = textStartOffset + item.text.length;
+      child: SingleChildScrollView(
+        physics: const NeverScrollableScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: page.contentItems.map((item) {
+            if (item is TextContent) {
+              // TextContent的startOffset已经是章节内的全局偏移量
+              final textStartOffset = item.startOffset;
+              final textEndOffset = textStartOffset + item.text.length;
 
-            // 调试：打印第1章第0页的TextContent信息
-            if (page.chapterIndex == 1 && page.pageIndexInChapter == 0) {
-              print(
-                '[BookReader] TextContent: textRange=[$textStartOffset, $textEndOffset), text="${item.text.substring(0, item.text.length > 30 ? 30 : item.text.length)}..."',
-              );
-            }
-
-            // 查找覆盖此文本范围内的链接
-            // 使用offset精确匹配（offset是章节内的全局偏移量）
-            final linksInRange = _globalLinks.where((link) {
-              final linkChapter = link['chapterIndex'] as int?;
-              final linkPageIndex = link['pageIndexInChapter'] as int?;
-              final linkOffset = link['offset'] as int?;
-              final linkLength = link['length'] as int?;
-
-              // 首先检查章节是否匹配
-              if (linkChapter != page.chapterIndex) {
-                return false;
-              }
-
-              // 然后检查页面索引是否匹配
-              if (linkPageIndex != page.pageIndexInChapter) {
-                return false;
-              }
-
-              // 检查offset范围是否匹配
-              if (linkOffset == null || linkLength == null) {
-                return false;
-              }
-
-              final linkEnd = linkOffset + linkLength;
-              final matches =
-                  linkEnd > textStartOffset && linkOffset < textEndOffset;
-
-              if (matches &&
-                  page.chapterIndex == 1 &&
-                  page.pageIndexInChapter == 0) {
+              // 调试：打印第1章第0页的TextContent信息
+              if (page.chapterIndex == 1 && page.pageIndexInChapter == 0) {
                 print(
-                  '[BookReader] 匹配到链接: text="${link['linkText']}", offset=$linkOffset, length=$linkLength',
+                  '[BookReader] TextContent: textRange=[$textStartOffset, $textEndOffset), text="${item.text.substring(0, item.text.length > 30 ? 30 : item.text.length)}..."',
                 );
               }
 
-              return matches;
-            }).toList();
+              // 查找覆盖此文本范围内的链接
+              // 使用offset精确匹配（offset是章节内的全局偏移量）
+              final linksInRange = _globalLinks.where((link) {
+                final linkChapter = link['chapterIndex'] as int?;
+                final linkPageIndex = link['pageIndexInChapter'] as int?;
+                final linkOffset = link['offset'] as int?;
+                final linkLength = link['length'] as int?;
 
-            // 构建带高亮的文本 spans
-            final highlightedSpans = HighlightOperations.buildHighlightSpans(
-              item.text,
-              textStartOffset,
-              page.chapterIndex,
-              _highlights,
-              _highlightSearchResults ? _searchResults : null,
-              _highlightSearchResults,
-            );
+                // 首先检查章节是否匹配
+                if (linkChapter != page.chapterIndex) {
+                  return false;
+                }
 
-            // 如果没有链接，直接使用原有的渲染方式
-            if (linksInRange.isEmpty) {
-              return SelectableTextWithToolbar(
-                text: item.text,
-                style: TextStyle(
-                  fontSize: _fontSize,
-                  height: 1.1,
-                  color:
-                      Theme.of(context).textTheme.bodyMedium?.color ??
-                      Colors.black87,
-                ),
-                textStartOffset: textStartOffset,
-                chapterIndex: page.chapterIndex,
-                pageIndex: _currentPageIndex,
-                spans: highlightedSpans,
-                onTextSelected:
-                    (selectedText, position, startOffset, endOffset) {
-                      _selectionStartOffset = startOffset;
-                      _selectionEndOffset = endOffset;
-                      _selectionChapterIndex = page.chapterIndex;
-                      _selectionPageIndex = _currentPageIndex;
+                // 然后检查页面索引是否匹配
+                if (linkPageIndex != page.pageIndexInChapter) {
+                  return false;
+                }
 
-                      // 检查是否选中了已有高亮/划线
-                      var existingHighlights =
-                          HighlightOperations.getHighlightsAtSelection(
-                            _highlights,
-                            page.chapterIndex,
-                            startOffset,
-                            endOffset,
-                          );
+                // 检查offset范围是否匹配
+                if (linkOffset == null || linkLength == null) {
+                  return false;
+                }
 
-                      _showTextToolbarAt(
-                        position,
-                        selectedText,
-                        existingHighlights: existingHighlights,
-                      );
-                    },
-                onSelectionCleared: () {
-                  if (_showTextToolbar) {
-                    _hideTextToolbar();
-                  }
-                },
-                onTap: () {
-                  if (_showControls) {
-                    setState(() {
-                      _showControls = false;
-                    });
-                  } else {
-                    setState(() {
-                      _showControls = true;
-                    });
-                  }
-                },
-              );
-            } else {
-              // 有链接的情况，合并链接和高亮
-              final finalSpans = _mergeLinksAndHighlights(
+                final linkEnd = linkOffset + linkLength;
+                final matches =
+                    linkEnd > textStartOffset && linkOffset < textEndOffset;
+
+                if (matches &&
+                    page.chapterIndex == 1 &&
+                    page.pageIndexInChapter == 0) {
+                  print(
+                    '[BookReader] 匹配到链接: text="${link['linkText']}", offset=$linkOffset, length=$linkLength',
+                  );
+                }
+
+                return matches;
+              }).toList();
+
+              // 构建带高亮的文本 spans
+              final highlightedSpans = HighlightOperations.buildHighlightSpans(
                 item.text,
                 textStartOffset,
-                highlightedSpans,
-                linksInRange,
+                page.chapterIndex,
+                _highlights,
+                _highlightSearchResults ? _searchResults : null,
+                _highlightSearchResults,
               );
 
-              return SelectableTextWithToolbar(
-                text: item.text,
-                style: TextStyle(
-                  fontSize: _fontSize,
-                  height: 1.1,
-                  color:
-                      Theme.of(context).textTheme.bodyMedium?.color ??
-                      Colors.black87,
-                ),
-                textStartOffset: textStartOffset,
-                chapterIndex: page.chapterIndex,
-                pageIndex: _currentPageIndex,
-                spans: finalSpans,
-                onTextSelected:
-                    (selectedText, position, startOffset, endOffset) {
-                      _selectionStartOffset = startOffset;
-                      _selectionEndOffset = endOffset;
-                      _selectionChapterIndex = page.chapterIndex;
-                      _selectionPageIndex = _currentPageIndex;
+              // 如果没有链接，直接使用原有的渲染方式
+              if (linksInRange.isEmpty) {
+                return SelectableTextWithToolbar(
+                  text: item.text,
+                  style: TextStyle(
+                    fontSize: _fontSize,
+                    height: 1.1,
+                    color:
+                        Theme.of(context).textTheme.bodyMedium?.color ??
+                        Colors.black87,
+                  ),
+                  textStartOffset: textStartOffset,
+                  chapterIndex: page.chapterIndex,
+                  pageIndex: _currentPageIndex,
+                  spans: highlightedSpans,
+                  onTextSelected:
+                      (selectedText, position, startOffset, endOffset) {
+                        _selectionStartOffset = startOffset;
+                        _selectionEndOffset = endOffset;
+                        _selectionChapterIndex = page.chapterIndex;
+                        _selectionPageIndex = _currentPageIndex;
 
-                      // 检查是否选中了已有高亮/划线
-                      var existingHighlights =
-                          HighlightOperations.getHighlightsAtSelection(
-                            _highlights,
-                            page.chapterIndex,
-                            startOffset,
-                            endOffset,
-                          );
+                        // 检查是否选中了已有高亮/划线
+                        var existingHighlights =
+                            HighlightOperations.getHighlightsAtSelection(
+                              _highlights,
+                              page.chapterIndex,
+                              startOffset,
+                              endOffset,
+                            );
 
-                      _showTextToolbarAt(
-                        position,
-                        selectedText,
-                        existingHighlights: existingHighlights,
-                      );
-                    },
-                onSelectionCleared: () {
-                  if (_showTextToolbar) {
-                    _hideTextToolbar();
-                  }
-                },
-                onTap: () {
-                  if (_showControls) {
-                    setState(() {
-                      _showControls = false;
-                    });
-                  } else {
-                    setState(() {
-                      _showControls = true;
-                    });
-                  }
-                },
-              );
-            }
-          } else if (item is HeaderContent) {
-            final fontSize =
-                32.0 - (item.level - 1) * 4; // h1=32, h2=28, ..., h6=12
-            final fontWeight = item.level <= 2
-                ? FontWeight.bold
-                : FontWeight.w600;
-            return Padding(
-              padding: const EdgeInsets.only(top: 24, bottom: 12),
-              child: Text(
-                item.text,
-                style: TextStyle(
-                  fontSize: fontSize,
-                  fontWeight: fontWeight,
-                  height: 1.2,
-                  color:
-                      Theme.of(context).textTheme.headlineMedium?.color ??
-                      Colors.black87,
-                ),
-              ),
-            );
-          } else if (item is ImageContent) {
-            return FutureBuilder<Uint8List?>(
-              future: _getImageData(item.source),
-              builder: (context, snapshot) {
-                final maxHeight = availableHeight * 0.5;
-
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Container(
-                    height: maxHeight,
-                    alignment: Alignment.center,
-                    child: const CircularProgressIndicator(),
-                  );
-                }
-
-                if (snapshot.hasData && snapshot.data != null) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return GestureDetector(
-                          onDoubleTap: () {
-                            setState(() {
-                              _isViewingLargeImage = true;
-                              _largeImageData = snapshot.data;
-                              // _largeImageTitle = '';
-                            });
-                          },
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: constraints.maxWidth,
-                              maxHeight: maxHeight,
-                            ),
-                            child: Image.memory(
-                              snapshot.data!,
-                              fit: BoxFit.contain,
-                              width: double.infinity,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  height: maxHeight,
-                                  color: Colors.grey[200],
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.broken_image,
-                                        size: 48,
-                                        color: Colors.grey[400],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        '图片加载失败',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
+                        _showTextToolbarAt(
+                          position,
+                          selectedText,
+                          existingHighlights: existingHighlights,
                         );
                       },
-                    ),
-                  );
-                } else {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Container(
-                      height: maxHeight,
-                      color: Colors.grey[200],
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.image_not_supported,
-                            size: 48,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '图片: ${item.source}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-              },
-            );
-          } else if (item is CoverContent) {
-            return Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _bookTitle,
-                    style: TextStyle(
-                      fontSize: _fontSize * 2,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                    textAlign: TextAlign.center,
+                  onSelectionCleared: () {
+                    if (_showTextToolbar) {
+                      _hideTextToolbar();
+                    }
+                  },
+                  onTap: () {
+                    if (_showControls) {
+                      setState(() {
+                        _showControls = false;
+                      });
+                    } else {
+                      setState(() {
+                        _showControls = true;
+                      });
+                    }
+                  },
+                );
+              } else {
+                // 有链接的情况，合并链接和高亮
+                final finalSpans = _mergeLinksAndHighlights(
+                  item.text,
+                  textStartOffset,
+                  highlightedSpans,
+                  linksInRange,
+                );
+
+                return SelectableTextWithToolbar(
+                  text: item.text,
+                  style: TextStyle(
+                    fontSize: _fontSize,
+                    height: 1.1,
+                    color:
+                        Theme.of(context).textTheme.bodyMedium?.color ??
+                        Colors.black87,
                   ),
-                  const SizedBox(height: 32),
-                  if (item.imagePath != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.6,
-                          maxHeight: MediaQuery.of(context).size.height * 0.6,
-                        ),
-                        child: Image.file(
-                          File(item.imagePath!),
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) {
-                            final coverWidth =
-                                MediaQuery.of(context).size.width * 0.6;
-                            final coverHeight =
-                                MediaQuery.of(context).size.height * 0.6;
-                            return Container(
-                              width: coverWidth,
-                              height: coverHeight,
-                              color: Colors.grey[200],
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.broken_image,
-                                    size: 48,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    '封面加载失败',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                ],
-                              ),
+                  textStartOffset: textStartOffset,
+                  chapterIndex: page.chapterIndex,
+                  pageIndex: _currentPageIndex,
+                  spans: finalSpans,
+                  onTextSelected:
+                      (selectedText, position, startOffset, endOffset) {
+                        _selectionStartOffset = startOffset;
+                        _selectionEndOffset = endOffset;
+                        _selectionChapterIndex = page.chapterIndex;
+                        _selectionPageIndex = _currentPageIndex;
+
+                        // 检查是否选中了已有高亮/划线
+                        var existingHighlights =
+                            HighlightOperations.getHighlightsAtSelection(
+                              _highlights,
+                              page.chapterIndex,
+                              startOffset,
+                              endOffset,
                             );
-                          },
+
+                        _showTextToolbarAt(
+                          position,
+                          selectedText,
+                          existingHighlights: existingHighlights,
+                        );
+                      },
+                  onSelectionCleared: () {
+                    if (_showTextToolbar) {
+                      _hideTextToolbar();
+                    }
+                  },
+                  onTap: () {
+                    if (_showControls) {
+                      setState(() {
+                        _showControls = false;
+                      });
+                    } else {
+                      setState(() {
+                        _showControls = true;
+                      });
+                    }
+                  },
+                );
+              }
+            } else if (item is HeaderContent) {
+              final fontSize =
+                  32.0 - (item.level - 1) * 4; // h1=32, h2=28, ..., h6=12
+              final fontWeight = item.level <= 2
+                  ? FontWeight.bold
+                  : FontWeight.w600;
+              return Padding(
+                padding: const EdgeInsets.only(top: 24, bottom: 12),
+                child: Text(
+                  item.text,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: fontWeight,
+                    height: 1.2,
+                    color:
+                        Theme.of(context).textTheme.headlineMedium?.color ??
+                        Colors.black87,
+                  ),
+                ),
+              );
+            } else if (item is ImageContent) {
+              return FutureBuilder<Uint8List?>(
+                future: _getImageData(item.source),
+                builder: (context, snapshot) {
+                  final maxHeight = availableHeight * 0.5;
+
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Container(
+                      height: maxHeight,
+                      alignment: Alignment.center,
+                      child: const CircularProgressIndicator(),
+                    );
+                  }
+
+                  if (snapshot.hasData && snapshot.data != null) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return GestureDetector(
+                            onDoubleTap: () {
+                              setState(() {
+                                _isViewingLargeImage = true;
+                                _largeImageData = snapshot.data;
+                                // _largeImageTitle = '';
+                              });
+                            },
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: constraints.maxWidth,
+                                maxHeight: maxHeight,
+                              ),
+                              child: Image.memory(
+                                snapshot.data!,
+                                fit: BoxFit.contain,
+                                width: double.infinity,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    height: maxHeight,
+                                    color: Colors.grey[200],
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.broken_image,
+                                          size: 48,
+                                          color: Colors.grey[400],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          '图片加载失败',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  } else {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Container(
+                        height: maxHeight,
+                        color: Colors.grey[200],
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.image_not_supported,
+                              size: 48,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '图片: ${item.source}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
                         ),
                       ),
+                    );
+                  }
+                },
+              );
+            } else if (item is CoverContent) {
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _bookTitle,
+                      style: TextStyle(
+                        fontSize: _fontSize * 2,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                      textAlign: TextAlign.center,
                     ),
-                ],
-              ),
-            );
-          }
-          return const SizedBox.shrink();
-        }).toList(),
+                    const SizedBox(height: 32),
+                    if (item.imagePath != null)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: MediaQuery.of(context).size.width * 0.6,
+                            maxHeight: MediaQuery.of(context).size.height * 0.6,
+                          ),
+                          child: Image.file(
+                            File(item.imagePath!),
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              final coverWidth =
+                                  MediaQuery.of(context).size.width * 0.6;
+                              final coverHeight =
+                                  MediaQuery.of(context).size.height * 0.6;
+                              return Container(
+                                width: coverWidth,
+                                height: coverHeight,
+                                color: Colors.grey[200],
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.broken_image,
+                                      size: 48,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '封面加载失败',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            }
+            return const SizedBox.shrink();
+          }).toList(),
+        ),
       ),
     );
   }
@@ -2681,20 +2688,22 @@ class _BookReaderPageState extends State<BookReaderPage>
                   width: double.infinity,
                   height: double.infinity,
                   color: Theme.of(context).scaffoldBackgroundColor,
-                  child: Column(
-                    children: [
-                      if (!_showControls)
-                        const SizedBox(height: kToolbarHeight),
-                      Expanded(
-                        child: _pages.isNotEmpty
-                            ? _buildPageContent(
-                                _pages[_currentPageIndex],
-                                constraints.maxHeight - 120 - kToolbarHeight,
-                              )
-                            : const Center(child: Text('暂无内容')),
-                      ),
-                      const SizedBox(height: 20),
-                    ],
+                  child: ClipRect(
+                    child: Column(
+                      children: [
+                        if (!_showControls)
+                          const SizedBox(height: kToolbarHeight),
+                        Expanded(
+                          child: _pages.isNotEmpty
+                              ? _buildPageContent(
+                                  _pages[_currentPageIndex],
+                                  constraints.maxHeight - 120 - kToolbarHeight,
+                                )
+                              : const Center(child: Text('暂无内容')),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
                   ),
                 )
               else
@@ -2758,18 +2767,20 @@ class _BookReaderPageState extends State<BookReaderPage>
                       width: double.infinity,
                       height: double.infinity,
                       color: Theme.of(context).scaffoldBackgroundColor,
-                      child: Column(
-                        children: [
-                          if (!_showControls)
-                            const SizedBox(height: kToolbarHeight),
-                          Expanded(
-                            child: _buildPageContent(
-                              _pages[idx],
-                              constraints.maxHeight - 120 - kToolbarHeight,
+                      child: ClipRect(
+                        child: Column(
+                          children: [
+                            if (!_showControls)
+                              const SizedBox(height: kToolbarHeight),
+                            Expanded(
+                              child: _buildPageContent(
+                                _pages[idx],
+                                constraints.maxHeight - 120 - kToolbarHeight,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 20),
-                        ],
+                            const SizedBox(height: 20),
+                          ],
+                        ),
                       ),
                     );
 
@@ -3158,7 +3169,7 @@ class _BookReaderPageState extends State<BookReaderPage>
     }
 
     // 如果找不到相同章节，尝试按百分比定位
-    if (targetPageIndex == -1 && _totalPages > 0) {
+    if (targetPageIndex == -1 && _totalPages > 0 && _pages.isNotEmpty) {
       final progress = previousPageIndex / (_totalPages > 0 ? _totalPages : 1);
       targetPageIndex = (progress * _pages.length).round().clamp(
         0,
@@ -3190,42 +3201,35 @@ class _BookReaderPageState extends State<BookReaderPage>
       return;
     }
 
-    // 立即关闭滑动条并显示处理中提示
-    setState(() {
-      _showFontSizeSlider = false;
-      _fontSize = _tempFontSize;
-      _isProcessingPages = true;
-    });
-
-    // 保存当前位置用于重新分页后恢复
+    final newFontSize = _tempFontSize;
     final previousPageIndex = _currentPageIndex;
     final previousChapterIndex = _currentChapterIndex;
 
-    // 保存字体大小设置
-    await _saveFontSize();
+    // 关闭滑动条，清空旧分页，显示 loading
+    setState(() {
+      _showFontSizeSlider = false;
+      _isProcessingPages = true;
+      _isContentLoaded = false; // 触发全屏 loading，不渲染旧分页
+      _pages = [];
+    });
 
-    // 清除旧缓存
+    _fontSize = newFontSize;
+    _bookLoader.fontSize = newFontSize;
+    await _saveFontSize();
     await _clearBookCache();
 
-    // 重新计算分页
     if (_chapters.isNotEmpty) {
+      // 重置标志，让 _processPagesAsync 可以执行
+      _isProcessingPages = false;
       await _processPagesAsync();
-
-      // 恢复阅读位置
-      if (mounted) {
-        _restorePositionAfterReflow(previousPageIndex, previousChapterIndex);
-      }
     }
 
     if (mounted) {
-      setState(() {
-        _isProcessingPages = false;
-      });
-
+      _restorePositionAfterReflow(previousPageIndex, previousChapterIndex);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('字体大小: ${_fontSize.toInt()}'),
-          duration: Duration(seconds: 1),
+          duration: const Duration(seconds: 1),
         ),
       );
     }
@@ -3342,8 +3346,8 @@ class _BookReaderPageState extends State<BookReaderPage>
                 child: Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    // 与当前字体一致时主题色，不一致时灰色
-                    color: _tempFontSize == _fontSize
+                    // 有变化时主题色，无变化时灰色
+                    color: _tempFontSize != _fontSize
                         ? Theme.of(context).primaryColor
                         : Colors.grey[400],
                     borderRadius: BorderRadius.circular(16),
@@ -3534,26 +3538,23 @@ class _BookReaderPageState extends State<BookReaderPage>
           // 内容已准备就绪
           return Stack(
             children: [
-              // 字体滑动条显示时，点击任意位置关闭；否则不包裹 GestureDetector，避免干扰文本选择
-              if (_showFontSizeSlider)
-                GestureDetector(
-                  onTap: _applyFontSizeChange,
-                  child: Container(
-                    width: double.infinity,
-                    height: double.infinity,
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                    child: _buildPageMode(),
-                  ),
-                )
-              else
-                Container(
-                  width: double.infinity,
-                  height: double.infinity,
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  child: _buildPageMode(),
-                ),
+              // 字体滑动条显示时不需要底层包裹，由上层遮罩处理关闭
+              Container(
+                width: double.infinity,
+                height: double.infinity,
+                color: Theme.of(context).scaffoldBackgroundColor,
+                child: _buildPageMode(),
+              ),
               if (_showTableOfContents) _buildTableOfContents(),
               if (_showSearchDrawer) _buildSearchDrawer(),
+              // 字体面板打开时，全屏透明遮罩拦截点击（放在面板下方）
+              if (_showFontSizeSlider)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _applyFontSizeChange,
+                  ),
+                ),
               if (_showFontSizeSlider) _buildFontSizeSlider(),
               if (_isViewingLargeImage && _largeImageData != null)
                 GestureDetector(
