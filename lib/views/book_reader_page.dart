@@ -292,6 +292,21 @@ class _BookReaderPageState extends State<BookReaderPage>
         linkData['targetPageIndexInChapter'] as int?;
 
     if (targetChapterIndex == null) {
+      // targetChapterIndex 未解析成功，尝试用 href 直接在页面里搜索目标 id
+      final href = linkData['href'] as String?;
+      if (href != null && href.contains('#')) {
+        final targetId = href.substring(href.indexOf('#') + 1);
+        // 在所有页面的文本里搜索包含 targetId 的页面
+        for (int i = 0; i < _pages.length; i++) {
+          final page = _pages[i];
+          for (final item in page.contentItems) {
+            if (item is TextContent && item.text.contains(targetId)) {
+              _goToPage(i);
+              return;
+            }
+          }
+        }
+      }
       print('[BookReader] 链接缺少目标章节索引: $linkId');
       return;
     }
@@ -422,6 +437,10 @@ class _BookReaderPageState extends State<BookReaderPage>
               _lastTappedLink = true;
               print('[BookReader] 点击链接: $linkId');
               _handleLinkTap(linkId);
+              // 延迟重置，确保本次 onTapUp 检查完成后清除标志
+              Future.delayed(const Duration(milliseconds: 200), () {
+                _lastTappedLink = false;
+              });
             },
         ),
       );
@@ -2812,14 +2831,12 @@ class _BookReaderPageState extends State<BookReaderPage>
                   left: 0,
                   top: 0,
                   bottom: 0,
-                  width: MediaQuery.of(context).size.width * 0.2,
-                  child: GestureDetector(
+                  width: MediaQuery.of(context).size.width * 0.25,
+                  child: Listener(
                     behavior: HitTestBehavior.translucent,
-                    onTap: () {
+                    onPointerUp: (event) {
                       if (_showControls) {
-                        setState(() {
-                          _showControls = false;
-                        });
+                        setState(() => _showControls = false);
                       } else {
                         Future.delayed(const Duration(milliseconds: 50), () {
                           if (!mounted || _lastTappedLink) return;
@@ -2829,19 +2846,17 @@ class _BookReaderPageState extends State<BookReaderPage>
                     },
                   ),
                 ),
-                // 右侧翻页区（20%宽度）
+                // 右侧翻页区（25%宽度）
                 Positioned(
                   right: 0,
                   top: 0,
                   bottom: 0,
-                  width: MediaQuery.of(context).size.width * 0.2,
-                  child: GestureDetector(
+                  width: MediaQuery.of(context).size.width * 0.25,
+                  child: Listener(
                     behavior: HitTestBehavior.translucent,
-                    onTap: () {
+                    onPointerUp: (event) {
                       if (_showControls) {
-                        setState(() {
-                          _showControls = false;
-                        });
+                        setState(() => _showControls = false);
                       } else {
                         Future.delayed(const Duration(milliseconds: 50), () {
                           if (!mounted || _lastTappedLink) return;
@@ -2936,9 +2951,9 @@ class _BookReaderPageState extends State<BookReaderPage>
                           });
                           return;
                         }
-                        if (tapX < screenWidth * 0.2) {
+                        if (tapX < screenWidth * 0.25) {
                           _previousPage();
-                        } else if (tapX > screenWidth * 0.8) {
+                        } else if (tapX > screenWidth * 0.75) {
                           _nextPage();
                         } else if (tapY > screenHeight * 0.2 &&
                             tapY < screenHeight * 0.8) {

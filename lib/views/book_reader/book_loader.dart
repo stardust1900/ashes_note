@@ -131,6 +131,32 @@ _ParseHtmlResult _parseHtmlStatic(
     });
   }
 
+  void addLinkAt(
+    String href,
+    String? linkId,
+    String linkText,
+    String? finalLinkId,
+    int offset,
+  ) {
+    final hashIndex = href.indexOf('#');
+    final targetId = hashIndex != -1 ? href.substring(hashIndex + 1) : '';
+    links.add({
+      'chapterIndex': chapterIndex,
+      'href': href,
+      'targetId': targetId,
+      'fullLinkId': finalLinkId ?? 'chapter$chapterIndex#link_${links.length}',
+      'linkText': linkText,
+      'linkId': linkId,
+      'htmlFileName': htmlFileName,
+      'pageIndexInChapter': null,
+      'offset': offset,
+      'length': linkText.length,
+      'targetChapterIndex': null,
+      'targetPageIndexInChapter': null,
+      'targetExplanation': null,
+    });
+  }
+
   void addText(String text, {bool isParagraph = false}) {
     if (text.isEmpty) return;
     final offset = plainTextBuffer.length;
@@ -187,11 +213,17 @@ _ParseHtmlResult _parseHtmlStatic(
             } else if (isFootnoteLink(n)) {
               final href = n.attributes['href']!;
               final linkId = n.attributes['id'];
+              // 链接文本可能在子元素（如 <sup>）里
               final lt = n.text.trim();
               final fid = linkId != null && linkId.isNotEmpty
                   ? 'chapter$chapterIndex#$linkId'
                   : 'chapter$chapterIndex#link_${links.length}';
-              addLink(href, linkId, lt, fid);
+              // offset = plainTextBuffer 已写入的 + buf 中待写入的 + 可能的空格
+              final linkOffset =
+                  plainTextBuffer.length +
+                  buf.length +
+                  (buf.isNotEmpty && lt.isNotEmpty ? 1 : 0);
+              addLinkAt(href, linkId, lt, fid, linkOffset);
               if (lt.isNotEmpty) {
                 if (buf.isNotEmpty) buf.write(' ');
                 buf.write(lt);
@@ -209,6 +241,32 @@ _ParseHtmlResult _parseHtmlStatic(
         }
       } else if (name == 'div') {
         for (final c in node.nodes) processNode(c);
+        // div 结束后加换行，确保块级分隔
+        if (plainTextBuffer.isNotEmpty &&
+            !plainTextBuffer.toString().endsWith('\n')) {
+          plainTextBuffer.write('\n');
+          if (itemMaps.isNotEmpty && itemMaps.last['type'] == 'text') {
+            itemMaps.last['text'] = '${itemMaps.last['text']}\n';
+          }
+        }
+      } else if (name == 'li') {
+        // 列表项：处理子节点后加换行
+        for (final c in node.nodes) processNode(c);
+        if (plainTextBuffer.isNotEmpty &&
+            !plainTextBuffer.toString().endsWith('\n')) {
+          plainTextBuffer.write('\n');
+          if (itemMaps.isNotEmpty && itemMaps.last['type'] == 'text') {
+            itemMaps.last['text'] = '${itemMaps.last['text']}\n';
+          } else {
+            itemMaps.add({
+              'type': 'text',
+              'text': '\n',
+              'startOffset': plainTextBuffer.length - 1,
+            });
+          }
+        }
+      } else if (name == 'ul' || name == 'ol') {
+        for (final c in node.nodes) processNode(c);
       } else if (isInlineElement(node)) {
         if (isFootnoteLink(node)) {
           final href = node.attributes['href']!;
@@ -220,8 +278,14 @@ _ParseHtmlResult _parseHtmlStatic(
           addLink(href, linkId, lt, fid);
           if (lt.isNotEmpty) addText(lt);
         } else {
-          final t = node.text.trim();
-          if (t.isNotEmpty) addText(t);
+          // 先检查子节点里是否有链接，有则递归处理
+          final hasChildLink = node.querySelectorAll('a[href]').isNotEmpty;
+          if (hasChildLink) {
+            for (final c in node.nodes) processNode(c);
+          } else {
+            final t = node.text.trim();
+            if (t.isNotEmpty) addText(t);
+          }
         }
       } else {
         for (final c in node.nodes) processNode(c);
@@ -2355,11 +2419,29 @@ class BookLoader {
         if (hashIndex == -1) continue;
 
         final chapterFilename = href.substring(0, hashIndex);
+        final baseName = chapterFilename.contains('/')
+            ? chapterFilename.split('/').last
+            : chapterFilename;
 
         // 使用预构建的文件名映射查找目标章节
-        targetChapterIndex = _chapterFilenameToIndex[chapterFilename];
+        targetChapterIndex =
+            _chapterFilenameToIndex[chapterFilename] ??
+            _chapterFilenameToIndex[baseName];
+
+        // 如果目标文件名就是当前章节，当作章节内链接处理
+        if (targetChapterIndex == null) {
+          final htmlFileName = link['htmlFileName'] as String?;
+          final currentBase = htmlFileName != null && htmlFileName.contains('/')
+              ? htmlFileName.split('/').last
+              : htmlFileName;
+          if (currentBase == baseName || htmlFileName == chapterFilename) {
+            targetChapterIndex = chapterIndex;
+          }
+        }
 
         if (targetChapterIndex == null) {
+          link['targetChapterIndex'] = null;
+          link['targetPageIndexInChapter'] = null;
           continue;
         }
 

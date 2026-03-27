@@ -48,6 +48,7 @@ class BookInfo {
   final String author;
   File? coverFile;
   double readingProgress;
+  DateTime? importedAt; // 导入时间（文件修改时间）
 
   BookInfo({
     required this.file,
@@ -55,6 +56,7 @@ class BookInfo {
     required this.author,
     this.coverFile,
     this.readingProgress = -1,
+    this.importedAt,
   });
 }
 
@@ -191,6 +193,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     for (final file in files) {
       final normalizedPath = file.path.replaceAll('\\', '/');
       final progress = await _getReadingProgress(file);
+      final stat = await file.stat();
       BookMetadata metadata;
       if (metadataMap.containsKey(normalizedPath)) {
         metadata = metadataMap[normalizedPath]!;
@@ -206,6 +209,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
               ? File(metadata.coverPath!)
               : null,
           readingProgress: progress,
+          importedAt: stat.modified,
         ),
       );
     }
@@ -462,7 +466,16 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
 
   List<BookInfo> get _sortedBooks {
     final list = List<BookInfo>.from(_books);
-    if (_sortMode == 'name') list.sort((a, b) => a.title.compareTo(b.title));
+    if (_sortMode == 'name') {
+      list.sort((a, b) => a.title.compareTo(b.title));
+    } else {
+      // 按导入时间降序（最新在前）
+      list.sort((a, b) {
+        final ta = a.importedAt ?? DateTime(0);
+        final tb = b.importedAt ?? DateTime(0);
+        return tb.compareTo(ta);
+      });
+    }
     return list;
   }
 
