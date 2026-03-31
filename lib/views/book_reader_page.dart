@@ -2882,38 +2882,51 @@ class _BookReaderPageState extends State<BookReaderPage>
                   left: 0,
                   top: 0,
                   bottom: 0,
-                  width: MediaQuery.of(context).size.width * 0.25,
-                  child: Listener(
+                  width: MediaQuery.of(context).size.width * 0.2,
+                  child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
-                    onPointerUp: (event) {
+                    onTap: () {
                       if (_showControls) {
                         setState(() => _showControls = false);
                       } else {
-                        Future.delayed(const Duration(milliseconds: 50), () {
-                          if (!mounted || _lastTappedLink) return;
+                        if (!_lastTappedLink) {
                           _previousPage();
-                        });
+                        }
                       }
                     },
                   ),
                 ),
-                // 右侧翻页区（25%宽度）
+                // 右侧翻页区（20%宽度）
                 Positioned(
                   right: 0,
                   top: 0,
                   bottom: 0,
-                  width: MediaQuery.of(context).size.width * 0.25,
-                  child: Listener(
+                  width: MediaQuery.of(context).size.width * 0.2,
+                  child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
-                    onPointerUp: (event) {
+                    onTap: () {
                       if (_showControls) {
                         setState(() => _showControls = false);
                       } else {
-                        Future.delayed(const Duration(milliseconds: 50), () {
-                          if (!mounted || _lastTappedLink) return;
+                        if (!_lastTappedLink) {
                           _nextPage();
-                        });
+                        }
                       }
+                    },
+                  ),
+                ),
+                // 中间区域：点击显示/隐藏 AppBar
+                Positioned(
+                  left: MediaQuery.of(context).size.width * 0.2,
+                  right: MediaQuery.of(context).size.width * 0.2,
+                  top: MediaQuery.of(context).size.height * 0.2,
+                  bottom: MediaQuery.of(context).size.height * 0.2,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () {
+                      setState(() {
+                        _showControls = !_showControls;
+                      });
                     },
                   ),
                 ),
