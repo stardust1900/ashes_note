@@ -18,6 +18,7 @@ class SelectableTextWithToolbar extends StatefulWidget {
   onTextSelected;
   final VoidCallback onSelectionCleared;
   final VoidCallback? onTap; // 单击回调，用于显示/隐藏控制栏
+  final Function(SelectableTextWithToolbarState)? onStateCreated; // 状态创建回调
 
   const SelectableTextWithToolbar({
     super.key,
@@ -30,6 +31,7 @@ class SelectableTextWithToolbar extends StatefulWidget {
     required this.onTextSelected,
     required this.onSelectionCleared,
     this.onTap,
+    this.onStateCreated,
   });
 
   @override
@@ -39,23 +41,26 @@ class SelectableTextWithToolbar extends StatefulWidget {
 
 class SelectableTextWithToolbarState extends State<SelectableTextWithToolbar> {
   final GlobalKey _selectableKey = GlobalKey();
+  final FocusNode _focusNode = FocusNode();
   TextPainter? _cachedTextPainter;
   String? _cachedText;
   TextStyle? _cachedStyle;
   double? _cachedMaxWidth;
 
   /// 清除文本选择状态
-  /// 使用反射调用私有方法，因为 SelectableTextState 不是公开类型
+  /// 通过失去焦点来清除选择
   void clearSelection() {
+    // 方法1：通过失去焦点来清除选择
+    _focusNode.unfocus();
+
+    // 方法2：尝试调用内部方法（作为备选）
     final state = _selectableKey.currentState;
     if (state != null) {
       try {
-        // 使用 dynamic 类型绕过静态类型检查
         final dynamicState = state as dynamic;
         dynamicState.clearSelection();
       } catch (e) {
-        // 如果方法不存在或调用失败，尝试使用其他方式清除选择
-        // 某些 Flutter 版本可能使用不同的内部实现
+        // 忽略错误
       }
     }
   }
@@ -82,14 +87,19 @@ class SelectableTextWithToolbarState extends State<SelectableTextWithToolbar> {
 
   @override
   void dispose() {
+    _focusNode.dispose();
     _cachedTextPainter?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // 调用状态创建回调，让父组件可以保存状态引用
+    widget.onStateCreated?.call(this);
+
     return SelectableText.rich(
       key: _selectableKey,
+      focusNode: _focusNode,
       TextSpan(children: widget.spans, style: widget.style),
       onTap: widget.onTap,
       onSelectionChanged: (selection, cause) {

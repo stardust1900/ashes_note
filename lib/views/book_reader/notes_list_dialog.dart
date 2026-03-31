@@ -738,24 +738,24 @@ class NotesListDialog extends StatelessWidget {
   Widget _buildNoteContent(String note, BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            isDark 
+            isDark
               ? theme.colorScheme.surface.withValues(alpha: 0.5)
               : Colors.grey[50]!,
-            isDark 
+            isDark
               ? theme.colorScheme.surface.withValues(alpha: 0.3)
               : Colors.grey[100]!,
           ],
         ),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark 
+          color: isDark
             ? theme.dividerColor.withValues(alpha: 0.3)
             : Colors.grey[200]!,
           width: 1,
@@ -773,8 +773,7 @@ class NotesListDialog extends StatelessWidget {
           Expanded(
             child: Text(
               note,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
+              // 不限制行数，显示完整内容
               style: TextStyle(
                 fontSize: 14,
                 color: isDark ? Colors.grey[200] : Colors.grey[700],

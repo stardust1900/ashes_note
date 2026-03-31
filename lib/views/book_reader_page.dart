@@ -33,6 +33,11 @@ Future<void> syncVolumeKeyEnabled(bool enabled) async {
   }
 }
 
+/// 用于保存 StatefulWidget 状态的辅助类
+class GlobalState<T extends State<StatefulWidget>> {
+  T? state;
+}
+
 /// 阅读器页面 - 支持分页阅读和图片显示
 class BookReaderPage extends StatefulWidget {
   final String bookPath;
@@ -88,6 +93,9 @@ class _BookReaderPageState extends State<BookReaderPage>
   bool _showTextToolbar = false;
   Offset _toolbarPosition = Offset.zero;
   OverlayEntry? _toolbarOverlay;
+
+  // 保存 SelectableTextWithToolbar 的状态引用，用于清除文本选择
+  final List<GlobalState<SelectableTextWithToolbarState>> _selectableTextStates = [];
 
   // 高亮笔记相关
   final List<Highlight> _highlights = [];
@@ -566,6 +574,12 @@ class _BookReaderPageState extends State<BookReaderPage>
 
   /// 隐藏文本选择工具栏
   void _hideTextToolbar({bool applyDefaultHighlight = false}) {
+    // 先清除所有文本选择状态（UI层面）
+    for (final globalState in _selectableTextStates) {
+      globalState.state?.clearSelection();
+    }
+
+    // 然后处理自动高亮逻辑
     if (applyDefaultHighlight &&
         _selectedText != null &&
         _selectedHighlights.isEmpty) {
@@ -631,11 +645,11 @@ class _BookReaderPageState extends State<BookReaderPage>
     return Stack(
       children: [
         // 透明背景，点击隐藏工具栏（如果选中文本未高亮，则使用默认颜色高亮）
+        // 注意：不要放 Container 子 widget，否则会影响 hit test
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
             onTap: () => _hideTextToolbar(applyDefaultHighlight: true),
-            child: Container(color: Colors.transparent),
           ),
         ),
         // 工具栏
@@ -1151,22 +1165,43 @@ class _BookReaderPageState extends State<BookReaderPage>
         _selectionChapterIndex == null)
       return;
 
-    // 先使用默认黄色高亮
-    _onHighlightWithColor(Colors.yellow);
+    // 保存当前选择的信息，避免被后续操作覆盖
+    final currentSelectedText = _selectedText!;
+    final currentStartOffset = _selectionStartOffset!;
+    final currentEndOffset = _selectionEndOffset!;
+    final currentChapterIndex = _selectionChapterIndex!;
+    final currentPageIndex = _selectionPageIndex ?? _currentPageIndex;
 
-    // 获取刚刚创建的高亮
-    final newHighlight = _highlights.lastWhere(
-      (h) =>
-          h.chapterIndex == _selectionChapterIndex &&
-          h.startOffset == _selectionStartOffset &&
-          h.endOffset == _selectionEndOffset,
-      orElse: () => _highlights.last,
-    );
+    // 移除与该位置重叠的高亮，避免重复
+    setState(() {
+      _highlights.removeWhere((h) {
+        return !h.isUnderline &&
+            h.chapterIndex == currentChapterIndex &&
+            h.startOffset < currentEndOffset &&
+            h.endOffset > currentStartOffset;
+      });
 
-    _selectedHighlights = [newHighlight];
+      // 创建新高亮对象并添加到列表
+      final newHighlight = Highlight(
+        chapterIndex: currentChapterIndex,
+        pageIndex: currentPageIndex,
+        text: currentSelectedText,
+        color: Colors.yellow,
+        startOffset: currentStartOffset,
+        endOffset: currentEndOffset,
+      );
+      _highlights.add(newHighlight);
+      _selectedHighlights = [newHighlight];
+
+      // 保存默认高亮颜色
+      _saveDefaultHighlightColor(Colors.yellow);
+
+      // 保存到持久化存储
+      _saveHighlights();
+    });
 
     // 显示添加笔记对话框
-    _showAddNoteDialog(newHighlight);
+    _showAddNoteDialog(_selectedHighlights.first);
   }
 
   /// 为已有高亮/划线添加/编辑笔记（支持叠加）
@@ -2412,6 +2447,14 @@ class _BookReaderPageState extends State<BookReaderPage>
                       });
                     }
                   },
+                  onStateCreated: (state) {
+                    // 保存状态引用，用于清除文本选择
+                    final globalState = GlobalState<SelectableTextWithToolbarState>();
+                    globalState.state = state;
+                    if (!_selectableTextStates.contains(globalState)) {
+                      _selectableTextStates.add(globalState);
+                    }
+                  },
                 );
               } else {
                 // 有链接的情况，合并链接和高亮
@@ -2471,6 +2514,14 @@ class _BookReaderPageState extends State<BookReaderPage>
                       setState(() {
                         _showControls = true;
                       });
+                    }
+                  },
+                  onStateCreated: (state) {
+                    // 保存状态引用，用于清除文本选择
+                    final globalState = GlobalState<SelectableTextWithToolbarState>();
+                    globalState.state = state;
+                    if (!_selectableTextStates.contains(globalState)) {
+                      _selectableTextStates.add(globalState);
                     }
                   },
                 );
