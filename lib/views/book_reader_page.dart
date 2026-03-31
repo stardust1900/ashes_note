@@ -434,7 +434,7 @@ class _BookReaderPageState extends State<BookReaderPage>
           text: linkText,
           style: TextStyle(
             fontSize: _fontSize,
-            height: 1.1,
+            height: BookReaderConstants.lineHeight,
             color: Colors.blue,
             decoration: TextDecoration.underline,
             decorationColor: Colors.blue,
@@ -488,7 +488,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                   currentStyle ??
                   TextStyle(
                     fontSize: _fontSize,
-                    height: 1.1,
+                    height: BookReaderConstants.lineHeight,
                     color:
                         Theme.of(context).textTheme.bodyMedium?.color ??
                         Colors.black87,
@@ -2400,7 +2400,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                   text: item.text,
                   style: TextStyle(
                     fontSize: _fontSize,
-                    height: 1.1,
+                    height: BookReaderConstants.lineHeight,
                     color:
                         Theme.of(context).textTheme.bodyMedium?.color ??
                         Colors.black87,
@@ -2469,7 +2469,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                   text: item.text,
                   style: TextStyle(
                     fontSize: _fontSize,
-                    height: 1.1,
+                    height: BookReaderConstants.lineHeight,
                     color:
                         Theme.of(context).textTheme.bodyMedium?.color ??
                         Colors.black87,
@@ -2527,19 +2527,21 @@ class _BookReaderPageState extends State<BookReaderPage>
                 );
               }
             } else if (item is HeaderContent) {
-              final fontSize =
-                  32.0 - (item.level - 1) * 4; // h1=32, h2=28, ..., h6=12
+              final fontSize = BookReaderConstants.getHeaderFontSize(item.level);
               final fontWeight = item.level <= 2
                   ? FontWeight.bold
                   : FontWeight.w600;
               return Padding(
-                padding: const EdgeInsets.only(top: 24, bottom: 12),
+                padding: const EdgeInsets.only(
+                  top: BookReaderConstants.headerPaddingTop,
+                  bottom: BookReaderConstants.headerPaddingBottom,
+                ),
                 child: Text(
                   item.text,
                   style: TextStyle(
                     fontSize: fontSize,
                     fontWeight: fontWeight,
-                    height: 1.2,
+                    height: BookReaderConstants.headerLineHeight,
                     color:
                         Theme.of(context).textTheme.headlineMedium?.color ??
                         Colors.black87,

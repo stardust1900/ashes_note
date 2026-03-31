@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
 import '../../utils/prefs_util.dart';
+import '../../utils/const.dart' show BookReaderConstants;
 import '../../models/book_reader/page_content.dart';
 import '../../models/book_reader/content_item.dart'
     show
@@ -1923,17 +1924,31 @@ class BookLoader {
       return pages;
     }
 
+    // 创建与渲染端一致的 TextStyle
+    // 注意：这里使用默认的 body 样式，实际渲染时会从 Theme 获取
     final textStyle = TextStyle(
       fontSize: fontSize,
-      height: 1.5,
+      height: BookReaderConstants.lineHeight,
       color: Colors.black87,
+      // 明确指定 fontFamily，避免使用系统默认字体导致的差异
+      fontFamily: '.SF Pro Text', // iOS/macOS 默认字体
+      fontFamilyFallback: const ['Roboto', 'Noto Sans CJK SC', 'sans-serif'],
     );
     textPainterCache ??= TextPainter(textDirection: TextDirection.ltr);
     textPainterCache!.text = TextSpan(text: '中', style: textStyle);
     textPainterCache!.layout();
     final lineHeight = textPainterCache!.height;
 
-    final usableHeight = availableHeight - 40 - kToolbarHeight;
+    // 统一可用高度计算：
+    // - 减去页面垂直预留（120）
+    // - 减去 kToolbarHeight
+    // - 减去内容区内部 padding（20）
+    // - 减去安全边距（小字体时 TextPainter 计算误差 + SelectableText 内边距）
+    final usableHeight = availableHeight
+        - BookReaderConstants.pageVerticalReserve
+        - kToolbarHeight
+        - BookReaderConstants.contentPaddingVertical
+        - BookReaderConstants.selectableTextExtraPadding;
 
     List<ContentItem> currentPageItems = [];
     double currentPageHeight = 0;
@@ -1995,40 +2010,32 @@ class BookLoader {
             currentPageHeight += actualLines * lineHeight;
             remaining = '';
           } else {
-            final lines = remaining.split('\n');
-            int usedLines = 0;
-            int cut = 0;
+            // 使用 calculateFitChars 精确计算能容纳的字符数
+            final fitChars = calculateFitChars(
+              remaining,
+              availableWidth,
+              remainingLines,
+              textStyle,
+            );
 
-            for (int i = 0; i < lines.length; i++) {
-              final line = lines[i];
-              if (line.isEmpty) {
-                usedLines += 1;
-              } else {
-                textPainterCache!.text = TextSpan(text: line, style: textStyle);
-                textPainterCache!.layout(maxWidth: availableWidth);
-                usedLines += textPainterCache!.computeLineMetrics().length;
-              }
-              if (usedLines > remainingLines && i > 0) break;
-
-              if (i < lines.length - 1) {
-                int newlineCount = 0;
-                for (int pos = 0; pos < remaining.length; pos++) {
-                  if (remaining[pos] == '\n') {
-                    newlineCount++;
-                    if (newlineCount == i + 1) {
-                      cut = pos + 1;
-                      break;
-                    }
-                  }
-                }
-              } else {
-                cut = remaining.length;
-              }
-            }
-
-            if (cut <= 0) {
+            if (fitChars <= 0) {
               flushCurrentPage();
               continue;
+            }
+
+            // 在 fitChars 位置向前查找合适的截断点（避免截断在单词中间）
+            int cut = fitChars;
+            // 向前查找换行符或空格，最多向前查找 20 个字符
+            for (int i = 0; i < 20 && cut > 0; i++) {
+              final char = remaining[cut - 1];
+              if (char == '\n' || char == ' ' || char == '\u3000') {
+                break;
+              }
+              cut--;
+            }
+            // 如果没有找到合适的截断点，使用原始 fitChars（防止回退太多）
+            if (cut < fitChars * 0.8) {
+              cut = fitChars;
             }
 
             final part = remaining.substring(0, cut);
@@ -2047,7 +2054,10 @@ class BookLoader {
                 TextContent(text: part, startOffset: currentOffset),
               );
             }
-            currentPageHeight += usedLines * lineHeight;
+            // 使用 remainingLines 作为实际使用的行数，而不是重新计算
+            // 因为 calculateFitChars 是根据 remainingLines 截断的
+            // 重新计算可能导致高度不一致（空白或溢出）
+            currentPageHeight += remainingLines * lineHeight;
             currentOffset += part.length;
             remaining = remaining.substring(cut);
             flushCurrentPage();
@@ -2062,7 +2072,8 @@ class BookLoader {
         currentPageHeight += imageHeight;
         if (imageHeight >= usableHeight) flushCurrentPage();
       } else if (item is HeaderContent) {
-        final headerHeight = 3 * lineHeight;
+        // 使用与渲染一致的标题高度计算
+        final headerHeight = BookReaderConstants.getHeaderHeight(item.level, fontSize);
         if (currentPageItems.isNotEmpty &&
             currentPageHeight + headerHeight > usableHeight)
           flushCurrentPage();
@@ -2126,10 +2137,15 @@ class BookLoader {
     }
 
     // 使用 TextPainter 精确计算行高
+    // 创建与渲染端一致的 TextStyle
+    // 注意：这里使用默认的 body 样式，实际渲染时会从 Theme 获取
     final textStyle = TextStyle(
       fontSize: fontSize,
-      height: 1.5,
+      height: BookReaderConstants.lineHeight,
       color: Colors.black87,
+      // 明确指定 fontFamily，避免使用系统默认字体导致的差异
+      fontFamily: '.SF Pro Text', // iOS/macOS 默认字体
+      fontFamilyFallback: const ['Roboto', 'Noto Sans CJK SC', 'sans-serif'],
     );
 
     // 计算实际行高（只计算一次）
@@ -2143,8 +2159,16 @@ class BookLoader {
     // final charWidth = textPainterCache!.width;
     // final charsPerLine = (availableWidth / charWidth).floor();
 
-    // 每页可用高度：减去内容区 padding(上下各10) 和底部 SizedBox(20)
-    final usableHeight = availableHeight - 40 - kToolbarHeight;
+    // 每页可用高度：
+    // - 减去页面垂直预留（120）
+    // - 减去 kToolbarHeight
+    // - 减去内容区内部 padding（20）
+    // - 减去安全边距（小字体时 TextPainter 计算误差 + SelectableText 内边距）
+    final usableHeight = availableHeight
+        - BookReaderConstants.pageVerticalReserve
+        - kToolbarHeight
+        - BookReaderConstants.contentPaddingVertical
+        - BookReaderConstants.selectableTextExtraPadding;
     // final linesPerPage = (usableHeight / lineHeight).floor();
 
     List<ContentItem> currentPageItems = [];
@@ -2222,59 +2246,33 @@ class BookLoader {
             currentPageHeight += actualLines * lineHeight;
             remaining = '';
           } else {
-            // 实际行数超过剩余行数，需要按照换行符分割
-            // 按换行符分割文本
-            final lines = remaining.split('\n');
-            int usedLines = 0;
-            int cut = 0;
+            // 实际行数超过剩余行数，使用 calculateFitChars 精确计算截断位置
+            final fitChars = calculateFitChars(
+              remaining,
+              availableWidth,
+              remainingLines,
+              textStyle,
+            );
 
-            // 逐行添加，直到填满当前页面
-            for (int i = 0; i < lines.length; i++) {
-              final line = lines[i];
-              if (line.isEmpty) {
-                // 空行也算一行
-                usedLines += 1;
-              } else {
-                // 使用 TextPainter 计算这一行在指定宽度下占多少行
-                textPainterCache!.text = TextSpan(text: line, style: textStyle);
-                textPainterCache!.layout(maxWidth: availableWidth);
-                final lineMetrics = textPainterCache!.computeLineMetrics();
-                usedLines += lineMetrics.length;
-              }
-
-              // 检查是否超出剩余行数
-              if (usedLines > remainingLines && i > 0) {
-                // 已超出，回退到上一行
-                // print('[BookLoader] 超出行数限制，在第 $i 行停止');
-                break;
-              }
-
-              // 更新截断位置 - 找到当前行对应的换行符位置
-              // 注意：split('\n') 会在每个换行符处分割，所以需要找到第 i+1 个换行符的位置
-              if (i < lines.length - 1) {
-                // 不是最后一行，找到第 i+1 个换行符
-                int newlineCount = 0;
-                int pos = 0;
-                while (pos < remaining.length) {
-                  if (remaining[pos] == '\n') {
-                    newlineCount++;
-                    if (newlineCount == i + 1) {
-                      cut = pos + 1;
-                      break;
-                    }
-                  }
-                  pos++;
-                }
-              } else {
-                // 最后一行，包含所有剩余文本
-                cut = remaining.length;
-              }
-            }
-
-            if (cut <= 0) {
+            if (fitChars <= 0) {
               // 无法分割，强制换页
               flushCurrentPage();
               continue;
+            }
+
+            // 在 fitChars 位置向前查找合适的截断点（避免截断在单词中间）
+            int cut = fitChars;
+            // 向前查找换行符或空格，最多向前查找 20 个字符
+            for (int i = 0; i < 20 && cut > 0; i++) {
+              final char = remaining[cut - 1];
+              if (char == '\n' || char == ' ' || char == '\u3000') {
+                break;
+              }
+              cut--;
+            }
+            // 如果没有找到合适的截断点，使用原始 fitChars（防止回退太多）
+            if (cut < fitChars * 0.8) {
+              cut = fitChars;
             }
 
             // 截取当前页面的文本
@@ -2303,7 +2301,10 @@ class BookLoader {
               );
             }
 
-            currentPageHeight += usedLines * lineHeight;
+            // 使用 remainingLines 作为实际使用的行数，而不是重新计算
+            // 因为 calculateFitChars 是根据 remainingLines 截断的
+            // 重新计算可能导致高度不一致（空白或溢出）
+            currentPageHeight += remainingLines * lineHeight;
             currentOffset += part.length;
             // 不使用 trimLeft，保留开头的空行
             remaining = remaining.substring(cut);
