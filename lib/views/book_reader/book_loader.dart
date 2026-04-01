@@ -1944,11 +1944,12 @@ class BookLoader {
     // - 减去 kToolbarHeight
     // - 减去内容区内部 padding（20）
     // - 减去安全边距（小字体时 TextPainter 计算误差 + SelectableText 内边距）
-    final usableHeight = availableHeight
-        - BookReaderConstants.pageVerticalReserve
-        - kToolbarHeight
-        - BookReaderConstants.contentPaddingVertical
-        - BookReaderConstants.selectableTextExtraPadding;
+    final usableHeight =
+        availableHeight -
+        BookReaderConstants.pageVerticalReserve -
+        kToolbarHeight -
+        BookReaderConstants.contentPaddingVertical -
+        BookReaderConstants.selectableTextExtraPadding;
 
     List<ContentItem> currentPageItems = [];
     double currentPageHeight = 0;
@@ -1978,7 +1979,8 @@ class BookLoader {
 
         while (remaining.isNotEmpty) {
           final remainingHeight = usableHeight - currentPageHeight;
-          final remainingLines = (remainingHeight / lineHeight).floor();
+          // 预留 1 行作为安全边距，防止小字体时 TextPainter 计算误差导致溢出
+          final remainingLines = (remainingHeight / lineHeight).floor() - 2;
 
           if (remainingLines <= 0) {
             flushCurrentPage();
@@ -2073,7 +2075,10 @@ class BookLoader {
         if (imageHeight >= usableHeight) flushCurrentPage();
       } else if (item is HeaderContent) {
         // 使用与渲染一致的标题高度计算
-        final headerHeight = BookReaderConstants.getHeaderHeight(item.level, fontSize);
+        final headerHeight = BookReaderConstants.getHeaderHeight(
+          item.level,
+          fontSize,
+        );
         if (currentPageItems.isNotEmpty &&
             currentPageHeight + headerHeight > usableHeight)
           flushCurrentPage();
@@ -2164,11 +2169,12 @@ class BookLoader {
     // - 减去 kToolbarHeight
     // - 减去内容区内部 padding（20）
     // - 减去安全边距（小字体时 TextPainter 计算误差 + SelectableText 内边距）
-    final usableHeight = availableHeight
-        - BookReaderConstants.pageVerticalReserve
-        - kToolbarHeight
-        - BookReaderConstants.contentPaddingVertical
-        - BookReaderConstants.selectableTextExtraPadding;
+    final usableHeight =
+        availableHeight -
+        BookReaderConstants.pageVerticalReserve -
+        kToolbarHeight -
+        BookReaderConstants.contentPaddingVertical -
+        BookReaderConstants.selectableTextExtraPadding;
     // final linesPerPage = (usableHeight / lineHeight).floor();
 
     List<ContentItem> currentPageItems = [];
@@ -2201,15 +2207,13 @@ class BookLoader {
 
         while (remaining.isNotEmpty) {
           final remainingHeight = usableHeight - currentPageHeight;
-          final remainingLines = (remainingHeight / lineHeight).floor();
+          // 预留 1 行作为安全边距，防止小字体时 TextPainter 计算误差导致溢出
+          final remainingLines = (remainingHeight / lineHeight).floor() - 1;
 
           if (remainingLines <= 0) {
             flushCurrentPage();
             continue;
           }
-
-          // 使用估算快速判断，减少精确计算次数
-          // final estimatedFit = remainingLines * charsPerLine;
 
           // 精确计算实际行数（不管估算结果如何）
           final actualLines = calculateTextLines(
