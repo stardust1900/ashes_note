@@ -10,7 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
 import '../../utils/prefs_util.dart';
-import '../../utils/const.dart' show BookReaderConstants;
+import '../../utils/const.dart' show BookReaderConstants, PrefKeys;
 import '../../models/book_reader/page_content.dart';
 import '../../models/book_reader/content_item.dart'
     show
@@ -1907,8 +1907,9 @@ class BookLoader {
     List<ContentItem> contentItems,
     String chapterPlainText,
     double availableHeight,
-    double availableWidth,
-  ) {
+    double availableWidth, {
+    int safetyLines = BookReaderConstants.defaultPageReserveLines,
+  }) {
     final pages = <PageContent>[];
 
     if (contentItems.isEmpty) {
@@ -1979,8 +1980,10 @@ class BookLoader {
 
         while (remaining.isNotEmpty) {
           final remainingHeight = usableHeight - currentPageHeight;
-          // 预留 1 行作为安全边距，防止小字体时 TextPainter 计算误差导致溢出
-          final remainingLines = (remainingHeight / lineHeight).floor() - 2;
+          // 根据字体大小动态计算预留行数：
+          // 小字体（<=16）时 TextPainter 计算误差比例更大，预留更多行
+          final remainingLines =
+              (remainingHeight / lineHeight).floor() - safetyLines;
 
           if (remainingLines <= 0) {
             flushCurrentPage();
@@ -2103,8 +2106,9 @@ class BookLoader {
     EpubChapter chapter,
     int chapterIndex,
     double availableHeight,
-    double availableWidth,
-  ) {
+    double availableWidth, {
+    int safetyLines = BookReaderConstants.defaultPageReserveLines,
+  }) {
     final pages = <PageContent>[];
     final htmlContent = chapter.htmlContent ?? '';
 
@@ -2207,8 +2211,11 @@ class BookLoader {
 
         while (remaining.isNotEmpty) {
           final remainingHeight = usableHeight - currentPageHeight;
-          // 预留 1 行作为安全边距，防止小字体时 TextPainter 计算误差导致溢出
-          final remainingLines = (remainingHeight / lineHeight).floor() - 1;
+          // 根据字体大小动态计算预留行数：
+          // 小字体（<=16）时 TextPainter 计算误差比例更大，预留更多行
+          // 大字体（>20）时误差比例较小，预留较少行
+          final remainingLines =
+              (remainingHeight / lineHeight).floor() - safetyLines;
 
           if (remainingLines <= 0) {
             flushCurrentPage();
@@ -2690,6 +2697,12 @@ class BookLoader {
     final availableHeight = size.height - padding.top - padding.bottom;
     final availableWidth = size.width - 48;
 
+    // 读取用户配置的预留行数
+    final safetyLines = SPUtil.get<int>(
+      PrefKeys.pageReserveLines,
+      BookReaderConstants.defaultPageReserveLines,
+    );
+
     final pages = <PageContent>[];
 
     // 清空全局链接，重新收集
@@ -2855,6 +2868,7 @@ class BookLoader {
         parsed.plainText,
         availableHeight,
         availableWidth,
+        safetyLines: safetyLines,
       );
       pages.addAll(chapterPages);
 

@@ -33,6 +33,7 @@ class _SettingsViewState extends State<SettingsView> {
 
   String _selectedTheme = ThemeModes.minimal;
   bool _volumeKeyPageTurn = false;
+  int _pageReserveLines = BookReaderConstants.defaultPageReserveLines;
   bool _isObscure = true;
 
   // TextEditingController? _workingDirectoryController;
@@ -54,6 +55,10 @@ class _SettingsViewState extends State<SettingsView> {
     _githubRemoteUrl = SPUtil.get<String>(PrefKeys.githubRemoteUrl, '');
     _selectedTheme = SPUtil.get<String>(PrefKeys.themeMode, ThemeModes.minimal);
     _volumeKeyPageTurn = SPUtil.get<bool>(PrefKeys.volumeKeyPageTurn, false);
+    _pageReserveLines = SPUtil.get<int>(
+      PrefKeys.pageReserveLines,
+      BookReaderConstants.defaultPageReserveLines,
+    );
 
     setState(() {
       if (_gitPlatform == GitPlatforms.gitee) {
@@ -111,6 +116,9 @@ class _SettingsViewState extends State<SettingsView> {
             const SizedBox(height: 24),
             if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) ...[
               _buildReadingSection(),
+              const SizedBox(height: 24),
+            ] else ...[
+              _buildPageReserveSection(),
               const SizedBox(height: 24),
             ],
             _buildWorkingDirectorySection(),
@@ -185,6 +193,64 @@ class _SettingsViewState extends State<SettingsView> {
                 syncVolumeKeyEnabled(value);
               },
               contentPadding: EdgeInsets.zero,
+            ),
+            const Divider(),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('分页预留行数'),
+              subtitle: Text(
+                '当前：$_pageReserveLines 行  —  值越小文字越多，值越大底部空白越多',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            Slider(
+              value: _pageReserveLines.toDouble(),
+              min: 0,
+              max: 10,
+              divisions: 10,
+              label: '$_pageReserveLines 行',
+              onChanged: (value) {
+                setState(() => _pageReserveLines = value.round());
+              },
+              onChangeEnd: (value) {
+                SPUtil.set<int>(PrefKeys.pageReserveLines, value.round());
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPageReserveSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('阅读设置', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('分页预留行数'),
+              subtitle: Text(
+                '当前：$_pageReserveLines 行  —  值越小文字越多，值越大底部空白越多',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            Slider(
+              value: _pageReserveLines.toDouble(),
+              min: 0,
+              max: 10,
+              divisions: 10,
+              label: '$_pageReserveLines 行',
+              onChanged: (value) {
+                setState(() => _pageReserveLines = value.round());
+              },
+              onChangeEnd: (value) {
+                SPUtil.set<int>(PrefKeys.pageReserveLines, value.round());
+              },
             ),
           ],
         ),

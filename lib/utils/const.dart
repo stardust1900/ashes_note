@@ -18,6 +18,7 @@ class PrefKeys {
   static const String bookViewMode = 'bookViewMode'; // grid / list
   static const String bookGridSize = 'bookGridSize'; // small / medium / large
   static const String bookSortMode = 'bookSortMode'; // name / imported
+  static const String pageReserveLines = 'pageReserveLines'; // 分页预留行数
 }
 
 class GitPlatforms {
@@ -42,7 +43,8 @@ class BookReaderConstants {
   /// 标题上下 padding（与渲染时的 EdgeInsets.only(top: 24, bottom: 12) 一致）
   static const double headerPaddingTop = 24;
   static const double headerPaddingBottom = 12;
-  static const double headerTotalPadding = headerPaddingTop + headerPaddingBottom;
+  static const double headerTotalPadding =
+      headerPaddingTop + headerPaddingBottom;
 
   /// 获取标题字体大小（h1=32, h2=28, ..., h6=12）
   static double getHeaderFontSize(int level) {
@@ -74,4 +76,8 @@ class BookReaderConstants {
   /// 3. 字体 hinting 和 subpixel 渲染导致的差异
   /// 预留 20 像素作为保险（约 1-1.5 行）
   static const double selectableTextExtraPadding = 20;
+
+  /// 用户可配置的分页预留行数（默认 4 行）
+  /// 值越大，每页文字越少（底部空白越多）；值越小，每页文字越多（可能溢出）
+  static const int defaultPageReserveLines = 4;
 }
