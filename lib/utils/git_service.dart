@@ -57,6 +57,7 @@ abstract class GitService {
     String workingDir, {
     ConflictAction conflictAction = ConflictAction.remoteWins,
     String? branch,
+    Set<String>? unsyncedIds,
   });
   Future<void> push(
     String owner,
@@ -167,6 +168,7 @@ class GiteeService extends GitService {
     String workingDir, {
     ConflictAction conflictAction = ConflictAction.remoteWins,
     String? branch,
+    Set<String>? unsyncedIds,
   }) async {
     print('DateTime now: ${DateTime.now().toIso8601String()} pull start');
     var usedBranch = branch;
@@ -207,6 +209,12 @@ class GiteeService extends GitService {
 
             try {
               print('同步文件（并发）: $path');
+
+              // 检查该文件是否在未保存列表中，如果是则跳过
+              if (unsyncedIds != null && unsyncedIds.contains(path)) {
+                print('跳过未保存的文件: $path');
+                return;
+              }
 
               // 拉取远端内容并立即处理（写盘后尽快释放内存）
               final fileInfo = await getFile(
@@ -1129,6 +1137,7 @@ class GitHubService extends GitService {
     String workingDir, {
     ConflictAction conflictAction = ConflictAction.remoteWins,
     String? branch,
+    Set<String>? unsyncedIds,
   }) async {
     var usedBranch = branch;
     if (usedBranch == null) {
@@ -1164,6 +1173,13 @@ class GitHubService extends GitService {
               return;
             }
             print('同步文件（并发）: $path');
+
+            // 检查该文件是否在未保存列表中，如果是则跳过
+            if (unsyncedIds != null && unsyncedIds.contains(path)) {
+              print('跳过未保存的文件: $path');
+              return;
+            }
+
             try {
               final fileInfo = await getFile(
                 owner,

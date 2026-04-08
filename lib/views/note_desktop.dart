@@ -72,10 +72,16 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
         git = GitFactory.getGitService(gitPlatform, token);
       }
 
+      // 恢复未同步笔记 id 集合
+      final saved = SPUtil.get<String>(PrefKeys.unsyncedNoteIds, '');
+      if (saved.isNotEmpty) {
+        _unsyncedNoteIds.addAll(saved.split(','));
+      }
+
       String lastPullTime = SPUtil.get(PrefKeys.lastPullTime, '');
       var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
       if (lastPullTime == '') {
-        git!.pull(owner, repo, notesDir.path).then((_) {
+        git!.pull(owner, repo, notesDir.path, unsyncedIds: _unsyncedNoteIds).then((_) {
           SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
         });
         _loadNotebookList();
@@ -84,7 +90,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
           List<Map<String, dynamic>> commits,
         ) {
           if (commits.isNotEmpty) {
-            git!.pull(owner, repo, notesDir.path).then((_) {
+            git!.pull(owner, repo, notesDir.path, unsyncedIds: _unsyncedNoteIds).then((_) {
               SPUtil.set(
                 PrefKeys.lastPullTime,
                 DateTime.now().toIso8601String(),
@@ -1027,7 +1033,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     });
 
     git!
-        .pull(owner, repo, '$workingDirectory/notes')
+        .pull(owner, repo, '$workingDirectory/notes', unsyncedIds: _unsyncedNoteIds)
         .then((_) {
           SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
           git!

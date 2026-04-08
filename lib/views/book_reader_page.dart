@@ -2329,7 +2329,9 @@ class _BookReaderPageState extends State<BookReaderPage>
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 10, 24, 10),
       child: SingleChildScrollView(
-        physics: const NeverScrollableScrollPhysics(),
+        physics: _isDesktop
+            ? const AlwaysScrollableScrollPhysics()
+            : const NeverScrollableScrollPhysics(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
