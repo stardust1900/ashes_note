@@ -49,6 +49,7 @@ class BookInfo {
   File? coverFile;
   double readingProgress;
   DateTime? importedAt; // 导入时间（文件修改时间）
+  DateTime? lastReadAt; // 最后阅读时间
 
   BookInfo({
     required this.file,
@@ -57,6 +58,7 @@ class BookInfo {
     this.coverFile,
     this.readingProgress = -1,
     this.importedAt,
+    this.lastReadAt,
   });
 }
 
@@ -193,6 +195,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     for (final file in files) {
       final normalizedPath = file.path.replaceAll('\\', '/');
       final progress = await _getReadingProgress(file);
+      final lastReadAt = await _getLastReadTime(file);
       final stat = await file.stat();
       BookMetadata metadata;
       if (metadataMap.containsKey(normalizedPath)) {
@@ -210,6 +213,7 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
               : null,
           readingProgress: progress,
           importedAt: stat.modified,
+          lastReadAt: lastReadAt,
         ),
       );
     }
@@ -226,6 +230,18 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       return (pageIndex / totalPages).clamp(0.0, 1.0);
     } catch (_) {
       return -1;
+    }
+  }
+
+  Future<DateTime?> _getLastReadTime(File file) async {
+    try {
+      final position = await StorageManager.loadReadingPosition(file.path);
+      if (position == null) return null;
+      final timestamp = position['timestamp'] as int?;
+      if (timestamp == null) return null;
+      return DateTime.fromMillisecondsSinceEpoch(timestamp);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -468,11 +484,18 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     final list = List<BookInfo>.from(_books);
     if (_sortMode == 'name') {
       list.sort((a, b) => a.title.compareTo(b.title));
-    } else {
+    } else if (_sortMode == 'imported') {
       // 按导入时间降序（最新在前）
       list.sort((a, b) {
         final ta = a.importedAt ?? DateTime(0);
         final tb = b.importedAt ?? DateTime(0);
+        return tb.compareTo(ta);
+      });
+    } else if (_sortMode == 'recent') {
+      // 按最近阅读时间降序（最近在前），未读过的放在最后
+      list.sort((a, b) {
+        final ta = a.lastReadAt ?? DateTime(0);
+        final tb = b.lastReadAt ?? DateTime(0);
         return tb.compareTo(ta);
       });
     }
@@ -543,6 +566,29 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
                       '按导入时间',
                       style: TextStyle(
                         color: _sortMode == 'imported'
+                            ? theme.primaryColor
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'recent',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.history,
+                      size: 18,
+                      color: _sortMode == 'recent'
+                          ? theme.primaryColor
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '最近阅读',
+                      style: TextStyle(
+                        color: _sortMode == 'recent'
                             ? theme.primaryColor
                             : null,
                       ),
