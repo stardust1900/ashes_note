@@ -51,6 +51,10 @@ class BookReaderPage extends StatefulWidget {
 class _BookReaderPageState extends State<BookReaderPage>
     with TickerProviderStateMixin {
   final List<EpubChapter> _chapters = [];
+  // 存储层级结构的原始章节（用于目录显示）
+  final List<EpubChapter> _hierarchicalChapters = [];
+  // 跟踪展开的章节 ID
+  final Set<String> _expandedChapterIds = <String>{};
   int _currentChapterIndex = 0;
   int _currentPageIndex = 0;
   bool _showTableOfContents = false;
@@ -300,17 +304,53 @@ class _BookReaderPageState extends State<BookReaderPage>
         linkData['targetPageIndexInChapter'] as int?;
 
     if (targetChapterIndex == null) {
-      // targetChapterIndex 未解析成功，尝试用 href 直接在页面里搜索目标 id
+      // targetChapterIndex 未解析成功，尝试用 href 解析或搜索
       final href = linkData['href'] as String?;
-      if (href != null && href.contains('#')) {
-        final targetId = href.substring(href.indexOf('#') + 1);
-        // 在所有页面的文本里搜索包含 targetId 的页面
-        for (int i = 0; i < _pages.length; i++) {
-          final page = _pages[i];
-          for (final item in page.contentItems) {
-            if (item is TextContent && item.text.contains(targetId)) {
-              _goToPage(i);
-              return;
+      if (href != null) {
+        // 尝试从 href 解析目标文件名（如 part0002.xhtml）
+        final chapterFilename = href.contains('#')
+            ? href.substring(0, href.indexOf('#'))
+            : href;
+
+        print('[BookReader] 尝试通过文件名查找: $chapterFilename');
+        print('[BookReader] 章节数: ${_chapters.length}, 页面数: ${_pages.length}');
+
+        // 根据文件名查找目标章节（处理路径问题）
+        final targetPage = _pages.firstWhere(
+          (page) {
+            final chapter = _chapters[page.chapterIndex];
+            final contentFileName = chapter.contentFileName ?? '';
+            // 多种匹配方式：完全匹配、endsWith、或都比较basename
+            final match = contentFileName == chapterFilename ||
+                contentFileName.endsWith('/$chapterFilename') ||
+                contentFileName.endsWith('\\$chapterFilename') ||
+                contentFileName.endsWith(chapterFilename);
+            if (match) {
+              print('[BookReader] 匹配成功: ${chapter.title} -> $contentFileName');
+            }
+            return match;
+          },
+          orElse: () => _pages[0],
+        );
+
+        if (targetPage != _pages[0]) {
+          final globalPageIndex = _pages.indexOf(targetPage);
+          print('[BookReader] 通过文件名跳转: $chapterFilename -> 页面 $globalPageIndex');
+          _goToPage(globalPageIndex);
+          return;
+        }
+        print('[BookReader] 未找到匹配章节: $chapterFilename');
+
+        // 如果 href 包含 #，尝试在页面里搜索目标 id
+        if (href.contains('#')) {
+          final targetId = href.substring(href.indexOf('#') + 1);
+          for (int i = 0; i < _pages.length; i++) {
+            final page = _pages[i];
+            for (final item in page.contentItems) {
+              if (item is TextContent && item.text.contains(targetId)) {
+                _goToPage(i);
+                return;
+              }
             }
           }
         }
@@ -2133,7 +2173,13 @@ class _BookReaderPageState extends State<BookReaderPage>
       setState(() {
         _bookTitle = epub.title ?? '未知书籍';
         _epubBook = epub;
-        _chapters.addAll(_bookLoader.flattenChapters(epub.chapters));
+        // 保存原始层级结构用于目录显示
+        _hierarchicalChapters.clear();
+        _hierarchicalChapters.addAll(epub.chapters);
+        // 默认展开所有有子章节的章节
+        _expandAllChapters(_hierarchicalChapters);
+        // 注意：_chapters 将在 onChaptersUpdated 回调中设置，
+        // 以确保与 BookLoader 处理页面的顺序一致
       });
       //根据 widget.bookPath 的哈希 判断封面图片是否已经存在，如果存在直接用
       await _bookLoader.loadCoverImage(epub);
@@ -3157,6 +3203,34 @@ class _BookReaderPageState extends State<BookReaderPage>
     }
   }
 
+  // 展开所有章节（初始化时调用）
+  void _expandAllChapters(List<EpubChapter> chapters) {
+    for (final chapter in chapters) {
+      if (chapter.subChapters.isNotEmpty) {
+        _expandedChapterIds.add(chapter.hashCode.toString());
+        _expandAllChapters(chapter.subChapters);
+      }
+    }
+  }
+
+  // 切换章节的展开/折叠状态
+  void _toggleChapterExpand(String chapterId) {
+    setState(() {
+      if (_expandedChapterIds.contains(chapterId)) {
+        _expandedChapterIds.remove(chapterId);
+      } else {
+        _expandedChapterIds.add(chapterId);
+      }
+    });
+  }
+
+  // 获取章节在扁平化列表中的索引
+  int _getChapterIndexInFlatList(EpubChapter chapter) {
+    return _chapters.indexWhere((c) =>
+        c.title == chapter.title &&
+        c.contentFileName == chapter.contentFileName);
+  }
+
   void _goToChapter(int chapterIndex) {
     // 查找该章节的第一页（pageIndexInChapter == 0）
     for (int i = 0; i < _pages.length; i++) {
@@ -3734,6 +3808,122 @@ class _BookReaderPageState extends State<BookReaderPage>
     );
   }
 
+  // 构建层级目录树
+  List<Widget> _buildChapterTree(List<EpubChapter> chapters, int level) {
+    final theme = Theme.of(context);
+    final widgets = <Widget>[];
+
+    for (final chapter in chapters) {
+      final chapterId = chapter.hashCode.toString();
+      final hasSubChapters = chapter.subChapters.isNotEmpty;
+      final isExpanded = _expandedChapterIds.contains(chapterId);
+      final flatIndex = _getChapterIndexInFlatList(chapter);
+      final isCurrentChapter = flatIndex == _currentChapterIndex;
+      final isBookmarked = flatIndex >= 0 && _bookmarks.any(
+        (b) => b.chapterIndex == flatIndex,
+      );
+
+      // 添加当前章节项
+      widgets.add(
+        InkWell(
+          onTap: () {
+            if (flatIndex >= 0) {
+              _goToChapter(flatIndex);
+            }
+          },
+          child: Container(
+            padding: EdgeInsets.fromLTRB(16 + level * 16, 8, 16, 8),
+            decoration: BoxDecoration(
+              color: isCurrentChapter
+                  ? theme.primaryColor.withValues(alpha: 0.1)
+                  : null,
+              border: Border(
+                left: BorderSide(
+                  color: isCurrentChapter
+                      ? theme.primaryColor
+                      : Colors.transparent,
+                  width: 3,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                // 展开/折叠按钮
+                if (hasSubChapters)
+                  InkWell(
+                    onTap: () => _toggleChapterExpand(chapterId),
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(
+                        isExpanded
+                            ? Icons.expand_more
+                            : Icons.chevron_right,
+                        size: 18,
+                        color: theme.iconTheme.color?.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  )
+                else
+                  const SizedBox(width: 22),
+                // 书签图标或序号
+                if (isBookmarked)
+                  Icon(
+                    Icons.bookmark,
+                    size: 14,
+                    color: theme.primaryColor,
+                  )
+                else if (!hasSubChapters)
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: isCurrentChapter
+                          ? theme.primaryColor
+                          : theme.dividerColor,
+                      shape: BoxShape.circle,
+                    ),
+                  )
+                else
+                  Icon(
+                    isExpanded ? Icons.folder_open : Icons.folder,
+                    size: 14,
+                    color: isCurrentChapter
+                        ? theme.primaryColor
+                        : theme.iconTheme.color?.withValues(alpha: 0.6),
+                  ),
+                const SizedBox(width: 8),
+                // 章节标题
+                Expanded(
+                  child: Text(
+                    chapter.title ?? '未命名章节',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isCurrentChapter
+                          ? theme.primaryColor
+                          : theme.colorScheme.onSurface,
+                      fontWeight: isCurrentChapter
+                          ? FontWeight.w600
+                          : (level == 0 ? FontWeight.w500 : FontWeight.normal),
+                      fontSize: level == 0 ? 14 : 13,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // 递归添加子章节（如果展开）
+      if (hasSubChapters && isExpanded) {
+        widgets.addAll(_buildChapterTree(chapter.subChapters, level + 1));
+      }
+    }
+
+    return widgets;
+  }
+
   Widget _buildTableOfContents() {
     final theme = Theme.of(context);
     return Positioned(
@@ -3741,7 +3931,7 @@ class _BookReaderPageState extends State<BookReaderPage>
       top: 0,
       bottom: 0,
       child: Container(
-        width: 280,
+        width: 300,
         decoration: BoxDecoration(
           color: theme.cardColor,
           boxShadow: [
@@ -3770,69 +3960,56 @@ class _BookReaderPageState extends State<BookReaderPage>
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    color: theme.iconTheme.color,
-                    onPressed: () {
-                      setState(() {
-                        _showTableOfContents = false;
-                      });
-                    },
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 全部展开按钮
+                      IconButton(
+                        icon: const Icon(Icons.unfold_more),
+                        iconSize: 20,
+                        tooltip: '全部展开',
+                        color: theme.iconTheme.color,
+                        onPressed: () {
+                          setState(() {
+                            _expandAllChapters(_hierarchicalChapters);
+                          });
+                        },
+                      ),
+                      // 全部折叠按钮
+                      IconButton(
+                        icon: const Icon(Icons.unfold_less),
+                        iconSize: 20,
+                        tooltip: '全部折叠',
+                        color: theme.iconTheme.color,
+                        onPressed: () {
+                          setState(() {
+                            _expandedChapterIds.clear();
+                          });
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        color: theme.iconTheme.color,
+                        onPressed: () {
+                          setState(() {
+                            _showTableOfContents = false;
+                          });
+                        },
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
             Expanded(
-              child: ListView.builder(
-                itemCount: _chapters.length,
-                itemBuilder: (context, index) {
-                  final chapter = _chapters[index];
-                  final isCurrentChapter = index == _currentChapterIndex;
-                  final isBookmarked = _bookmarks.any(
-                    (b) => b.chapterIndex == index,
-                  );
-
-                  return ListTile(
-                    leading: CircleAvatar(
-                      radius: 14,
-                      backgroundColor: isCurrentChapter
-                          ? Theme.of(context).primaryColor
-                          : Theme.of(context).colorScheme.surface,
-                      child: isBookmarked
-                          ? Icon(
-                              Icons.bookmark,
-                              size: 14,
-                              color: Theme.of(context).colorScheme.onSurface,
-                            )
-                          : Text(
-                              '${index + 1}',
-                              style: TextStyle(
-                                color: isCurrentChapter
-                                    ? Colors.white
-                                    : Theme.of(context).colorScheme.onSurface,
-                                fontSize: 12,
-                              ),
-                            ),
-                    ),
-                    title: Text(
-                      chapter.title ?? '第 ${index + 1} 章',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: isCurrentChapter
-                            ? Theme.of(context).primaryColor
-                            : null,
-                        fontWeight: isCurrentChapter
-                            ? FontWeight.w600
-                            : FontWeight.normal,
+              child: _hierarchicalChapters.isEmpty
+                  ? const Center(child: Text('暂无目录'))
+                  : SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: _buildChapterTree(_hierarchicalChapters, 0),
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    onTap: () {
-                      _goToChapter(index);
-                    },
-                  );
-                },
-              ),
             ),
           ],
         ),
