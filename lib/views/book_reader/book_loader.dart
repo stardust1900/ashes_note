@@ -10,7 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
 import '../../utils/prefs_util.dart';
-import '../../utils/const.dart' show BookReaderConstants, PrefKeys;
+import '../../utils/const.dart' show BookReaderConstants;
 import '../../models/book_reader/page_content.dart';
 import '../../models/book_reader/content_item.dart'
     show
@@ -1784,6 +1784,7 @@ class BookLoader {
   }
 
   /// 使用 TextPainter 计算文本在指定宽度下能容纳的最大字符数（带缓存）
+  /// 正确处理换行符：每个换行符会强制产生一个新行
   int calculateFitChars(
     String text,
     double maxWidth,
@@ -1794,99 +1795,112 @@ class BookLoader {
 
     textPainterCache ??= TextPainter(textDirection: TextDirection.ltr);
 
-    // 获取字符平均宽度
+    // 按换行符分割文本，逐段计算能容纳的字符数
+    final lines = text.split('\n');
+    int remainingLines = maxLines;
+    int totalChars = 0;
+
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+
+      if (remainingLines <= 0) {
+        break;
+      }
+
+      if (line.isEmpty) {
+        // 空行也算一行
+        remainingLines--;
+        totalChars++; // 计入换行符本身
+        continue;
+      }
+
+      // 计算这一行能容纳多少字符
+      final fitCharsInLine = _calculateFitCharsInLine(
+        line,
+        maxWidth,
+        remainingLines,
+        style,
+      );
+
+      totalChars += fitCharsInLine;
+
+      // 如果这一行没放完，说明已经用完了所有行
+      if (fitCharsInLine < line.length) {
+        break;
+      }
+
+      // 这一行放完了，减去这一行实际占用的行数
+      textPainterCache!.text = TextSpan(text: line, style: style);
+      textPainterCache!.layout(maxWidth: maxWidth);
+      final lineMetrics = textPainterCache!.computeLineMetrics();
+      remainingLines -= lineMetrics.length;
+
+      // 如果不是最后一行，需要为换行符预留一行
+      if (i < lines.length - 1 && remainingLines > 0) {
+        remainingLines--;
+        totalChars++; // 计入换行符本身
+      }
+    }
+
+    return totalChars.clamp(1, text.length);
+  }
+
+  /// 计算单行文本在指定宽度下能容纳的最大字符数
+  int _calculateFitCharsInLine(
+    String line,
+    double maxWidth,
+    int maxLines,
+    TextStyle style,
+  ) {
+    if (maxLines <= 0) return 0;
+    if (line.isEmpty) return 0;
+
+    // 先估算一个字符宽度
     textPainterCache!.text = TextSpan(text: '中', style: style);
     textPainterCache!.layout();
     final charWidth = textPainterCache!.width;
-
-    // 估算每行字符数
     final estimatedCharsPerLine = (maxWidth / charWidth).floor();
-    if (estimatedCharsPerLine <= 0) return 0;
-
-    // 估算总字符数
     final estimatedChars = estimatedCharsPerLine * maxLines;
 
-    // 如果估算值超过文本长度，直接返回
-    if (estimatedChars >= text.length) {
-      return text.length;
+    if (estimatedChars >= line.length) {
+      // 估算能放下整行，验证一下
+      textPainterCache!.text = TextSpan(text: line, style: style);
+      textPainterCache!.layout(maxWidth: maxWidth);
+      final lineMetrics = textPainterCache!.computeLineMetrics();
+
+      if (lineMetrics.length <= maxLines) {
+        return line.length;
+      }
     }
 
-    // 检查缓存（对中等长度文本有效）
-    if (text.length >= 1000 && text.length < 5000) {
-      final cacheKey = '${text.length}_$estimatedCharsPerLine$maxLines';
-      if (_fitCharsCache.containsKey(cacheKey)) {
-        return _fitCharsCache[cacheKey]!.clamp(1, text.length);
+    // 需要截断，使用二分查找找到合适的截断点
+    int low = 0;
+    int high = line.length;
+    int bestFit = 0;
+
+    while (low <= high) {
+      final mid = (low + high) ~/ 2;
+      if (mid == 0) {
+        bestFit = 0;
+        break;
       }
 
-      // 对中等长度文本进行精确校正后再缓存
       textPainterCache!.text = TextSpan(
-        text: text.substring(0, estimatedChars.clamp(0, text.length)),
+        text: line.substring(0, mid),
         style: style,
       );
       textPainterCache!.layout(maxWidth: maxWidth);
       final lineMetrics = textPainterCache!.computeLineMetrics();
 
       if (lineMetrics.length <= maxLines) {
-        final corrected = estimatedChars;
-        if (_fitCharsCache.length < _maxFitCharsCacheSize) {
-          _fitCharsCache[cacheKey] = corrected;
-        }
-        return corrected.clamp(1, text.length);
+        bestFit = mid;
+        low = mid + 1;
       } else {
-        // 超出，需要减少
-        final corrected = (estimatedChars * 0.8).floor().clamp(1, text.length);
-        if (_fitCharsCache.length < _maxFitCharsCacheSize) {
-          _fitCharsCache[cacheKey] = corrected;
-        }
-        return corrected;
+        high = mid - 1;
       }
     }
 
-    // 对短文本进行精确校正（< 1000 字符）
-    if (text.length < 1000) {
-      textPainterCache!.text = TextSpan(
-        text: text.substring(0, estimatedChars.clamp(0, text.length)),
-        style: style,
-      );
-      textPainterCache!.layout(maxWidth: maxWidth);
-      final lineMetrics = textPainterCache!.computeLineMetrics();
-
-      if (lineMetrics.length <= maxLines) {
-        // 还有空间，尝试增加 10%
-        final increased = (estimatedChars * 1.1).floor().clamp(0, text.length);
-        if (increased > estimatedChars) {
-          textPainterCache!.text = TextSpan(
-            text: text.substring(0, increased),
-            style: style,
-          );
-          textPainterCache!.layout(maxWidth: maxWidth);
-          final increasedMetrics = textPainterCache!.computeLineMetrics();
-
-          if (increasedMetrics.length <= maxLines) {
-            return increased;
-          }
-        }
-        return estimatedChars;
-      } else if (lineMetrics.length > maxLines) {
-        // 超出，尝试减少
-        final decreased = (estimatedChars * 0.9).floor().clamp(1, text.length);
-        textPainterCache!.text = TextSpan(
-          text: text.substring(0, decreased),
-          style: style,
-        );
-        textPainterCache!.layout(maxWidth: maxWidth);
-        final decreasedMetrics = textPainterCache!.computeLineMetrics();
-
-        if (decreasedMetrics.length <= maxLines) {
-          return decreased;
-        }
-        // 保守估计
-        return (estimatedChars * 0.8).floor().clamp(1, text.length);
-      }
-    }
-
-    // 非常长的文本，直接返回估算值
-    return estimatedChars.clamp(1, text.length);
+    return bestFit;
   }
 
   /// 将 Map 列表还原为 ContentItem 列表
@@ -1919,7 +1933,7 @@ class BookLoader {
     String chapterPlainText,
     double availableHeight,
     double availableWidth, {
-    int safetyLines = BookReaderConstants.defaultPageReserveLines,
+    int safetyLines = 0,
   }) {
     final pages = <PageContent>[];
 
@@ -2039,19 +2053,35 @@ class BookLoader {
               continue;
             }
 
-            // 在 fitChars 位置向前查找合适的截断点（避免截断在单词中间）
+            // 在 fitChars 位置向前/向后查找合适的截断点
+            // 优先在换行符处截断，保持段落结构
             int cut = fitChars;
-            // 向前查找换行符或空格，最多向前查找 20 个字符
-            for (int i = 0; i < 20 && cut > 0; i++) {
-              final char = remaining[cut - 1];
-              if (char == '\n' || char == ' ' || char == '\u3000') {
+
+            // 首先尝试在 fitChars 附近查找换行符（优先向后查找）
+            bool foundNewline = false;
+            // 向后查找换行符（最多向后查找 30 个字符）
+            for (int i = 0; i < 30 && cut + i < remaining.length; i++) {
+              if (remaining[cut + i] == '\n') {
+                cut = cut + i + 1; // 包含换行符
+                foundNewline = true;
                 break;
               }
-              cut--;
             }
-            // 如果没有找到合适的截断点，使用原始 fitChars（防止回退太多）
-            if (cut < fitChars * 0.8) {
-              cut = fitChars;
+
+            // 如果没有找到换行符，向前查找合适的截断点
+            if (!foundNewline) {
+              // 向前查找换行符、空格或标点，最多向前查找 20 个字符
+              for (int i = 0; i < 20 && cut > 0; i++) {
+                final char = remaining[cut - 1];
+                if (char == '\n' || char == ' ' || char == '\u3000') {
+                  break;
+                }
+                cut--;
+              }
+              // 如果没有找到合适的截断点，使用原始 fitChars（防止回退太多）
+              if (cut < fitChars * 0.8) {
+                cut = fitChars;
+              }
             }
 
             final part = remaining.substring(0, cut);
@@ -2118,7 +2148,7 @@ class BookLoader {
     int chapterIndex,
     double availableHeight,
     double availableWidth, {
-    int safetyLines = BookReaderConstants.defaultPageReserveLines,
+    int safetyLines = 2,
   }) {
     final pages = <PageContent>[];
     final htmlContent = chapter.htmlContent ?? '';
@@ -2282,19 +2312,35 @@ class BookLoader {
               continue;
             }
 
-            // 在 fitChars 位置向前查找合适的截断点（避免截断在单词中间）
+            // 在 fitChars 位置向前/向后查找合适的截断点
+            // 优先在换行符处截断，保持段落结构
             int cut = fitChars;
-            // 向前查找换行符或空格，最多向前查找 20 个字符
-            for (int i = 0; i < 20 && cut > 0; i++) {
-              final char = remaining[cut - 1];
-              if (char == '\n' || char == ' ' || char == '\u3000') {
+
+            // 首先尝试在 fitChars 附近查找换行符（优先向后查找）
+            bool foundNewline = false;
+            // 向后查找换行符（最多向后查找 30 个字符）
+            for (int i = 0; i < 30 && cut + i < remaining.length; i++) {
+              if (remaining[cut + i] == '\n') {
+                cut = cut + i + 1; // 包含换行符
+                foundNewline = true;
                 break;
               }
-              cut--;
             }
-            // 如果没有找到合适的截断点，使用原始 fitChars（防止回退太多）
-            if (cut < fitChars * 0.8) {
-              cut = fitChars;
+
+            // 如果没有找到换行符，向前查找合适的截断点
+            if (!foundNewline) {
+              // 向前查找换行符、空格或标点，最多向前查找 20 个字符
+              for (int i = 0; i < 20 && cut > 0; i++) {
+                final char = remaining[cut - 1];
+                if (char == '\n' || char == ' ' || char == '\u3000') {
+                  break;
+                }
+                cut--;
+              }
+              // 如果没有找到合适的截断点，使用原始 fitChars（防止回退太多）
+              if (cut < fitChars * 0.8) {
+                cut = fitChars;
+              }
             }
 
             // 截取当前页面的文本
@@ -2434,7 +2480,8 @@ class BookLoader {
       }
 
       // 判断是否跨章节（检查 href 是否包含文件名）
-      final isCrossChapterLink = href.contains('/') ||
+      final isCrossChapterLink =
+          href.contains('/') ||
           href.contains('.html') ||
           href.contains('.xhtml') ||
           href.contains('.htm');
@@ -2443,8 +2490,9 @@ class BookLoader {
         // 跨章节链接：解析 href 格式: part0004_split_004.html#note1n
         final hashIndex = href.indexOf('#');
 
-        final chapterFilename =
-            hashIndex != -1 ? href.substring(0, hashIndex) : href;
+        final chapterFilename = hashIndex != -1
+            ? href.substring(0, hashIndex)
+            : href;
         final baseName = chapterFilename.contains('/')
             ? chapterFilename.split('/').last
             : chapterFilename;
@@ -2716,12 +2764,6 @@ class BookLoader {
     final availableHeight = size.height - padding.top - padding.bottom;
     final availableWidth = size.width - 48;
 
-    // 读取用户配置的预留行数
-    final safetyLines = SPUtil.get<int>(
-      PrefKeys.pageReserveLines,
-      BookReaderConstants.defaultPageReserveLines,
-    );
-
     final pages = <PageContent>[];
     // 按 spine 顺序收集实际处理的章节（用于与目录保持一致）
     final List<EpubChapter> processedChapters = [];
@@ -2893,7 +2935,6 @@ class BookLoader {
         parsed.plainText,
         availableHeight,
         availableWidth,
-        safetyLines: safetyLines,
       );
       pages.addAll(chapterPages);
 
