@@ -99,7 +99,7 @@ github: https://github.com/stardust1900/ashes_note
 
 如果你对这个应用有什么问题或者建议，请联系我 :)
 email: stardust1900@hotmail.com
-微博: @君敕
+微博: @王一舠
 微信公众号: 魔域桃源
                     ''',
                   ),
@@ -120,7 +120,9 @@ email: stardust1900@hotmail.com
                           Text(
                             '© $currentYear ',
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: isDark ? Colors.grey[500] : Colors.grey[600],
+                              color: isDark
+                                  ? Colors.grey[500]
+                                  : Colors.grey[600],
                             ),
                           ),
                           GestureDetector(
