@@ -101,11 +101,6 @@ _ParseHtmlResult _parseHtmlStatic(
     return ['span', 'i', 'b', 'strong', 'em', 'a', 'sup', 'sub'].contains(name);
   }
 
-  bool isFootnoteLink(html_dom.Element node) {
-    final href = node.attributes['href'];
-    return node.localName == 'a' && href != null && href.contains('#');
-  }
-
   bool isLink(html_dom.Element node) {
     final href = node.attributes['href'];
     return node.localName == 'a' && href != null && href.isNotEmpty;
@@ -336,10 +331,6 @@ class BookLoader {
 
   /// 字体大小
   double fontSize = 16;
-
-  /// 字符容纳数缓存
-  static final Map<String, int> _fitCharsCache = {};
-  static const int _maxFitCharsCacheSize = 500;
 
   /// 章节纯文本映射（用于从缓存恢复时提取文本）
   final Map<int, String> _chapterPlainTextMap = {};
@@ -782,10 +773,6 @@ class BookLoader {
     }
 
     // 判断是否为脚注链接（有 id 和 href）
-    bool isFootnoteLink(html_dom.Element node) {
-      final href = node.attributes['href'];
-      return node.localName == 'a' && href != null && href.contains('#');
-    }
 
     // 判断是否为任意链接（有 href）
     bool isLink(html_dom.Element node) {
