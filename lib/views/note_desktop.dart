@@ -848,6 +848,10 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                     SPUtil.set(PrefKeys.selectedNote, actualNote.id);
                     _expandedNotebooks.add(notebook.name);
                   });
+                  // 延迟触发详情面板的搜索功能
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _detailPanelKey.currentState?.triggerSearch(_currentSearchQuery);
+                  });
                 },
               );
             },
@@ -1735,6 +1739,25 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
         setState(() => _showLineNumbers = !_showLineNumbers);
         SPUtil.set(PrefKeys.showLineNumbers, _showLineNumbers);
       }
+    });
+  }
+
+  // 从外部触发搜索功能（如从笔记本搜索跳转过来）
+  void triggerSearch(String query) {
+    if (query.isEmpty) {
+      _findController.close();
+      return;
+    }
+    // 打开搜索面板
+    _findController.findMode();
+    // 延迟设置搜索文本并聚焦，让编辑器处理搜索
+    Future.delayed(Duration(milliseconds: 100), () {
+      _findController.findInputController.text = query;
+      _findController.findInputController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: query.length,
+      );
+      _findController.focusOnFindInput();
     });
   }
 }
