@@ -81,22 +81,29 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       String lastPullTime = SPUtil.get(PrefKeys.lastPullTime, '');
       var (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
       if (lastPullTime == '') {
-        git!.pull(owner, repo, notesDir.path, unsyncedIds: _unsyncedNoteIds).then((_) {
-          SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
-        });
+        git!
+            .pull(owner, repo, notesDir.path, unsyncedIds: _unsyncedNoteIds)
+            .then((_) {
+              SPUtil.set(
+                PrefKeys.lastPullTime,
+                DateTime.now().toIso8601String(),
+              );
+            });
         _loadNotebookList();
       } else {
         git!.getCommits(owner, repo, since: lastPullTime).then((
           List<Map<String, dynamic>> commits,
         ) {
           if (commits.isNotEmpty) {
-            git!.pull(owner, repo, notesDir.path, unsyncedIds: _unsyncedNoteIds).then((_) {
-              SPUtil.set(
-                PrefKeys.lastPullTime,
-                DateTime.now().toIso8601String(),
-              );
-              _loadNotebookList();
-            });
+            git!
+                .pull(owner, repo, notesDir.path, unsyncedIds: _unsyncedNoteIds)
+                .then((_) {
+                  SPUtil.set(
+                    PrefKeys.lastPullTime,
+                    DateTime.now().toIso8601String(),
+                  );
+                  _loadNotebookList();
+                });
           }
         });
       }
@@ -850,7 +857,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                   });
                   // 延迟触发详情面板的搜索功能
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _detailPanelKey.currentState?.triggerSearch(_currentSearchQuery);
+                    _detailPanelKey.currentState?.triggerSearch(
+                      _currentSearchQuery,
+                    );
                   });
                 },
               );
@@ -1037,7 +1046,12 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     });
 
     git!
-        .pull(owner, repo, '$workingDirectory/notes', unsyncedIds: _unsyncedNoteIds)
+        .pull(
+          owner,
+          repo,
+          '$workingDirectory/notes',
+          unsyncedIds: _unsyncedNoteIds,
+        )
         .then((_) {
           SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
           git!
@@ -1643,71 +1657,118 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     );
   }
 
+  void _joinSelectedLines() {
+    final controller = _contentController;
+    final text = controller.text;
+    if (text.isEmpty) return;
+
+    final sel = controller.selection;
+    final lines = text.split('\n');
+
+    final startLine = sel.start.index;
+    final endLine = sel.end.index;
+
+    if (startLine >= endLine) return; // 只有一行，无需合并
+
+    // 合并选中行：每行 trim 后用空格连接
+    final merged = lines
+        .sublist(startLine, endLine + 1)
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .join(' ');
+
+    // 计算替换范围（整行范围）
+    int rangeStart = 0;
+    for (int i = 0; i < startLine; i++) {
+      rangeStart += lines[i].length + 1;
+    }
+    int rangeEnd = rangeStart;
+    for (int i = startLine; i <= endLine; i++) {
+      rangeEnd += lines[i].length;
+      if (i < endLine) rangeEnd += 1; // '\n'
+    }
+    if (rangeEnd > text.length) rangeEnd = text.length;
+
+    final newText = text.replaceRange(rangeStart, rangeEnd, merged);
+    controller.text = newText;
+  }
+
   Widget _buildEditor(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
-    return CodeEditor(
-      controller: _contentController,
-      scrollController: _codeScrollController,
-      findController: _findController,
-      wordWrap: _autoWrap,
-      padding: const EdgeInsets.only(bottom: 300),
-      shortcutOverrideActions: <Type, Action<Intent>>{
-        CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
-          onInvoke: (intent) {
-            widget.saveNote(widget.note);
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
-            return null;
-          },
-        ),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(
+          LogicalKeyboardKey.keyJ,
+          control: true,
+          shift: true,
+        ): _joinSelectedLines,
       },
-      style: CodeEditorStyle(
-        fontSize: 14,
-        fontHeight: 1.6,
-        fontFamily: 'monospace',
-        textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
-        backgroundColor: isDark
-            ? Color.fromARGB(255, 48, 48, 48)
-            : const Color(0xFFFFFFFF),
-        highlightColor: Colors.yellow.withValues(alpha: 0.5),
-        selectionColor: Colors.orange.withValues(alpha: 0.6),
-        codeTheme: CodeHighlightTheme(
-          languages: {'markdown': CodeHighlightThemeMode(mode: langMarkdown)},
-          theme: {
-            ...(isDark ? atomOneDarkTheme : atomOneLightTheme),
-            // blockquote (quote token) 颜色覆盖，提升对比度
-            'quote': TextStyle(
-              color: isDark ? const Color(0xFF9ECBFF) : const Color(0xFF5C6370),
-              fontStyle: FontStyle.italic,
-            ),
-          },
+      child: CodeEditor(
+        controller: _contentController,
+        scrollController: _codeScrollController,
+        findController: _findController,
+        wordWrap: _autoWrap,
+        padding: const EdgeInsets.only(bottom: 300),
+        shortcutOverrideActions: <Type, Action<Intent>>{
+          CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
+            onInvoke: (intent) {
+              widget.saveNote(widget.note);
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
+              return null;
+            },
+          ),
+        },
+        style: CodeEditorStyle(
+          fontSize: 14,
+          fontHeight: 1.6,
+          fontFamily: 'monospace',
+          textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
+          backgroundColor: isDark
+              ? Color.fromARGB(255, 48, 48, 48)
+              : const Color(0xFFFFFFFF),
+          highlightColor: Colors.yellow.withValues(alpha: 0.5),
+          selectionColor: Colors.orange.withValues(alpha: 0.6),
+          codeTheme: CodeHighlightTheme(
+            languages: {'markdown': CodeHighlightThemeMode(mode: langMarkdown)},
+            theme: {
+              ...(isDark ? atomOneDarkTheme : atomOneLightTheme),
+              // blockquote (quote token) 颜色覆盖，提升对比度
+              'quote': TextStyle(
+                color: isDark
+                    ? const Color(0xFF9ECBFF)
+                    : const Color(0xFF5C6370),
+                fontStyle: FontStyle.italic,
+              ),
+            },
+          ),
         ),
-      ),
-      findBuilder: (context, controller, readOnly) =>
-          _FindPanel(controller: controller),
-      indicatorBuilder:
-          (context, editingController, chunkController, notifier) {
-            return GestureDetector(
-              onSecondaryTapUp: (details) =>
-                  _showLineNumberMenu(details.globalPosition),
-              child: _showLineNumbers
-                  ? Container(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: DefaultCodeLineNumber(
-                        controller: editingController,
-                        notifier: notifier,
-                        textStyle: TextStyle(
-                          fontSize: 12,
-                          color: theme.textTheme.bodySmall?.color?.withValues(
-                            alpha: 0.5,
+        findBuilder: (context, controller, readOnly) =>
+            _FindPanel(controller: controller),
+        indicatorBuilder:
+            (context, editingController, chunkController, notifier) {
+              return GestureDetector(
+                onSecondaryTapUp: (details) =>
+                    _showLineNumberMenu(details.globalPosition),
+                child: _showLineNumbers
+                    ? Container(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: DefaultCodeLineNumber(
+                          controller: editingController,
+                          notifier: notifier,
+                          textStyle: TextStyle(
+                            fontSize: 12,
+                            color: theme.textTheme.bodySmall?.color?.withValues(
+                              alpha: 0.5,
+                            ),
                           ),
                         ),
-                      ),
-                    )
-                  : Container(width: 12, color: Colors.transparent),
-            );
-          },
+                      )
+                    : Container(width: 12, color: Colors.transparent),
+              );
+            },
+      ),
     );
   }
 
