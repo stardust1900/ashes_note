@@ -49,8 +49,8 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   bool _isSyncing = false;
   double _sidebarWidth = 300;
 
-  // 笔记排序模式：'name'(名称), 'modified'(修改时间)
-  String _noteSortMode = 'name';
+  // 笔记排序模式：'name_asc'(名称升序), 'name_desc'(名称降序), 'modified_asc'(时间升序), 'modified_desc'(时间降序)
+  String _noteSortMode = 'name_asc';
 
   @override
   void initState() {
@@ -161,14 +161,40 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
 
   List<Note> _sortNotes(List<Note> notes) {
     final sortedNotes = List<Note>.from(notes);
-    if (_noteSortMode == 'name') {
-      sortedNotes.sort(
-        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
-      );
-    } else {
-      sortedNotes.sort((a, b) => b.lastModified.compareTo(a.lastModified));
+    switch (_noteSortMode) {
+      case 'name_asc':
+        sortedNotes.sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        );
+      case 'name_desc':
+        sortedNotes.sort(
+          (a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()),
+        );
+      case 'modified_asc':
+        sortedNotes.sort((a, b) => a.lastModified.compareTo(b.lastModified));
+      case 'modified_desc':
+        sortedNotes.sort((a, b) => b.lastModified.compareTo(a.lastModified));
+      default:
+        sortedNotes.sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        );
     }
     return sortedNotes;
+  }
+
+  String _getSortTooltip() {
+    switch (_noteSortMode) {
+      case 'name_asc':
+        return '按名称升序';
+      case 'name_desc':
+        return '按名称降序';
+      case 'modified_asc':
+        return '按时间升序';
+      case 'modified_desc':
+        return '按时间降序';
+      default:
+        return '按名称升序';
+    }
   }
 
   String _formatModifiedTime(DateTime dateTime) {
@@ -530,25 +556,85 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                 ),
               ),
               // 排序按钮
-              IconButton(
+              PopupMenuButton<String>(
                 icon: Icon(
-                  _noteSortMode == 'name'
+                  _noteSortMode.startsWith('name')
                       ? Icons.sort_by_alpha
                       : Icons.access_time,
                   size: 20,
                   color: theme.primaryColor,
                 ),
-                onPressed: () {
+                tooltip: _getSortTooltip(),
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                onSelected: (value) {
                   setState(() {
-                    _noteSortMode = _noteSortMode == 'name'
-                        ? 'modified'
-                        : 'name';
+                    _noteSortMode = value;
                     SPUtil.set(PrefKeys.noteSortMode, _noteSortMode);
                   });
                 },
-                tooltip: _noteSortMode == 'name' ? '按名称排序' : '按时间排序',
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'name_asc',
+                    child: Row(
+                      children: [
+                        Icon(Icons.sort_by_alpha, size: 16),
+                        SizedBox(width: 8),
+                        Text('按名称升序'),
+                        if (_noteSortMode == 'name_asc')
+                          Padding(
+                            padding: EdgeInsets.only(left: 8),
+                            child: Icon(Icons.check, size: 16, color: theme.primaryColor),
+                          ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'name_desc',
+                    child: Row(
+                      children: [
+                        Icon(Icons.sort_by_alpha, size: 16),
+                        SizedBox(width: 8),
+                        Text('按名称降序'),
+                        if (_noteSortMode == 'name_desc')
+                          Padding(
+                            padding: EdgeInsets.only(left: 8),
+                            child: Icon(Icons.check, size: 16, color: theme.primaryColor),
+                          ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'modified_asc',
+                    child: Row(
+                      children: [
+                        Icon(Icons.access_time, size: 16),
+                        SizedBox(width: 8),
+                        Text('按时间升序'),
+                        if (_noteSortMode == 'modified_asc')
+                          Padding(
+                            padding: EdgeInsets.only(left: 8),
+                            child: Icon(Icons.check, size: 16, color: theme.primaryColor),
+                          ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'modified_desc',
+                    child: Row(
+                      children: [
+                        Icon(Icons.access_time, size: 16),
+                        SizedBox(width: 8),
+                        Text('按时间降序'),
+                        if (_noteSortMode == 'modified_desc')
+                          Padding(
+                            padding: EdgeInsets.only(left: 8),
+                            child: Icon(Icons.check, size: 16, color: theme.primaryColor),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
               if (_selectedNotebook != null)
                 IconButton(
