@@ -75,4 +75,9 @@ class BookReaderConstants {
   /// 3. 字体 hinting 和 subpixel 渲染导致的差异
   /// 预留 20 像素作为保险（约 1-1.5 行）
   static const double selectableTextExtraPadding = 20;
+
+  /// 桌面端阅读器最大内容宽度（dp）
+  /// 超过此宽度时，内容区域居中显示，不再随窗口变宽
+  /// Kindle 风格：保持舒适的阅读宽度，避免长行影响阅读体验
+  static const double maxReaderContentWidth = 800.0;
 }

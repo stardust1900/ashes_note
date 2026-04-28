@@ -326,8 +326,12 @@ class BookLoader {
   /// HTML 标签移除的正则表达式缓存（用于特殊标签处理）
   static final RegExp _spaceTabRegex = RegExp(r'[ \t]+');
 
+
   /// 窗口大小
   Size? windowSize;
+
+  /// 是否为桌面端
+  bool isDesktop = false;
 
   /// 字体大小
   double fontSize = 16;
@@ -1953,16 +1957,27 @@ class BookLoader {
     final lineHeight = textPainterCache!.height;
 
     // 统一可用高度计算：
-    // - 减去页面垂直预留（120）
-    // - 减去 kToolbarHeight
+    // - 减去页面垂直预留（120）- 移动端需要（控制栏等）
+    // - 减去 kToolbarHeight - 移动端需要（控制栏）
     // - 减去内容区内部 padding（20）
     // - 减去安全边距（小字体时 TextPainter 计算误差 + SelectableText 内边距）
-    final usableHeight =
-        availableHeight -
-        BookReaderConstants.pageVerticalReserve -
-        kToolbarHeight -
-        BookReaderConstants.contentPaddingVertical -
-        BookReaderConstants.selectableTextExtraPadding;
+    // 桌面端：只减去 padding 和安全边距，内容从顶部开始
+    final double usableHeight;
+    if (isDesktop) {
+      // 桌面端：只减去必要的 padding，kToolbarHeight 和 pageVerticalReserve 不需要
+      usableHeight =
+          availableHeight -
+          8 - // 上下 padding (4+4)
+          BookReaderConstants.selectableTextExtraPadding;
+    } else {
+      // 移动端：减去所有预留空间
+      usableHeight =
+          availableHeight -
+          BookReaderConstants.pageVerticalReserve -
+          kToolbarHeight -
+          BookReaderConstants.contentPaddingVertical -
+          BookReaderConstants.selectableTextExtraPadding;
+    }
 
     List<ContentItem> currentPageItems = [];
     double currentPageHeight = 0;
@@ -2197,16 +2212,27 @@ class BookLoader {
     // final charsPerLine = (availableWidth / charWidth).floor();
 
     // 每页可用高度：
-    // - 减去页面垂直预留（120）
-    // - 减去 kToolbarHeight
+    // - 减去页面垂直预留（120）- 移动端需要（控制栏等）
+    // - 减去 kToolbarHeight - 移动端需要（控制栏）
     // - 减去内容区内部 padding（20）
     // - 减去安全边距（小字体时 TextPainter 计算误差 + SelectableText 内边距）
-    final usableHeight =
-        availableHeight -
-        BookReaderConstants.pageVerticalReserve -
-        kToolbarHeight -
-        BookReaderConstants.contentPaddingVertical -
-        BookReaderConstants.selectableTextExtraPadding;
+    // 桌面端：只减去 padding 和安全边距，内容从顶部开始
+    final double usableHeight;
+    if (isDesktop) {
+      // 桌面端：只减去必要的 padding，kToolbarHeight 和 pageVerticalReserve 不需要
+      usableHeight =
+          availableHeight -
+          8 - // 上下 padding (4+4)
+          BookReaderConstants.selectableTextExtraPadding;
+    } else {
+      // 移动端：减去所有预留空间
+      usableHeight =
+          availableHeight -
+          BookReaderConstants.pageVerticalReserve -
+          kToolbarHeight -
+          BookReaderConstants.contentPaddingVertical -
+          BookReaderConstants.selectableTextExtraPadding;
+    }
     // final linesPerPage = (usableHeight / lineHeight).floor();
 
     List<ContentItem> currentPageItems = [];
@@ -2748,8 +2774,14 @@ class BookLoader {
     final size = MediaQuery.of(context).size;
     windowSize = size;
     final padding = MediaQuery.of(context).padding;
+    // 检测是否为桌面端（宽度大于最大内容宽度）
+    isDesktop = size.width > BookReaderConstants.maxReaderContentWidth;
     final availableHeight = size.height - padding.top - padding.bottom;
-    final availableWidth = size.width - 48;
+    // 桌面端限制最大宽度（Kindle风格）
+    double availableWidth = size.width - 48;
+    if (size.width > BookReaderConstants.maxReaderContentWidth) {
+      availableWidth = BookReaderConstants.maxReaderContentWidth;
+    }
 
     final pages = <PageContent>[];
     // 按 spine 顺序收集实际处理的章节（用于与目录保持一致）

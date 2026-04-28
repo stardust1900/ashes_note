@@ -2372,8 +2372,12 @@ class _BookReaderPageState extends State<BookReaderPage>
       );
     }
 
+    // 桌面端使用较小 padding 以减少空白，移动端保持原有间距
+    final horizontalPadding = 24.0;
+    final verticalPadding = _isDesktop ? 4.0 : 10.0;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 10, 24, 10),
+      padding: EdgeInsets.fromLTRB(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding),
       child: SingleChildScrollView(
         physics: _isDesktop
             ? const AlwaysScrollableScrollPhysics()
@@ -2814,14 +2818,21 @@ class _BookReaderPageState extends State<BookReaderPage>
                         if (!_showControls)
                           const SizedBox(height: kToolbarHeight),
                         Expanded(
-                          child: _pages.isNotEmpty
-                              ? _buildPageContent(
-                                  _pages[_currentPageIndex],
-                                  constraints.maxHeight - 120 - kToolbarHeight,
-                                )
-                              : const Center(child: Text('暂无内容')),
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: BookReaderConstants.maxReaderContentWidth,
+                              ),
+                              child: _pages.isNotEmpty
+                                  ? _buildPageContent(
+                                      _pages[_currentPageIndex],
+                                      constraints.maxHeight,
+                                    )
+                                  : const Center(child: Text('暂无内容')),
+                            ),
+                          ),
                         ),
-                        const SizedBox(height: 20),
                       ],
                     ),
                   ),
