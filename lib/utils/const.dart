@@ -39,9 +39,9 @@ class BookReaderConstants {
   /// 标题行高
   static const double headerLineHeight = 1.2;
 
-  /// 标题上下 padding（与渲染时的 EdgeInsets.only(top: 24, bottom: 12) 一致）
-  static const double headerPaddingTop = 24;
-  static const double headerPaddingBottom = 12;
+  /// 标题上下 padding（桌面端减小底部间距以减少空行）
+  static const double headerPaddingTop = 16;
+  static const double headerPaddingBottom = 4;
   static const double headerTotalPadding =
       headerPaddingTop + headerPaddingBottom;
 

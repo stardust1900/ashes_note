@@ -1965,10 +1965,11 @@ class BookLoader {
     final double usableHeight;
     if (isDesktop) {
       // 桌面端：只减去必要的 padding，kToolbarHeight 和 pageVerticalReserve 不需要
+      // 预留更多底部空间避免滚动条（顶部8px padding + 底部安全边距）
       usableHeight =
           availableHeight -
           8 - // 上下 padding (4+4)
-          BookReaderConstants.selectableTextExtraPadding;
+          80; // 底部安全边距，避免滚动条
     } else {
       // 移动端：减去所有预留空间
       usableHeight =
@@ -2220,10 +2221,11 @@ class BookLoader {
     final double usableHeight;
     if (isDesktop) {
       // 桌面端：只减去必要的 padding，kToolbarHeight 和 pageVerticalReserve 不需要
+      // 预留更多底部空间避免滚动条（顶部8px padding + 底部安全边距）
       usableHeight =
           availableHeight -
           8 - // 上下 padding (4+4)
-          BookReaderConstants.selectableTextExtraPadding;
+          80; // 底部安全边距，避免滚动条
     } else {
       // 移动端：减去所有预留空间
       usableHeight =
