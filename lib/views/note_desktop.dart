@@ -1079,35 +1079,35 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                   return;
                 }
 
-                FileUtil()
-                    .saveFile(
-                      '$workingDirectory/notes',
-                      _selectedNotebook!.name,
-                      _noteTitleController.text.endsWith('.md')
-                          ? _noteTitleController.text
-                          : '${_noteTitleController.text}.md',
-                      utf8.encode(''),
-                    )
-                    .then((value) {
-                      FileUtil()
-                          .listNotes(
-                            '$workingDirectory/notes',
-                            _selectedNotebook!.name,
-                          )
-                          .then((notes) {
-                            setState(() {
-                              final notebookIndex = _notebooks.indexWhere(
-                                (n) => n.name == _selectedNotebook!.name,
-                              );
-                              _notebooks[notebookIndex].notes.clear();
-                              _notebooks[notebookIndex].notes.addAll(notes);
-                              _selectedNote = notes.last;
-                              // 展开笔记本并标记新笔记为未同步
-                              _expandedNotebooks.add(_selectedNotebook!.name);
-                              _unsyncedNoteIds.add(notes.last.id);
-                            });
-                          });
-                    });
+                final newTitle = _noteTitleController.text.endsWith('.md')
+                    ? _noteTitleController.text
+                    : '${_noteTitleController.text}.md';
+                final newNote = Note(
+                  id: '${_selectedNotebook!.name}/$newTitle',
+                  title: newTitle,
+                  content: '',
+                  lastModified: DateTime.now(),
+                );
+
+                // 先更新本地状态
+                setState(() {
+                  _selectedNotebook!.notes.add(newNote);
+                  _selectedNote = newNote;
+                  // 展开笔记本并标记新笔记为未同步
+                  _expandedNotebooks.add(_selectedNotebook!.name);
+                  _unsyncedNoteIds.add(newNote.id);
+                  SPUtil.set(PrefKeys.selectedNotebook, _selectedNotebook!.name);
+                  SPUtil.set(PrefKeys.selectedNote, newNote.id);
+                });
+
+                // 保存到文件
+                FileUtil().saveFile(
+                  '$workingDirectory/notes',
+                  _selectedNotebook!.name,
+                  newTitle,
+                  utf8.encode(''),
+                );
+
                 Navigator.pop(context);
               }
             },
