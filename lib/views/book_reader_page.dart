@@ -614,16 +614,24 @@ class _BookReaderPageState extends State<BookReaderPage>
 
   /// 隐藏文本选择工具栏
   void _hideTextToolbar({bool applyDefaultHighlight = false}) {
+    // 如果已经隐藏，直接返回（防止重复调用）
+    if (!_showTextToolbar) return;
+
+    // 先保存需要用到的值（因为后续会清空）
+    final savedSelectedText = _selectedText;
+    final savedHighlights = _selectedHighlights;
+
     // 先清除所有文本选择状态（UI层面）
     for (final globalState in _selectableTextStates) {
       globalState.state?.clearSelection();
     }
 
-    // 然后处理自动高亮逻辑
+    // 立即处理自动高亮逻辑（在清除状态之前）
+    // 使用 savedHighlights.isEmpty 判断，因为 savedSelectedText 可能已被清空
     if (applyDefaultHighlight &&
-        _selectedText != null &&
-        _selectedHighlights.isEmpty) {
-      final text = _selectedText!;
+        savedSelectedText != null &&
+        savedHighlights.isEmpty) {
+      final text = savedSelectedText;
       final isEnglish = _isEnglishText(text);
 
       // 根据语言类型决定是否自动高亮
@@ -686,9 +694,10 @@ class _BookReaderPageState extends State<BookReaderPage>
       children: [
         // 透明背景，点击隐藏工具栏（如果选中文本未高亮，则使用默认颜色高亮）
         // 注意：不要放 Container 子 widget，否则会影响 hit test
+        // 使用 opaque 确保捕获所有点击事件，避免与 SelectableText 的点击事件冲突
         Positioned.fill(
           child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
+            behavior: HitTestBehavior.opaque,
             onTap: () => _hideTextToolbar(applyDefaultHighlight: true),
           ),
         ),
@@ -2485,7 +2494,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                       },
                   onSelectionCleared: () {
                     if (_showTextToolbar) {
-                      _hideTextToolbar();
+                      _hideTextToolbar(applyDefaultHighlight: true);
                     }
                   },
                   onTap: () {
@@ -2554,7 +2563,7 @@ class _BookReaderPageState extends State<BookReaderPage>
                       },
                   onSelectionCleared: () {
                     if (_showTextToolbar) {
-                      _hideTextToolbar();
+                      _hideTextToolbar(applyDefaultHighlight: true);
                     }
                   },
                   onTap: () {
