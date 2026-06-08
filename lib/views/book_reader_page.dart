@@ -53,6 +53,10 @@ class _BookReaderPageState extends State<BookReaderPage>
   final List<EpubChapter> _chapters = [];
   // 存储层级结构的原始章节（用于目录显示）
   final List<EpubChapter> _hierarchicalChapters = [];
+  // 扁平章节索引 -> 完整层级章节名的映射
+  final Map<int, String> _chapterFullTitles = {};
+  // 扁平章节索引 -> 层级深度的映射（0=一级, 1=二级, ...）
+  final Map<int, int> _chapterDepths = {};
   // 跟踪展开的章节 ID
   final Set<String> _expandedChapterIds = <String>{};
   int _currentChapterIndex = 0;
@@ -228,6 +232,7 @@ class _BookReaderPageState extends State<BookReaderPage>
         setState(() {
           _chapters.clear();
           _chapters.addAll(chapters);
+          _buildChapterFullTitles();
         });
       },
     );
@@ -1481,6 +1486,7 @@ class _BookReaderPageState extends State<BookReaderPage>
       onShowAddNoteDialog: _showAddNoteDialog,
       onJumpToHighlight: _jumpToHighlight,
       getChapterTitle: _getChapterTitle,
+      getChapterLevel: _getChapterLevel,
       getTextForRange: _getTextForRange,
       onRefresh: () {
         setState(() {});
@@ -1494,6 +1500,7 @@ class _BookReaderPageState extends State<BookReaderPage>
       _bookTitle,
       _highlights,
       _getChapterTitle,
+      _getChapterLevel,
       _getTextForRange,
       context,
     );
@@ -1536,12 +1543,84 @@ class _BookReaderPageState extends State<BookReaderPage>
     return result.toString();
   }
 
-  /// 获取章节标题
+  /// 获取章节标题（与 _buildChapterTree 显示一致）
   String _getChapterTitle(int chapterIndex) {
+    // 优先使用从层级树中预计算的标题（与目录展示一致）
+    if (_chapterFullTitles.isNotEmpty && _chapterFullTitles.containsKey(chapterIndex)) {
+      return _chapterFullTitles[chapterIndex]!;
+    }
     if (chapterIndex >= 0 && chapterIndex < _chapters.length) {
       return _chapters[chapterIndex].title ?? '第${chapterIndex + 1}章';
     }
     return '第${chapterIndex + 1}章';
+  }
+
+  /// 获取章节在层级树中的深度（0=顶级, 1=二级, ...）
+  int _getChapterLevel(int chapterIndex) {
+    return _chapterDepths[chapterIndex] ?? 0;
+  }
+
+  /// 构建扁平章节索引 -> 章节标题的映射（参考 _buildChapterTree 的遍历方式）
+  void _buildChapterFullTitles() {
+    _chapterFullTitles.clear();
+    _chapterDepths.clear();
+    _buildFullTitlesRecursive(_hierarchicalChapters, 0);
+  }
+
+  /// 递归遍历层级树，将每个章节的标题和层级深度存入映射
+  void _buildFullTitlesRecursive(List<EpubChapter> chapters, int depth) {
+    for (final chapter in chapters) {
+      // 使用与 _buildChapterTree 相同的查找方式
+      final flatIndex = _getChapterIndexInFlatList(chapter);
+      if (flatIndex >= 0) {
+        // 存储章节自身标题与深度，与目录树中显示的名称一致
+        _chapterFullTitles[flatIndex] = chapter.title ?? '';
+        _chapterDepths[flatIndex] = depth;
+      }
+
+      if (chapter.subChapters.isNotEmpty) {
+        _buildFullTitlesRecursive(chapter.subChapters, depth + 1);
+      }
+    }
+  }
+
+  /// 从 epub spine 重建扁平章节列表（用于缓存加载时 _chapters 为空的情况）
+  void _populateChaptersFromSpine() {
+    if (_chapters.isNotEmpty) return;
+    final spineItems = _epubBook?.schema?.package?.spine?.items;
+    final manifestItems = _epubBook?.schema?.package?.manifest?.items;
+    if (spineItems == null || manifestItems == null) return;
+
+    // 扁平化层级章节列表
+    final flatChapters = _bookLoader.flattenChapters(_hierarchicalChapters);
+
+    // 构建 contentFileName -> chapter 映射
+    final Map<String, EpubChapter> fileNameToChapterMap = {};
+    for (final chapter in flatChapters) {
+      final name = chapter.contentFileName;
+      if (name != null && name.isNotEmpty) {
+        fileNameToChapterMap[name] = chapter;
+      }
+    }
+
+    // 按 spine 顺序收集章节
+    for (final spineItem in spineItems) {
+      final idRef = spineItem.idRef;
+      if (idRef == null) continue;
+      final manifestItem = manifestItems.cast<EpubManifestItem?>().firstWhere(
+            (item) => item?.id == idRef,
+            orElse: () => null,
+          );
+      if (manifestItem == null) continue;
+      final href = manifestItem.href;
+      if (href == null) continue;
+      final chapter = fileNameToChapterMap[href];
+      if (chapter != null && !_chapters.contains(chapter)) {
+        _chapters.add(chapter);
+      }
+    }
+
+    _buildChapterFullTitles();
   }
 
   /// 跳转到高亮位置
@@ -2212,7 +2291,9 @@ class _BookReaderPageState extends State<BookReaderPage>
       final cachedPages = await _bookLoader.loadPagesFromCache();
 
       if (cachedPages != null && cachedPages.isNotEmpty) {
-        // 从缓存加载成功
+        // 从缓存加载成功，需要补充章节信息（缓存中不含章节列表）
+        _populateChaptersFromSpine();
+
         setState(() {
           _pages = cachedPages;
           _totalPages = cachedPages.length;

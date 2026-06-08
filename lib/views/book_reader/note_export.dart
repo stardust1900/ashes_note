@@ -12,6 +12,7 @@ class NoteExport {
     String bookTitle,
     List<Highlight> highlights,
     String Function(int chapterIndex) getChapterTitle,
+    int Function(int chapterIndex) getChapterLevel,
     String Function(int chapterIndex, int startOffset, int endOffset)
     getTextForRange,
     BuildContext context,
@@ -29,6 +30,7 @@ class NoteExport {
         bookTitle,
         highlights,
         getChapterTitle,
+        getChapterLevel,
         getTextForRange,
       );
 
@@ -143,6 +145,7 @@ class NoteExport {
     String bookTitle,
     List<Highlight> highlights,
     String Function(int chapterIndex) getChapterTitle,
+    int Function(int chapterIndex) getChapterLevel,
     String Function(int chapterIndex, int startOffset, int endOffset)
     getTextForRange,
   ) {
@@ -166,7 +169,11 @@ class NoteExport {
     }
 
     for (final group in groupedHighlights) {
-      buffer.writeln('## ${group.chapterTitle}');
+      // 根据章节层级深度生成对应级别的 Markdown 标题
+      final level = getChapterLevel(group.chapterIndex);
+      final headingCount = (level + 2).clamp(2, 6);
+      final headingPrefix = List.filled(headingCount, '#').join();
+      buffer.writeln('$headingPrefix ${group.chapterTitle}');
       buffer.writeln();
 
       for (final merged in group.mergedHighlights) {

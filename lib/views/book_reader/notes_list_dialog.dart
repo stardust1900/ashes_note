@@ -14,6 +14,7 @@ class NotesListDialog extends StatelessWidget {
   final Future<void> Function(Highlight) onShowAddNoteDialog;
   final void Function(Highlight) onJumpToHighlight;
   final String Function(int) getChapterTitle;
+  final int Function(int) getChapterLevel;
   final String Function(int, int, int) getTextForRange;
   final void Function() onRefresh;
 
@@ -27,6 +28,7 @@ class NotesListDialog extends StatelessWidget {
     required this.onShowAddNoteDialog,
     required this.onJumpToHighlight,
     required this.getChapterTitle,
+    required this.getChapterLevel,
     required this.getTextForRange,
     required this.onRefresh,
   });
@@ -42,6 +44,7 @@ class NotesListDialog extends StatelessWidget {
     required Future<void> Function(Highlight) onShowAddNoteDialog,
     required void Function(Highlight) onJumpToHighlight,
     required String Function(int) getChapterTitle,
+    required int Function(int) getChapterLevel,
     required String Function(int, int, int) getTextForRange,
     required void Function() onRefresh,
   }) {
@@ -58,6 +61,7 @@ class NotesListDialog extends StatelessWidget {
             onShowAddNoteDialog: onShowAddNoteDialog,
             onJumpToHighlight: onJumpToHighlight,
             getChapterTitle: getChapterTitle,
+            getChapterLevel: getChapterLevel,
             getTextForRange: getTextForRange,
             onRefresh: () {
               onRefresh();
@@ -386,8 +390,6 @@ class NotesListDialog extends StatelessWidget {
                 color: theme.primaryColor,
                 letterSpacing: 0.2,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(width: 10),
@@ -947,6 +949,7 @@ class NotesListDialog extends StatelessWidget {
                 bookTitle,
                 highlights,
                 getChapterTitle,
+                getChapterLevel,
                 getTextForRange,
                 context,
               ),
