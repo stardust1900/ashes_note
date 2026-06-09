@@ -305,15 +305,27 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
               final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
               FileUtil()
                   .listNotes('$workingDirectory/notes', notebookName)
-                  .then((notes) {
+                  .then((notes) async {
                     for (var note in notes) {
-                      git?.deleteFile(
-                        owner,
-                        repo,
-                        note.id,
-                        '删除笔记本 ${note.id}',
-                        git!.hashObject(utf8.encode(note.content)),
-                      );
+                      try {
+                        final fileInfo = await git!.getFile(
+                          owner,
+                          repo,
+                          note.id,
+                        );
+                        final remoteSha = fileInfo['sha'] as String?;
+                        if (remoteSha != null && remoteSha.isNotEmpty) {
+                          await git?.deleteFile(
+                            owner,
+                            repo,
+                            note.id,
+                            '删除笔记本 ${note.id}',
+                            remoteSha,
+                          );
+                        }
+                      } catch (_) {
+                        // 如果远端不存在或获取失败，跳过删除
+                      }
                     }
                   })
                   .then((_) {
@@ -354,9 +366,24 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     FileUtil().deleteFile('$workingDirectory/notes', path, filename);
 
     if (git != null && remoteUrl != null) {
-      String sha = git!.hashObject(utf8.encode(note.content));
       final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
-      git!.deleteFile(owner, repo, noteId, 'Delete note $noteId', sha);
+      git!
+          .getFile(owner, repo, noteId)
+          .then((fileInfo) {
+            final remoteSha = fileInfo['sha'] as String?;
+            if (remoteSha != null && remoteSha.isNotEmpty) {
+              git!.deleteFile(
+                owner,
+                repo,
+                noteId,
+                'Delete note $noteId',
+                remoteSha,
+              );
+            }
+          })
+          .catchError((_) {
+            // 远端文件不存在或获取失败，忽略远端删除
+          });
     }
 
     ScaffoldMessenger.of(
@@ -407,15 +434,24 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
 
       // 如果 git 已配置，删除远程的旧笔记文件
       if (git != null && remoteUrl != null) {
-        String sha = git!.hashObject(utf8.encode(updatedNote.content));
         final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
-        git!.deleteFile(
-          owner,
-          repo,
-          oldNoteId,
-          'Rename note to $newFileName',
-          sha,
-        );
+        git!
+            .getFile(owner, repo, oldNoteId)
+            .then((fileInfo) {
+              final remoteSha = fileInfo['sha'] as String?;
+              if (remoteSha != null && remoteSha.isNotEmpty) {
+                git!.deleteFile(
+                  owner,
+                  repo,
+                  oldNoteId,
+                  'Rename note to $newFileName',
+                  remoteSha,
+                );
+              }
+            })
+            .catchError((_) {
+              // 远端文件不存在或获取失败，忽略远端删除
+            });
       }
 
       setState(() {
@@ -584,7 +620,11 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                         if (_noteSortMode == 'name_asc')
                           Padding(
                             padding: EdgeInsets.only(left: 8),
-                            child: Icon(Icons.check, size: 16, color: theme.primaryColor),
+                            child: Icon(
+                              Icons.check,
+                              size: 16,
+                              color: theme.primaryColor,
+                            ),
                           ),
                       ],
                     ),
@@ -599,7 +639,11 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                         if (_noteSortMode == 'name_desc')
                           Padding(
                             padding: EdgeInsets.only(left: 8),
-                            child: Icon(Icons.check, size: 16, color: theme.primaryColor),
+                            child: Icon(
+                              Icons.check,
+                              size: 16,
+                              color: theme.primaryColor,
+                            ),
                           ),
                       ],
                     ),
@@ -614,7 +658,11 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                         if (_noteSortMode == 'modified_asc')
                           Padding(
                             padding: EdgeInsets.only(left: 8),
-                            child: Icon(Icons.check, size: 16, color: theme.primaryColor),
+                            child: Icon(
+                              Icons.check,
+                              size: 16,
+                              color: theme.primaryColor,
+                            ),
                           ),
                       ],
                     ),
@@ -629,7 +677,11 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                         if (_noteSortMode == 'modified_desc')
                           Padding(
                             padding: EdgeInsets.only(left: 8),
-                            child: Icon(Icons.check, size: 16, color: theme.primaryColor),
+                            child: Icon(
+                              Icons.check,
+                              size: 16,
+                              color: theme.primaryColor,
+                            ),
                           ),
                       ],
                     ),
@@ -1096,7 +1148,10 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                   // 展开笔记本并标记新笔记为未同步
                   _expandedNotebooks.add(_selectedNotebook!.name);
                   _unsyncedNoteIds.add(newNote.id);
-                  SPUtil.set(PrefKeys.selectedNotebook, _selectedNotebook!.name);
+                  SPUtil.set(
+                    PrefKeys.selectedNotebook,
+                    _selectedNotebook!.name,
+                  );
                   SPUtil.set(PrefKeys.selectedNote, newNote.id);
                 });
 
