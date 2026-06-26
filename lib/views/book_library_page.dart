@@ -5,6 +5,7 @@ import 'package:ashes_note/services/book_reader/book_reader_services.dart';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:ashes_note/views/book_reader/storage_manager.dart';
+import 'package:ashes_note/views/book_web_transfer_dialog.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:epub_plus/epub_plus.dart' hide Image;
 import 'package:file_picker/file_picker.dart';
@@ -317,6 +318,15 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
           context,
         ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
     }
+  }
+
+  /// 显示网页传书弹窗
+  void _showWebTransferDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // 只能通过关闭按钮关闭
+      builder: (ctx) => const BookWebTransferDialog(),
+    ).then((_) => _loadBooks()); // 关闭弹窗后刷新书籍列表
   }
 
   Future<void> _renameBook(BookInfo book, String newTitle) async {
@@ -686,10 +696,39 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
               SPUtil.set(PrefKeys.bookViewMode, next);
             },
           ),
-          IconButton(
+          // 导入菜单
+          PopupMenuButton<String>(
             icon: const Icon(Icons.upload_file),
-            onPressed: _importBook,
-            tooltip: '导入 EPUB',
+            tooltip: '导入书籍',
+            onSelected: (value) {
+              if (value == 'local') {
+                _importBook();
+              } else if (value == 'web') {
+                _showWebTransferDialog();
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'local',
+                child: Row(
+                  children: [
+                    Icon(Icons.folder_open, size: 18),
+                    SizedBox(width: 8),
+                    Text('本地导入'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'web',
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_upload_outlined, size: 18),
+                    SizedBox(width: 8),
+                    Text('网页传书'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),

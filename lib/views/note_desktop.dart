@@ -349,9 +349,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
 
   void _deleteNote(String noteId) {
     if (_selectedNotebook == null) return;
-    final note = _selectedNotebook!.notes.firstWhere(
-      (note) => note.id == noteId,
-    );
+    _selectedNotebook!.notes.firstWhere((note) => note.id == noteId);
     setState(() {
       _selectedNotebook!.notes.removeWhere((note) => note.id == noteId);
       if (_selectedNote?.id == noteId) {

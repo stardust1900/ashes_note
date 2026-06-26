@@ -58,6 +58,8 @@ dependencies:
   image: ^4.8.0
   html: ^0.15.6
   url_launcher: ^6.3.1
+  qr_flutter: ^4.1.0
+  mime: ^2.0.0
 
 dev_dependencies:
   flutter_test:
