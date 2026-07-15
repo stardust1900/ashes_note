@@ -5,6 +5,7 @@ import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
@@ -51,6 +52,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
 
   // 笔记排序模式：'name_asc'(名称升序), 'name_desc'(名称降序), 'modified_asc'(时间升序), 'modified_desc'(时间降序)
   String _noteSortMode = 'name_asc';
+
+  // 打开的本地文件列表
+  final List<_LocalFileInfo> _localFiles = [];
 
   @override
   void initState() {
@@ -394,6 +398,18 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   }
 
   void noteChanged(Note updatedNote, {String? newTitle}) {
+    // 如果是本地文件，直接保存到磁盘
+    if (updatedNote.notebookName == '__local_file__') {
+      final fileInfo = _localFiles.cast<_LocalFileInfo?>().firstWhere(
+        (lf) => lf?.filePath == updatedNote.id,
+        orElse: () => null,
+      );
+      if (fileInfo != null) {
+        _saveLocalFile(fileInfo, updatedNote.content);
+      }
+      return;
+    }
+
     if (newTitle != null && newTitle != updatedNote.title) {
       final exists = _selectedNotebook!.notes.any(
         (note) => note.title == newTitle || note.title == '$newTitle.md',
@@ -695,6 +711,13 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                   constraints: BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
               IconButton(
+                icon: Icon(Icons.folder_open, size: 20),
+                onPressed: _openLocalFile,
+                tooltip: '打开本地文件',
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+              IconButton(
                 icon: Icon(Icons.sync, size: 20),
                 color: _isSyncing ? Colors.grey : theme.primaryColor,
                 onPressed: _performSync,
@@ -739,10 +762,115 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
         ? _buildEmptySidebar()
         : ListView(
             padding: EdgeInsets.only(top: 4, bottom: 4),
-            children: _notebooks.map((notebook) {
-              return _buildNotebookItem(notebook);
-            }).toList(),
+            children: [
+              ..._notebooks.map((notebook) {
+                return _buildNotebookItem(notebook);
+              }),
+              if (_localFiles.isNotEmpty) _buildLocalFilesSection(),
+            ],
           );
+  }
+
+  /// 构建本地文件区域
+  Widget _buildLocalFilesSection() {
+    final theme = Theme.of(context);
+    return Container(
+      margin: EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Row(
+              children: [
+                Icon(Icons.attach_file, size: 16, color: Colors.orange),
+                SizedBox(width: 8),
+                Text(
+                  '打开的本地文件',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, indent: 12, endIndent: 12),
+          ..._localFiles.map((file) => _buildLocalFileItem(file)),
+        ],
+      ),
+    );
+  }
+
+  /// 构建单个本地文件项
+  Widget _buildLocalFileItem(_LocalFileInfo fileInfo) {
+    final theme = Theme.of(context);
+    final isSelected = _selectedNote?.id == fileInfo.filePath &&
+        _selectedNote?.notebookName == '__local_file__';
+
+    return InkWell(
+      onTap: () {
+        _openLocalFileInEditor(fileInfo);
+      },
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? theme.primaryColor.withValues(alpha: 0.1)
+              : Colors.transparent,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.description_outlined,
+              size: 16,
+              color: isSelected ? theme.primaryColor : Colors.orange.shade400,
+            ),
+            SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    fileInfo.fileName,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    fileInfo.filePath,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 10,
+                      color: theme.disabledColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            InkWell(
+              onTap: () => _closeLocalFile(fileInfo),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(
+                  Icons.close,
+                  size: 14,
+                  color: theme.disabledColor,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildNotebookItem(Notebook notebook) {
@@ -960,6 +1088,97 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     );
   }
 
+  /// 打开本地文件选择器
+  Future<void> _openLocalFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['md', 'txt', 'markdown'],
+        allowMultiple: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      for (final f in result.files) {
+        if (f.path == null) continue;
+        // 检查是否已经打开
+        if (_localFiles.any((lf) => lf.filePath == f.path)) continue;
+
+        final file = File(f.path!);
+        if (!await file.exists()) continue;
+
+        try {
+          final content = await file.readAsString();
+          setState(() {
+            _localFiles.add(_LocalFileInfo(
+              filePath: f.path!,
+              fileName: f.name,
+              content: content,
+              lastModified: DateTime.now(),
+            ));
+          });
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('无法读取文件：${f.name}')),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('打开文件失败：$e')),
+        );
+      }
+    }
+  }
+
+  /// 在编辑器中打开本地文件
+  void _openLocalFileInEditor(_LocalFileInfo fileInfo) {
+    // 创建一个虚拟 Note 用于编辑
+    final virtualNote = Note(
+      id: fileInfo.filePath,
+      title: fileInfo.fileName,
+      content: fileInfo.content,
+      lastModified: fileInfo.lastModified,
+      notebookName: '__local_file__',
+    );
+    setState(() {
+      _selectedNote = virtualNote;
+      _selectedNotebook = null;
+    });
+  }
+
+  /// 关闭本地文件
+  void _closeLocalFile(_LocalFileInfo fileInfo) {
+    setState(() {
+      _localFiles.remove(fileInfo);
+      // 如果当前选中的是该文件，则清除选中状态
+      if (_selectedNote?.id == fileInfo.filePath &&
+          _selectedNote?.notebookName == '__local_file__') {
+        _selectedNote = null;
+      }
+    });
+  }
+
+  /// 保存本地文件到磁盘
+  Future<void> _saveLocalFile(_LocalFileInfo fileInfo, String content) async {
+    try {
+      final file = File(fileInfo.filePath);
+      await file.writeAsString(content);
+      setState(() {
+        fileInfo.content = content;
+        fileInfo.lastModified = DateTime.now();
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('保存文件失败：$e')),
+        );
+      }
+    }
+  }
+
   Widget _buildSearchResults() {
     return _searchResults.isEmpty
         ? Center(child: Text('无搜索结果'))
@@ -1004,10 +1223,14 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   }
 
   Widget _buildNoteDetail(Note note) {
+    // 如果是本地文件，使用虚拟笔记本
+    final notebook = _selectedNotebook ??
+        Notebook(name: '本地文件', notes: [], color: Colors.orange);
+
     return _NoteDetailPanel(
       key: _detailPanelKey,
       note: note,
-      notebook: _selectedNotebook!,
+      notebook: notebook,
       onNoteChanged: noteChanged,
       saveNote: saveNote,
       onDeleteNote: _deleteNote,
@@ -2064,5 +2287,20 @@ class GlobalSearchResult {
     required this.note,
     required this.notebookName,
     required this.matchType,
+  });
+}
+
+/// 本地文件信息模型
+class _LocalFileInfo {
+  final String filePath;
+  final String fileName;
+  String content;
+  DateTime lastModified;
+
+  _LocalFileInfo({
+    required this.filePath,
+    required this.fileName,
+    required this.content,
+    required this.lastModified,
   });
 }
