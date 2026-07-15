@@ -1673,6 +1673,9 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   }
 
   void _saveContentToFile() {
+    // 本地文件不通过 FileUtil 保存，已在 noteChanged 中处理
+    if (widget.note.notebookName == '__local_file__') return;
+
     final workingDir = SPUtil.get<String>(PrefKeys.workingDirectory, '');
     FileUtil().saveFile(
       '$workingDir/notes',
