@@ -12,8 +12,118 @@ import 'package:ashes_note/entity/entities_notebook.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
 import 'package:re_editor/re_editor.dart';
 import 'package:re_highlight/languages/markdown.dart';
+import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/atom-one-dark.dart';
 import 'package:re_highlight/styles/atom-one-light.dart';
+
+/// 懒加载并缓存「注入了全角引号规则的 markdown 语言模式」。
+///
+/// 为全角引号/书名号/方头括号（“” ‘’ 「」『』 【】 《》）单独分配高亮作用域，
+/// 在编辑器中与半角引号（" '）明显区分。
+///
+/// 关键设计：深克隆 re_highlight 的全局 `langMarkdown` 单例，再注入规则。
+/// 绝不直接改动全局单例——否则一旦该单例被（任何代码路径）提前编译
+/// （`isCompiled = true`），后续注入会静默失效；热重载 / 多编辑器实例时
+/// 全局单例状态也不可控。克隆出独立副本后，注入与编译时机完全由本编辑器掌控。
+Mode? _markdownFwCache;
+
+Mode get markdownWithFullwidthQuote {
+  final cached = _markdownFwCache;
+  if (cached != null) return cached;
+
+  final quoteMode = Mode(
+    // 注意：不能用原始字符串 r'...'，否则 \uXXXX 不会被解释成全角字符，
+    // 而是被当成字面量的反斜杠+u+数字，导致全角引号永远匹配不上。
+    // 用普通字符串让 \u 转义生效，同时避免源码直接写全角字符被「智能标点」改写。
+    // 覆盖："" '' 「」『』 【】 《》 等常见全角引号/书名号/方头括号。
+    //
+    // 必须用 begin/end 形式而非 match-only：re_highlight 的 Dart 移植版不会把
+    // match-only 规则应用到 begin/end 模式的内部内容（节点无法自闭合会被吞掉），
+    // 但 begin/end 模式正常工作。这里用零宽断言 (?=) 作 end，使节点匹配单个
+    // 引号字符后立即闭合，等价于「单字符 token」。
+    begin:
+        '[\u201c\u201d\u2018\u2019\u300c\u300d\u300e\u300f\u3010\u3011\u300a\u300b]',
+    end: r'(?=)',
+    scope: 'fullwidth-quote',
+  );
+
+  // 深克隆，断开与全局单例的所有共享引用（contains / refs / variants）。
+  // 同时强制 isCompiled=false：copyWith 会原样拷贝单例的 isCompiled，
+  // 若全局单例曾在任何路径下被提前编译，克隆会继承 isCompiled=true，
+  // 导致 re_highlight 编译时直接跳过、注入静默失效。这里彻底清零。
+  final visited = <Mode>{};
+  Mode deepClone(Mode m) {
+    if (!visited.add(m)) {
+      // 理论上 markdown 无环，但保险起见：已访问则直接浅拷贝返回，避免无限递归。
+      final shallow = m.copyWith();
+      shallow.isCompiled = false;
+      return shallow;
+    }
+    final c = m.copyWith();
+    c.isCompiled = false;
+    if (m.contains is List) {
+      c.contains = (m.contains as List)
+          .map((e) => e is Mode ? deepClone(e) : e)
+          .toList();
+    }
+    if (m.refs is Map) {
+      c.refs = (m.refs as Map)
+          .map((k, v) => MapEntry(k, v is Mode ? deepClone(v) : v));
+    }
+    if (m.variants is List) {
+      c.variants = (m.variants as List)
+          .map((e) => e is Mode ? deepClone(e) : e)
+          .toList();
+    }
+    return c;
+  }
+
+  final cloned = deepClone(langMarkdown);
+
+  // 把全角引号规则插入到「每一个」带 contains 的 mode 最前（最高优先级）。
+  //
+  // 关键点：markdown 的强调（*…* / **…**）、链接、标题等是「嵌套子模式」，
+  // 它们通过 `ref` 引用 refs 映射里真正的 mode 定义；当前 mode 的 contains 中
+  // 那些 `Mode(ref: '…')` 本身没有 contains，真正的规则在 cloned.refs[key] 中。
+  // 编译期 extractRef 会按 language.refs 解析 ref，所以必须同时把引号规则注入到
+  // refs 映射里的对应 mode。否则一旦文本进入未闭合的强调（例如命令里的 `*.jar`
+  // 被当成斜体开头），后续引号就掉进强调子模式、因子模式无引号规则而不显色。
+  final refsMap = (cloned.refs is Map) ? (cloned.refs as Map) : <String, dynamic>{};
+  final injected = <Mode>{};
+  void injectAll(Mode mode) {
+    if (!injected.add(mode)) return; // 防止环（emphasis 与 strong 互相引用）
+    if (mode.contains is List) {
+      final list = mode.contains as List;
+      // 插入前先拍快照，避免遍历到刚插入的引号模式自身
+      final snapshot = List<dynamic>.from(list);
+      // 每个父模式前插一个全新的引号模式副本，避免同一实例被多处共享、
+      // 编译期 isCompiled / 正则状态互相污染。
+      list.insert(0, quoteMode.copyWith()..isCompiled = false);
+      for (final c in snapshot) {
+        if (c is Mode) {
+          if (c.ref != null) {
+            final refMode = refsMap[c.ref];
+            if (refMode is Mode) injectAll(refMode);
+          } else {
+            injectAll(c);
+          }
+        }
+      }
+    }
+    // section（标题）等模式只有 variants 没有 contains，需单独处理其 variants，
+    // 否则标题内的全角引号也不会显色。emphasis/strong 的 variants 多为纯
+    // begin/end（无 contains），此处处理为 no-op，无副作用。
+    if (mode.variants is List) {
+      for (final v in List<dynamic>.from(mode.variants as List)) {
+        if (v is Mode) injectAll(v);
+      }
+    }
+  }
+
+  injectAll(cloned);
+  _markdownFwCache = cloned;
+  return cloned;
+}
 
 class NotebookDesktopPage extends StatefulWidget {
   const NotebookDesktopPage({super.key});
@@ -1503,6 +1613,13 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   // 标题确认按钮是否已点击（用于变灰效果）
   bool _isTitleConfirmClicked = false;
 
+
+
+
+
+
+
+
   @override
   void initState() {
     super.initState();
@@ -2069,70 +2186,84 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
         ): _joinSelectedLines,
       },
       child: CodeEditor(
-        controller: _contentController,
-        scrollController: _codeScrollController,
-        findController: _findController,
-        wordWrap: _autoWrap,
-        padding: const EdgeInsets.only(bottom: 300),
-        shortcutOverrideActions: <Type, Action<Intent>>{
-          CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
-            onInvoke: (intent) {
-              widget.saveNote(widget.note);
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
-              return null;
-            },
+          controller: _contentController,
+          scrollController: _codeScrollController,
+          findController: _findController,
+          wordWrap: _autoWrap,
+          padding: const EdgeInsets.only(bottom: 300),
+          shortcutOverrideActions: <Type, Action<Intent>>{
+            CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
+              onInvoke: (intent) {
+                widget.saveNote(widget.note);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
+                return null;
+              },
+            ),
+          },
+          style: CodeEditorStyle(
+            fontSize: 14,
+            fontHeight: 1.6,
+            fontFamily: 'monospace',
+            textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
+            backgroundColor: isDark
+                ? Color.fromARGB(255, 48, 48, 48)
+                : const Color(0xFFFFFFFF),
+            highlightColor: Colors.yellow.withValues(alpha: 0.5),
+            selectionColor: Colors.orange.withValues(alpha: 0.6),
+            codeTheme: CodeHighlightTheme(
+              languages: {
+                'markdown': CodeHighlightThemeMode(
+                  mode: markdownWithFullwidthQuote,
+                ),
+              },
+              theme: {
+                // 移除编辑器内所有斜体样式（斜体下空格/引号不易辨识）
+                for (final entry in (isDark ? atomOneDarkTheme : atomOneLightTheme).entries)
+                  entry.key: entry.value.copyWith(
+                    fontStyle: FontStyle.normal,
+                  ),
+                // blockquote (quote token) 颜色覆盖，提升对比度
+                'quote': TextStyle(
+                  color: isDark
+                      ? const Color(0xFF9ECBFF)
+                      : const Color(0xFF5C6370),
+                ),
+                // 全角引号：醒目颜色，与半角引号（默认字符串色）明显区分
+                'fullwidth-quote': TextStyle(
+                  color: isDark
+                      ? const Color(0xFFFF79C6)
+                      : const Color(0xFFD6336C),
+                  fontWeight: FontWeight.bold,
+                ),
+              },
+            ),
           ),
-        },
-        style: CodeEditorStyle(
-          fontSize: 14,
-          fontHeight: 1.6,
-          fontFamily: 'monospace',
-          textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
-          backgroundColor: isDark
-              ? Color.fromARGB(255, 48, 48, 48)
-              : const Color(0xFFFFFFFF),
-          highlightColor: Colors.yellow.withValues(alpha: 0.5),
-          selectionColor: Colors.orange.withValues(alpha: 0.6),
-          codeTheme: CodeHighlightTheme(
-            languages: {'markdown': CodeHighlightThemeMode(mode: langMarkdown)},
-            theme: {
-              ...(isDark ? atomOneDarkTheme : atomOneLightTheme),
-              // blockquote (quote token) 颜色覆盖，提升对比度
-              'quote': TextStyle(
-                color: isDark
-                    ? const Color(0xFF9ECBFF)
-                    : const Color(0xFF5C6370),
-                fontStyle: FontStyle.italic,
-              ),
-            },
-          ),
-        ),
-        findBuilder: (context, controller, readOnly) =>
-            _FindPanel(controller: controller),
-        indicatorBuilder:
-            (context, editingController, chunkController, notifier) {
-              return GestureDetector(
-                onSecondaryTapUp: (details) =>
-                    _showLineNumberMenu(details.globalPosition),
-                child: _showLineNumbers
-                    ? Container(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: DefaultCodeLineNumber(
-                          controller: editingController,
-                          notifier: notifier,
-                          textStyle: TextStyle(
-                            fontSize: 12,
-                            color: theme.textTheme.bodySmall?.color?.withValues(
-                              alpha: 0.5,
+          findBuilder: (context, controller, readOnly) =>
+              _FindPanel(controller: controller),
+          indicatorBuilder:
+              (context, editingController, chunkController, notifier) {
+                return GestureDetector(
+                  onSecondaryTapUp: (details) =>
+                      _showLineNumberMenu(details.globalPosition),
+                  child: _showLineNumbers
+                      ? Container(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: DefaultCodeLineNumber(
+                            controller: editingController,
+                            notifier: notifier,
+                            textStyle: TextStyle(
+                              fontSize: 12,
+                              color: theme.textTheme.bodySmall?.color?.withValues(
+                                alpha: 0.5,
+                              ),
                             ),
                           ),
-                        ),
-                      )
-                    : Container(width: 12, color: Colors.transparent),
-              );
-            },
+                        )
+                      : Container(width: 12, color: Colors.transparent),
+                );
+              },
       ),
     );
   }
