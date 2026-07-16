@@ -67,8 +67,9 @@ Mode get markdownWithFullwidthQuote {
           .toList();
     }
     if (m.refs is Map) {
-      c.refs = (m.refs as Map)
-          .map((k, v) => MapEntry(k, v is Mode ? deepClone(v) : v));
+      c.refs = (m.refs as Map).map(
+        (k, v) => MapEntry(k, v is Mode ? deepClone(v) : v),
+      );
     }
     if (m.variants is List) {
       c.variants = (m.variants as List)
@@ -88,7 +89,9 @@ Mode get markdownWithFullwidthQuote {
   // 编译期 extractRef 会按 language.refs 解析 ref，所以必须同时把引号规则注入到
   // refs 映射里的对应 mode。否则一旦文本进入未闭合的强调（例如命令里的 `*.jar`
   // 被当成斜体开头），后续引号就掉进强调子模式、因子模式无引号规则而不显色。
-  final refsMap = (cloned.refs is Map) ? (cloned.refs as Map) : <String, dynamic>{};
+  final refsMap = (cloned.refs is Map)
+      ? (cloned.refs as Map)
+      : <String, dynamic>{};
   final injected = <Mode>{};
   void injectAll(Mode mode) {
     if (!injected.add(mode)) return; // 防止环（emphasis 与 strong 互相引用）
@@ -816,7 +819,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                 IconButton(
                   icon: Icon(Icons.add, size: 20),
                   onPressed: _showCreateNoteDialog,
-                  tooltip: '创建笔记',
+                  tooltip: '创建笔记本',
                   padding: EdgeInsets.zero,
                   constraints: BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
@@ -919,7 +922,8 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   /// 构建单个本地文件项
   Widget _buildLocalFileItem(_LocalFileInfo fileInfo) {
     final theme = Theme.of(context);
-    final isSelected = _selectedNote?.id == fileInfo.filePath &&
+    final isSelected =
+        _selectedNote?.id == fileInfo.filePath &&
         _selectedNote?.notebookName == '__local_file__';
 
     return InkWell(
@@ -948,7 +952,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                   Text(
                     fileInfo.fileName,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -970,11 +976,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding: EdgeInsets.all(4),
-                child: Icon(
-                  Icons.close,
-                  size: 14,
-                  color: theme.disabledColor,
-                ),
+                child: Icon(Icons.close, size: 14, color: theme.disabledColor),
               ),
             ),
           ],
@@ -1219,26 +1221,28 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
         try {
           final content = await file.readAsString();
           setState(() {
-            _localFiles.add(_LocalFileInfo(
-              filePath: f.path!,
-              fileName: f.name,
-              content: content,
-              lastModified: DateTime.now(),
-            ));
+            _localFiles.add(
+              _LocalFileInfo(
+                filePath: f.path!,
+                fileName: f.name,
+                content: content,
+                lastModified: DateTime.now(),
+              ),
+            );
           });
         } catch (_) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('无法读取文件：${f.name}')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('无法读取文件：${f.name}')));
           }
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('打开文件失败：$e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('打开文件失败：$e')));
       }
     }
   }
@@ -1282,9 +1286,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('保存文件失败：$e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('保存文件失败：$e')));
       }
     }
   }
@@ -1334,7 +1338,8 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
 
   Widget _buildNoteDetail(Note note) {
     // 如果是本地文件，使用虚拟笔记本
-    final notebook = _selectedNotebook ??
+    final notebook =
+        _selectedNotebook ??
         Notebook(name: '本地文件', notes: [], color: Colors.orange);
 
     return _NoteDetailPanel(
@@ -1612,13 +1617,6 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   bool _isTitleModified = false;
   // 标题确认按钮是否已点击（用于变灰效果）
   bool _isTitleConfirmClicked = false;
-
-
-
-
-
-
-
 
   @override
   void initState() {
@@ -2186,84 +2184,83 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
         ): _joinSelectedLines,
       },
       child: CodeEditor(
-          controller: _contentController,
-          scrollController: _codeScrollController,
-          findController: _findController,
-          wordWrap: _autoWrap,
-          padding: const EdgeInsets.only(bottom: 300),
-          shortcutOverrideActions: <Type, Action<Intent>>{
-            CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
-              onInvoke: (intent) {
-                widget.saveNote(widget.note);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
-                return null;
-              },
-            ),
-          },
-          style: CodeEditorStyle(
-            fontSize: 14,
-            fontHeight: 1.6,
-            fontFamily: 'monospace',
-            textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
-            backgroundColor: isDark
-                ? Color.fromARGB(255, 48, 48, 48)
-                : const Color(0xFFFFFFFF),
-            highlightColor: Colors.yellow.withValues(alpha: 0.5),
-            selectionColor: Colors.orange.withValues(alpha: 0.6),
-            codeTheme: CodeHighlightTheme(
-              languages: {
-                'markdown': CodeHighlightThemeMode(
-                  mode: markdownWithFullwidthQuote,
-                ),
-              },
-              theme: {
-                // 移除编辑器内所有斜体样式（斜体下空格/引号不易辨识）
-                for (final entry in (isDark ? atomOneDarkTheme : atomOneLightTheme).entries)
-                  entry.key: entry.value.copyWith(
-                    fontStyle: FontStyle.normal,
-                  ),
-                // blockquote (quote token) 颜色覆盖，提升对比度
-                'quote': TextStyle(
-                  color: isDark
-                      ? const Color(0xFF9ECBFF)
-                      : const Color(0xFF5C6370),
-                ),
-                // 全角引号：醒目颜色，与半角引号（默认字符串色）明显区分
-                'fullwidth-quote': TextStyle(
-                  color: isDark
-                      ? const Color(0xFFFF79C6)
-                      : const Color(0xFFD6336C),
-                  fontWeight: FontWeight.bold,
-                ),
-              },
-            ),
+        controller: _contentController,
+        scrollController: _codeScrollController,
+        findController: _findController,
+        wordWrap: _autoWrap,
+        padding: const EdgeInsets.only(bottom: 300),
+        shortcutOverrideActions: <Type, Action<Intent>>{
+          CodeShortcutSaveIntent: CallbackAction<CodeShortcutSaveIntent>(
+            onInvoke: (intent) {
+              widget.saveNote(widget.note);
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('笔记已保存')));
+              return null;
+            },
           ),
-          findBuilder: (context, controller, readOnly) =>
-              _FindPanel(controller: controller),
-          indicatorBuilder:
-              (context, editingController, chunkController, notifier) {
-                return GestureDetector(
-                  onSecondaryTapUp: (details) =>
-                      _showLineNumberMenu(details.globalPosition),
-                  child: _showLineNumbers
-                      ? Container(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: DefaultCodeLineNumber(
-                            controller: editingController,
-                            notifier: notifier,
-                            textStyle: TextStyle(
-                              fontSize: 12,
-                              color: theme.textTheme.bodySmall?.color?.withValues(
-                                alpha: 0.5,
-                              ),
+        },
+        style: CodeEditorStyle(
+          fontSize: 14,
+          fontHeight: 1.6,
+          fontFamily: 'monospace',
+          textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),
+          backgroundColor: isDark
+              ? Color.fromARGB(255, 48, 48, 48)
+              : const Color(0xFFFFFFFF),
+          highlightColor: Colors.yellow.withValues(alpha: 0.5),
+          selectionColor: Colors.orange.withValues(alpha: 0.6),
+          codeTheme: CodeHighlightTheme(
+            languages: {
+              'markdown': CodeHighlightThemeMode(
+                mode: markdownWithFullwidthQuote,
+              ),
+            },
+            theme: {
+              // 移除编辑器内所有斜体样式（斜体下空格/引号不易辨识）
+              for (final entry
+                  in (isDark ? atomOneDarkTheme : atomOneLightTheme).entries)
+                entry.key: entry.value.copyWith(fontStyle: FontStyle.normal),
+              // blockquote (quote token) 颜色覆盖，提升对比度
+              'quote': TextStyle(
+                color: isDark
+                    ? const Color(0xFF9ECBFF)
+                    : const Color(0xFF5C6370),
+              ),
+              // 全角引号：醒目颜色，与半角引号（默认字符串色）明显区分
+              'fullwidth-quote': TextStyle(
+                color: isDark
+                    ? const Color(0xFFFF79C6)
+                    : const Color(0xFFD6336C),
+                fontWeight: FontWeight.bold,
+              ),
+            },
+          ),
+        ),
+        findBuilder: (context, controller, readOnly) =>
+            _FindPanel(controller: controller),
+        indicatorBuilder:
+            (context, editingController, chunkController, notifier) {
+              return GestureDetector(
+                onSecondaryTapUp: (details) =>
+                    _showLineNumberMenu(details.globalPosition),
+                child: _showLineNumbers
+                    ? Container(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: DefaultCodeLineNumber(
+                          controller: editingController,
+                          notifier: notifier,
+                          textStyle: TextStyle(
+                            fontSize: 12,
+                            color: theme.textTheme.bodySmall?.color?.withValues(
+                              alpha: 0.5,
                             ),
                           ),
-                        )
-                      : Container(width: 12, color: Colors.transparent),
-                );
-              },
+                        ),
+                      )
+                    : Container(width: 12, color: Colors.transparent),
+              );
+            },
       ),
     );
   }

@@ -60,6 +60,8 @@ dependencies:
   url_launcher: ^6.3.1
   qr_flutter: ^4.1.0
   mime: ^2.0.0
+  xml: ^6.5.0
+  fast_gbk: ^1.0.0
 
 dev_dependencies:
   flutter_test:

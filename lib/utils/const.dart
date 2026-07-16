@@ -18,6 +18,15 @@ class PrefKeys {
   static const String bookViewMode = 'bookViewMode'; // grid / list
   static const String bookGridSize = 'bookGridSize'; // small / medium / large
   static const String bookSortMode = 'bookSortMode'; // name / imported
+
+  // ===== RSS 阅读器相关常量 =====
+  static const String rssRefreshInterval =
+      'rssRefreshInterval'; // 定时刷新间隔（分钟）
+  static const String rssViewMode = 'rssViewMode'; // list / grid
+  static const String rssLastSelectedFeedId =
+      'rssLastSelectedFeedId'; // 上次选中的订阅源/分组 id
+  static const String rssShowRead = 'rssShowRead'; // 是否在列表显示已读
+  static const String rssStarredOnly = 'rssStarredOnly'; // 仅看收藏
 }
 
 class GitPlatforms {
@@ -80,4 +89,33 @@ class BookReaderConstants {
   /// 超过此宽度时，内容区域居中显示，不再随窗口变宽
   /// Kindle 风格：保持舒适的阅读宽度，避免长行影响阅读体验
   static const double maxReaderContentWidth = 800.0;
+}
+
+/// RSS 阅读器相关常量
+class RssConstants {
+  /// 工作目录下存放 RSS 数据的子目录
+  static const String rssDir = 'rss';
+
+  /// 订阅源与文章缓存文件名
+  static const String feedsFile = 'feeds.json';
+
+  /// OPML 导入导出目录
+  static const String opmlDir = 'opml';
+
+  /// 单源最多缓存文章数（控制 feeds.json 体积）
+  static const int maxArticlesPerFeed = 200;
+
+  /// 默认定时刷新间隔（分钟）
+  static const int defaultRefreshInterval = 30;
+
+  /// 可选的刷新间隔档位（分钟），用于设置页下拉选择
+  static const List<int> refreshIntervalOptions = [0, 15, 30, 60, 120, 360];
+
+  /// 全文搜索输入防抖时长（毫秒）
+  static const Duration searchDebounce = Duration(milliseconds: 300);
+
+  /// 特殊分组 id：全部、未读、收藏
+  static const String allFeedsId = '__all__';
+  static const String unreadFeedsId = '__unread__';
+  static const String starredFeedsId = '__starred__';
 }

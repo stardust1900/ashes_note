@@ -7,6 +7,7 @@ import 'package:ashes_note/views/note_desktop.dart';
 import 'package:ashes_note/views/settings_view.dart';
 import 'package:ashes_note/views/book_library_page.dart';
 import 'package:ashes_note/views/about_page.dart';
+import 'package:ashes_note/views/rss/rss_home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:sidebarx/sidebarx.dart';
 
@@ -97,7 +98,7 @@ class _AshesNoteAppState extends State<AshesNoteApp>
                       TextButton(
                         onPressed: () {
                           Navigator.of(context).pop();
-                          _controller.selectIndex(2);
+                          _controller.selectIndex(3);
                         },
                         child: Text('去设置'),
                       ),
@@ -180,17 +181,24 @@ class AshesNoteSidebarX extends StatelessWidget {
           },
         ),
         SidebarXItem(
+          icon: Icons.rss_feed,
+          label: 'RSS',
+          onTap: () {
+            _controller.selectIndex(2);
+          },
+        ),
+        SidebarXItem(
           icon: Icons.settings,
           label: '设置',
           onTap: () {
-            _controller.selectIndex(2);
+            _controller.selectIndex(3);
           },
         ),
         SidebarXItem(
           icon: Icons.info,
           label: '关于',
           onTap: () {
-            _controller.selectIndex(3);
+            _controller.selectIndex(4);
           },
         ),
       ],
@@ -225,6 +233,8 @@ class AshesNoteScreens extends StatelessWidget {
             child: const BookLibraryPage(),
           );
         } else if (controller.selectedIndex == 2) {
+          return const RssHomePage();
+        } else if (controller.selectedIndex == 3) {
           return Padding(
             padding: const EdgeInsets.all(16.0),
             child: SettingsView(
@@ -238,7 +248,7 @@ class AshesNoteScreens extends StatelessWidget {
               },
             ),
           );
-        } else if (controller.selectedIndex == 3) {
+        } else if (controller.selectedIndex == 4) {
           return const AboutPage();
         } else {
           return Padding(
