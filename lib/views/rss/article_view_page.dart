@@ -143,7 +143,10 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
   @override
   Widget build(BuildContext context) {
     final theme = ThemeManager.getCurrentTheme();
-    final isDark = ThemeManager.isDarkMode();
+    // 墨水屏虽被 isDarkMode 归为“深色”，但其背景为白色，文字应为黑色；
+    // 仅真正的暗黑模式才使用浅色文字。
+    final isInk = ThemeManager.isInkMode();
+    final isDark = ThemeManager.isDarkMode() && !isInk;
     final textColor = isDark ? Colors.white70 : Colors.black87;
     final subColor = isDark ? Colors.white54 : Colors.black54;
     final linkColor = theme.mainTheme.colorScheme.primary;
