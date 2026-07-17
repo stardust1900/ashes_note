@@ -1605,6 +1605,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   bool _isSyncingScroll = false;
   bool _showLineNumbers = true;
   bool _autoWrap = true;
+  double _editorFontSize = 14;
   Timer? _scrollSaveTimer;
 
   // 视图模式：edit(普通编辑), split(分栏预览), preview(预览)
@@ -1630,6 +1631,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     );
     _showLineNumbers = SPUtil.get<bool>(PrefKeys.showLineNumbers, true);
     _autoWrap = SPUtil.get<bool>(PrefKeys.autoWrap, true);
+    _editorFontSize = SPUtil.get<double>(PrefKeys.editorFontSize, 14);
     _findController = CodeFindController(_contentController);
     _codeScrollController = CodeScrollController(
       verticalScroller: ScrollController(),
@@ -1927,6 +1929,31 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                   },
                   tooltip: _autoWrap ? '自动换行' : '取消自动换行',
                 ),
+                // 编辑器字号调整
+                IconButton(
+                  icon: const Icon(Icons.text_decrease),
+                  onPressed: () => _changeEditorFontSize(-1),
+                  tooltip: '减小字号',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Text(
+                    _editorFontSize.toInt().toString(),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.text_increase),
+                  onPressed: () => _changeEditorFontSize(1),
+                  tooltip: '增大字号',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
                 // 普通编辑模式按钮
                 IconButton(
                   icon: Icon(
@@ -2173,6 +2200,15 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     controller.text = newText;
   }
 
+  void _changeEditorFontSize(double delta) {
+    final next = (_editorFontSize + delta).clamp(10.0, 32.0);
+    if (next == _editorFontSize) return;
+    setState(() {
+      _editorFontSize = next;
+    });
+    SPUtil.set(PrefKeys.editorFontSize, _editorFontSize);
+  }
+
   Widget _buildEditor(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
     return CallbackShortcuts(
@@ -2201,7 +2237,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
           ),
         },
         style: CodeEditorStyle(
-          fontSize: 14,
+          fontSize: _editorFontSize,
           fontHeight: 1.6,
           fontFamily: 'monospace',
           textColor: isDark ? const Color(0xFFE8E8E8) : const Color(0xFF1A1A1A),

@@ -5,6 +5,33 @@ import 'package:flutter_html/flutter_html.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+/// 解析 HTML 属性中的尺寸（支持 "50" / "50px" / "50%" 等写法）
+double? _parseDimension(String? value) {
+  if (value == null || value.isEmpty) return null;
+  final n = double.tryParse(value.replaceAll(RegExp(r'[^0-9.]'), ''));
+  return n;
+}
+
+/// 从 style 字符串中提取 width（如 "width: 50px"）
+double? _parseStyleWidth(String? style) {
+  if (style == null || style.isEmpty) return null;
+  final m = RegExp(r'width\s*:\s*([0-9.]+)\s*px', caseSensitive: false)
+      .firstMatch(style);
+  if (m != null) return double.tryParse(m.group(1)!);
+  return null;
+}
+
+/// 判断图片 style/属性是否表明它是 em 级的小图（如 emoji：height:1em）
+bool _isEmSizedImage(String? style) {
+  if (style == null || style.isEmpty) return false;
+  final m = RegExp(r'(?:width|height|max-height|max-width)\s*:\s*([0-9.]+)\s*em',
+          caseSensitive: false)
+      .firstMatch(style);
+  if (m == null) return false;
+  final n = double.tryParse(m.group(1)!);
+  return n != null && n <= 3;
+}
+
 /// 文章阅读页：用 flutter_html 渲染正文，支持标记已读/收藏、外链打开。
 /// 可内嵌于主从布局右侧（提供 [onBack]/[onPrev]/[onNext]），也可作为独立路由使用。
 class ArticleViewPage extends StatefulWidget {
@@ -289,6 +316,88 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
                           return const SizedBox.shrink();
                         }
                         final url = _resolveUrl(src.trim());
+
+                        final cls = (ec.attributes['class'] ?? '').toLowerCase();
+                        final alt = (ec.attributes['alt'] ?? '').toLowerCase();
+                        final style = ec.attributes['style'];
+                        final isAvatar = cls.contains('avatar') ||
+                            cls.contains('author') ||
+                            cls.contains('profile') ||
+                            cls.contains('head') ||
+                            alt.contains('头像') ||
+                            alt.contains('作者');
+                        // emoji / 表情小图：wp-smiley、emoji 类，或 em 级尺寸
+                        final isEmoji = cls.contains('smiley') ||
+                            cls.contains('emoji') ||
+                            _isEmSizedImage(style);
+                        final declaredW = _parseDimension(ec.attributes['width']) ??
+                            _parseStyleWidth(style);
+                        final isSmall = declaredW != null && declaredW <= 120;
+
+                        if (isEmoji) {
+                          // 表情/emoji：随文字大小的小图，与正文行内对齐
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 1),
+                            child: Image.network(
+                              url,
+                              width: 18,
+                              height: 18,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, _, _) =>
+                                  const SizedBox(width: 18, height: 18),
+                            ),
+                          );
+                        }
+
+                        if (isAvatar) {
+                          // 头像：固定小尺寸、圆形、左对齐，避免被拉伸成巨图
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isDark
+                                      ? Colors.white24
+                                      : Colors.black12,
+                                  width: 1,
+                                ),
+                              ),
+                              child: ClipOval(
+                                child: Image.network(
+                                  url,
+                                  width: 44,
+                                  height: 44,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, _, _) => const Icon(
+                                    Icons.person,
+                                    size: 28,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+
+                        if (isSmall) {
+                          // 其它小图（图标/表情等）：保持原尺寸，不撑满宽度
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Image.network(
+                              url,
+                              fit: BoxFit.scaleDown,
+                              errorBuilder: (context, _, _) => const Icon(
+                                Icons.broken_image_outlined,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          );
+                        }
+
+                        // 普通大图：撑满正文宽度，点击查看大图
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           child: GestureDetector(
