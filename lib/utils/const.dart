@@ -103,8 +103,10 @@ class RssConstants {
   /// OPML 导入导出目录
   static const String opmlDir = 'opml';
 
-  /// 单源最多缓存文章数（控制 feeds.json 体积）
-  static const int maxArticlesPerFeed = 200;
+  /// 单源最多缓存文章数（控制 feeds.json 体积）。
+  /// 该上限同时决定「全部」视图的计数上限：每源最多计入此数值，
+  /// 避免高产出源把缓存撑爆，也避免「全部」数量被错误地钉死在低位。
+  static const int maxArticlesPerFeed = 1000;
 
   /// 默认定时刷新间隔（分钟）
   static const int defaultRefreshInterval = 30;

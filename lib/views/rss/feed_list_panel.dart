@@ -33,7 +33,6 @@ class FeedListPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalArticles = feeds.fold(0, (s, f) => s + f.articles.length);
     final totalUnread = feeds.fold(0, (s, f) => s + f.unreadCount);
     final totalStarred = feeds.fold(0, (s, f) => s + f.starredCount);
 
@@ -63,14 +62,6 @@ class FeedListPanel extends StatelessWidget {
       label: '未读',
       id: RssConstants.unreadFeedsId,
       badge: totalUnread,
-    ));
-    children.add(_specialTile(
-      context,
-      icon: Icons.article_outlined,
-      label: '全部',
-      id: RssConstants.allFeedsId,
-      badge: totalArticles,
-      highlight: false,
     ));
     children.add(_specialTile(
       context,
