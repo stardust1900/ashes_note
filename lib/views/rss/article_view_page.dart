@@ -2,6 +2,8 @@ import 'package:ashes_note/ashes_theme.dart';
 import 'package:ashes_note/models/rss/rss_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as html_parser;
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -30,6 +32,80 @@ bool _isEmSizedImage(String? style) {
   if (m == null) return false;
   final n = double.tryParse(m.group(1)!);
   return n != null && n <= 3;
+}
+
+/// 判断浮动元素是否为“小图标前缀”（表情/头像/小图）：
+/// 宽度很小、或图片本身为 emoji/smiley、或 em 级尺寸。
+bool _isIconFloat(dom.Element el, dom.Element img) {
+  final w = _parseStyleWidth(el.attributes['style']) ??
+      _parseDimension(el.attributes['width']);
+  if (w != null && w <= 48) return true;
+  final cls = (img.attributes['class'] ?? '').toLowerCase();
+  if (cls.contains('smiley') || cls.contains('emoji')) return true;
+  return _isEmSizedImage(img.attributes['style']);
+}
+
+/// 从 style 中移除 float 声明。
+String _stripFloat(String style) {
+  return style
+      .replaceAll(RegExp(r'\s*float\s*:\s*(left|right)\s*;?',
+          caseSensitive: false), '')
+      .trim();
+}
+
+/// 递归移除某子树 style 中的百分比 width（如 width: 88%），避免 flutter_html
+/// 对百分比宽度解析异常导致文字被挤成一字一行。保留 px 宽度与图片尺寸。
+void _stripPctWidthRecursive(dom.Element el) {
+  final s = el.attributes['style'];
+  if (s != null) {
+    el.attributes['style'] = s
+        .replaceAll(RegExp(r'\s*width\s*:\s*[0-9.]+\s*%\s*;?',
+            caseSensitive: false), '')
+        .trim();
+  }
+  for (final child in el.children) {
+    _stripPctWidthRecursive(child);
+  }
+}
+
+/// 清洗 flutter_html 不支持的 float / 百分比宽度，修复 ifanr 等源“图标独占一行、
+/// 文字被挤成一字一行”的错乱；并把仅含单图的浮动前缀块提升为行内图标，使其与后续
+/// 文字进入正常流式排版。解析异常时原样返回，避免正文消失。
+String _sanitizeRssHtml(String rawHtml) {
+  if (rawHtml.trim().isEmpty) return rawHtml;
+  try {
+    final doc = html_parser.parse(rawHtml);
+
+    final floatEls = doc.querySelectorAll('*').where((el) {
+      final s = el.attributes['style'] ?? '';
+      return RegExp(r'float\s*:\s*(left|right)', caseSensitive: false)
+          .hasMatch(s);
+    }).toList();
+
+    for (final el in floatEls) {
+      // 移除 float 声明，避免 flutter_html 无法处理导致的错乱
+      el.attributes['style'] = _stripFloat(el.attributes['style'] ?? '');
+
+      // 仅含单图的浮动小图标：提升为后续文字块的行内前置，与文字同行显示
+      final img = el.querySelector('img');
+      final parent = el.parent;
+      if (img != null && parent != null && _isIconFloat(el, img)) {
+        final next = el.nextElementSibling;
+        if (next != null) {
+          final target = next.querySelector('p, span, a, div') ?? next;
+          target.insertBefore(img, target.firstChild);
+          _stripPctWidthRecursive(next);
+        } else {
+          parent.insertBefore(img, el);
+        }
+        el.remove();
+      }
+    }
+
+    return doc.body?.innerHtml ?? rawHtml;
+  } catch (_) {
+    return rawHtml;
+  }
 }
 
 /// 文章阅读页：用 flutter_html 渲染正文，支持标记已读/收藏、外链打开。
@@ -258,8 +334,9 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
                 ],
               ),
               const Divider(height: 24),
-              Html(
-                  data: html,
+              SelectionArea(
+                child: Html(
+                  data: _sanitizeRssHtml(html),
                   style: {
                     'body': Style(
                       color: textColor,
@@ -430,6 +507,7 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
                     ),
                   ],
                 ),
+              ),
             ],
           ),
         ),
