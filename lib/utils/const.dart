@@ -28,6 +28,15 @@ class PrefKeys {
       'rssLastSelectedFeedId'; // 上次选中的订阅源/分组 id
   static const String rssShowRead = 'rssShowRead'; // 是否在列表显示已读
   static const String rssStarredOnly = 'rssStarredOnly'; // 仅看收藏
+
+  // ===== 双向链接与标签相关 =====
+  static const String noteSidebarTab = 'noteSidebarTab'; // notes / tags
+  static const String noteTagFilter = 'noteTagFilter'; // 逗号分隔的标签名
+  static const String noteTagFilterMatchAll =
+      'noteTagFilterMatchAll'; // true=全部满足
+  static const String noteTagSortMode = 'noteTagSortMode'; // count / name
+  static const String graphColorMode = 'graphColorMode'; // notebook / tag
+  static const String graphShowIsolated = 'graphShowIsolated'; // 是否显示孤立节点
 }
 
 class GitPlatforms {
@@ -121,4 +130,52 @@ class RssConstants {
   static const String allFeedsId = '__all__';
   static const String unreadFeedsId = '__unread__';
   static const String starredFeedsId = '__starred__';
+}
+
+/// 双向链接与标签索引相关常量。
+class NoteIndexConstants {
+  /// 工作目录 notes 下存放索引的隐藏目录。
+  ///
+  /// 以 `.` 开头是刻意为之：`FileUtil.listFiles(type:'directory')` 的
+  /// io / web 两个实现都会过滤 `.` 开头的目录，因此不会被当成笔记本展示。
+  static const String indexDir = '.ashes';
+
+  /// 标签索引文件名。
+  static const String tagsFile = 'tags.json';
+
+  /// 标签索引损坏时的备份文件名。
+  static const String tagsBackupFile = 'tags.json.bak';
+
+  /// 索引文件中相对 notes 目录的路径，用于 Git 同步白名单。
+  static const String tagsRelativePath = '$indexDir/$tagsFile';
+
+  /// 标签索引 schema 版本。
+  static const int schemaVersion = 1;
+
+  /// 预览中笔记跳转链接使用的自定义 scheme。
+  static const String linkScheme = 'ashesnote';
+
+  /// 本地文件（非笔记本内笔记）使用的伪笔记本名，与既有实现保持一致。
+  static const String localFileNotebook = '__local_file__';
+
+  /// 自动补全最多展示的候选数。
+  static const int maxAutocompleteItems = 20;
+
+  /// 自动补全输入防抖。
+  static const Duration autocompleteDebounce = Duration(milliseconds: 80);
+
+  /// 标签索引写盘防抖。
+  static const Duration tagsSaveDebounce = Duration(milliseconds: 500);
+
+  /// 反链摘要中链接前后各截取的字符数。
+  static const int snippetRadius = 60;
+
+  /// 图谱全量布局的节点数上限，超过则自动切换为邻域模式。
+  static const int graphMaxNodes = 300;
+
+  /// 力导向布局最大迭代次数。
+  static const int graphMaxIterations = 300;
+
+  /// 邻域模式的默认深度。
+  static const int graphNeighborhoodDepth = 2;
 }

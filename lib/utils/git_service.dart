@@ -1,7 +1,9 @@
 import 'dart:async' show Completer;
 import 'dart:convert';
 import 'dart:io';
-import 'package:ashes_note/utils/const.dart' show GitPlatforms;
+import 'package:ashes_note/utils/const.dart'
+    show GitPlatforms, NoteIndexConstants;
+import 'package:ashes_note/logging.dart';
 import 'package:crypto/crypto.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:http/http.dart' as http;
@@ -343,6 +345,12 @@ class GiteeService extends GitService {
     final Map<String, List<int>> localFiles = {};
     await _collectLocalFilesRecursively(workingDir, '', localFiles);
 
+    // _collectLocalFilesRecursively 依赖 listFiles(type:'directory')，
+    // 而该方法在 io / web 实现中都会过滤 "." 开头的隐藏目录，
+    // 因此 .ashes/ 下的索引文件不会被自动收集。这里显式补录白名单，
+    // 否则标签索引既无法推送，还会在 deleteRemoteMissing 时被误删。
+    await _collectWhitelistedFiles(workingDir, localFiles);
+
     // localFiles.forEach((key, value) {
     //   print('local file: $key, size: ${value.length}');
     // });
@@ -408,6 +416,33 @@ class GiteeService extends GitService {
             );
           }
         }
+      }
+    }
+  }
+
+  /// 显式收集位于隐藏目录中、但需要参与同步的索引文件。
+  ///
+  /// 这些文件不会被 [_collectLocalFilesRecursively] 扫描到（隐藏目录被过滤），
+  /// 读取失败时静默跳过，不影响正常笔记同步。
+  Future<void> _collectWhitelistedFiles(
+    String workingDir,
+    Map<String, List<int>> out,
+  ) async {
+    const whitelist = <String>[NoteIndexConstants.tagsRelativePath];
+
+    for (final relativePath in whitelist) {
+      final slash = relativePath.lastIndexOf('/');
+      if (slash <= 0) continue;
+      final dir = relativePath.substring(0, slash);
+      final filename = relativePath.substring(slash + 1);
+
+      try {
+        final content = await FileUtil().readFile(workingDir, dir, filename);
+        if (content.isEmpty) continue;
+        out[relativePath] = utf8.encode(content);
+      } catch (e) {
+        // 首次使用时索引文件尚不存在，属于正常情况。
+        appLog.fine('跳过未生成的索引文件 $relativePath: $e');
       }
     }
   }

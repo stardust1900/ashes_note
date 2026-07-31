@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:ashes_note/logging.dart';
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
@@ -9,6 +10,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
+import 'package:ashes_note/models/notes/note_index_models.dart';
+import 'package:ashes_note/services/notes/notes_index_service.dart';
+import 'package:ashes_note/services/notes/wiki_link_parser.dart' as wiki;
+import 'package:ashes_note/views/notes/backlinks_panel.dart';
+import 'package:ashes_note/views/notes/note_graph_view.dart';
+import 'package:ashes_note/views/notes/tag_editor_bar.dart';
+import 'package:ashes_note/views/notes/tag_filter_panel.dart';
+import 'package:ashes_note/views/notes/wiki_link_autocomplete.dart';
+import 'package:ashes_note/views/notes/wiki_markdown_view.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
 import 'package:re_editor/re_editor.dart';
 import 'package:re_highlight/languages/markdown.dart';
@@ -169,12 +179,34 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   // 打开的本地文件列表
   final List<_LocalFileInfo> _localFiles = [];
 
+  // 左侧栏页签：'notes' 笔记树 / 'tags' 标签面板
+  String _sidebarTab = 'notes';
+
+  // 标签筛选条件
+  Set<String> _selectedTags = <String>{};
+  bool _tagMatchAll = false;
+
+  /// 笔记索引（双向链接 + 标签），全局单例。
+  final NotesIndexService _index = NotesIndexService();
+
+  /// notes 目录路径，标签索引文件存于其下的 .ashes/。
+  String get _notesRoot => '$workingDirectory/notes';
+
   @override
   void initState() {
     super.initState();
     workingDirectory = SPUtil.get<String>(PrefKeys.workingDirectory, '');
     String gitPlatform = SPUtil.get<String>(PrefKeys.gitPlatform, '');
     _noteSortMode = SPUtil.get<String>(PrefKeys.noteSortMode, 'name');
+
+    // 恢复左侧栏页签与标签筛选条件
+    _sidebarTab = SPUtil.get<String>(PrefKeys.noteSidebarTab, 'notes');
+    _tagMatchAll = SPUtil.get<bool>(PrefKeys.noteTagFilterMatchAll, false);
+    final savedTags = SPUtil.get<String>(PrefKeys.noteTagFilter, '');
+    if (savedTags.isNotEmpty) {
+      _selectedTags = savedTags.split(',').where((e) => e.isNotEmpty).toSet();
+    }
+    _index.addListener(_onIndexChanged);
 
     final notesDir = Directory('$workingDirectory/notes');
 
@@ -235,7 +267,15 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     _noteTitleController.dispose();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
+    _index.removeListener(_onIndexChanged);
+    // 退出前把标签索引落盘，避免防抖窗口内的改动丢失。
+    _index.flushTags();
     super.dispose();
+  }
+
+  /// 索引变更后刷新界面（标签计数、反链数量等）。
+  void _onIndexChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onSearchChanged() {
@@ -254,14 +294,39 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
   void _performSearch(String query) {
     _searchResults.clear();
 
+    // 解析 tag: 语法，例如 "tag:读书 卡片" = 有「读书」标签且含「卡片」关键字。
+    final parsed = wiki.parseSearchQuery(query);
+    final keyword = parsed.keyword.toLowerCase();
+
+    // 有标签条件时先用倒排表取出候选集合，避免遍历全部笔记。
+    Set<String>? tagMatchedIds;
+    if (parsed.tags.isNotEmpty) {
+      tagMatchedIds = _index.notesOfTags(parsed.tags, matchAll: true);
+      if (tagMatchedIds.isEmpty) return;
+    }
+
     for (final notebook in _notebooks) {
       for (final note in notebook.notes) {
-        final titleMatch = note.title.toLowerCase().contains(
-          query.toLowerCase(),
-        );
-        final contentMatch = note.content.toLowerCase().contains(
-          query.toLowerCase(),
-        );
+        if (tagMatchedIds != null && !tagMatchedIds.contains(note.id)) {
+          continue;
+        }
+
+        // 仅有标签条件时，命中标签即算命中。
+        if (keyword.isEmpty) {
+          if (tagMatchedIds != null) {
+            _searchResults.add(
+              GlobalSearchResult(
+                note: note,
+                notebookName: notebook.name,
+                matchType: '标签',
+              ),
+            );
+          }
+          continue;
+        }
+
+        final titleMatch = note.title.toLowerCase().contains(keyword);
+        final contentMatch = note.content.toLowerCase().contains(keyword);
 
         if (titleMatch || contentMatch) {
           _searchResults.add(
@@ -388,6 +453,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
         }
       }
     });
+
+    // 笔记全部载入内存后重建索引：链接图直接复用已读到的正文，无需二次 I/O。
+    await _index.rebuild(_notebooks, notesRootPath: _notesRoot);
   }
 
   void _deleteNotebook(String notebookName) {
@@ -452,6 +520,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                     );
                   });
 
+              // 同步清理该笔记本下所有笔记的链接与标签记录。
+              _index.onNotebookDeleted(notebookName);
+
               Navigator.pop(context);
               ScaffoldMessenger.of(
                 context,
@@ -479,6 +550,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     final path = noteId.substring(0, noteId.lastIndexOf('/'));
     final filename = noteId.substring(noteId.lastIndexOf('/') + 1);
     FileUtil().deleteFile('$workingDirectory/notes', path, filename);
+
+    // 摘除链接图中的出/入链，并清理该笔记的标签记录。
+    _index.onNoteDeleted(noteId);
 
     if (git != null && remoteUrl != null) {
       final (owner, repo) = git!.getOwnerRepoFromUrl(remoteUrl!);
@@ -597,6 +671,13 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
           _persistUnsyncedIds();
         }
       });
+
+      // 迁移标签、重算受影响的反链（指向旧标题的链接会变为未解析）。
+      _index.onNoteRenamed(
+        oldNoteId,
+        updatedNote,
+        notebookName: _selectedNotebook!.name,
+      );
     } else {
       setState(() {
         final index = _selectedNotebook!.notes.indexWhere(
@@ -614,6 +695,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
           _persistUnsyncedIds();
         }
       });
+
+      // 增量重算本篇出链，反链表随之差分更新。
+      _index.onNoteSaved(updatedNote, notebookName: _selectedNotebook!.name);
     }
   }
 
@@ -650,10 +734,13 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
               child: Column(
                 children: [
                   _buildSidebarHeader(),
+                  _buildSidebarTabs(),
                   Expanded(
                     child: _showSearchResults
                         ? _buildSearchResults()
-                        : _buildNoteTree(),
+                        : (_sidebarTab == 'tags'
+                              ? _buildTagPanel()
+                              : _buildNoteTree()),
                   ),
                 ],
               ),
@@ -692,6 +779,287 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 左侧栏「笔记 / 标签」页签。
+  Widget _buildSidebarTabs() {
+    final theme = Theme.of(context);
+    final tagCount = _index.allTagsWithCount().length;
+
+    Widget tab(String key, IconData icon, String label, {int? badge}) {
+      final active = _sidebarTab == key;
+      return Expanded(
+        child: InkWell(
+          onTap: () {
+            setState(() => _sidebarTab = key);
+            SPUtil.set<String>(PrefKeys.noteSidebarTab, key);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  width: 2,
+                  color: active ? theme.primaryColor : Colors.transparent,
+                ),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 13,
+                  color: active ? theme.primaryColor : theme.hintColor,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 15,
+                    color: active ? theme.primaryColor : theme.hintColor,
+                    fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+                if (badge != null && badge > 0) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    '$badge',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
+      ),
+      child: Row(
+        children: [
+          tab('notes', Icons.folder_outlined, '笔记'),
+          tab('tags', Icons.local_offer_outlined, '标签', badge: tagCount),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTagPanel() {
+    return TagFilterPanel(
+      selectedTags: _selectedTags,
+      matchAll: _tagMatchAll,
+      onSelectionChanged: (tags) {
+        setState(() => _selectedTags = tags);
+        SPUtil.set<String>(PrefKeys.noteTagFilter, tags.join(','));
+      },
+      onMatchModeChanged: (matchAll) {
+        setState(() => _tagMatchAll = matchAll);
+        SPUtil.set<bool>(PrefKeys.noteTagFilterMatchAll, matchAll);
+      },
+    );
+  }
+
+  /// 按当前标签筛选条件过滤笔记列表。
+  List<Note> _applyTagFilter(List<Note> notes) {
+    if (_selectedTags.isEmpty) return notes;
+    final allowed = _index.notesOfTags(_selectedTags, matchAll: _tagMatchAll);
+    return notes.where((n) => allowed.contains(n.id)).toList();
+  }
+
+  /// 统一的笔记跳转入口：处理跨笔记本切换与不存在时的创建。
+  ///
+  /// 所有来自预览链接、反链面板、图谱的跳转都必须走这里，
+  /// 以避免各处重复处理空值与笔记本切换逻辑。
+  void _openNoteByRef(NoteRef ref) {
+    for (final notebook in _notebooks) {
+      for (final note in notebook.notes) {
+        if (note.id != ref.id) continue;
+
+        setState(() {
+          _selectedNotebook = notebook;
+          _selectedNote = note;
+          _expandedNotebooks.add(notebook.name);
+          // 跳转后关闭搜索结果，让左侧树定位到目标笔记。
+          _showSearchResults = false;
+          _searchController.clear();
+        });
+        SPUtil.set<String>(PrefKeys.selectedNotebook, notebook.name);
+        SPUtil.set<String>(PrefKeys.selectedNote, note.id);
+        return;
+      }
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('未找到笔记：${ref.displayTitle}')));
+  }
+
+  /// 处理预览中点击 `[[...]]` 的跳转意图。
+  Future<void> _handleOpenIntent(wiki.OpenNoteIntent intent) async {
+    if (intent.ambiguous) {
+      await _pickAmbiguousTarget(intent.rawTarget);
+      return;
+    }
+
+    final noteId = intent.noteId;
+    if (intent.exists && noteId != null) {
+      _openNoteByRef(NoteRef.fromId(noteId));
+      return;
+    }
+
+    await _confirmCreateLinkedNote(intent.rawTarget);
+  }
+
+  /// 同名笔记消歧：弹出候选让用户选择。
+  Future<void> _pickAmbiguousTarget(String rawTarget) async {
+    final resolution = _index.resolve(
+      rawTarget,
+      currentNotebook: _selectedNotebook?.name,
+    );
+    if (resolution is! LinkAmbiguous) {
+      if (resolution is LinkResolved) _openNoteByRef(resolution.target);
+      return;
+    }
+
+    final picked = await showDialog<NoteRef>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('「$rawTarget」有多篇同名笔记'),
+        children: resolution.candidates
+            .map(
+              (c) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, c),
+                child: ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.description_outlined, size: 18),
+                  title: Text(c.displayTitle),
+                  subtitle: Text(c.notebookName),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+
+    if (picked != null) _openNoteByRef(picked);
+  }
+
+  /// 链接目标不存在时，确认后创建空笔记并跳转。
+  Future<void> _confirmCreateLinkedNote(String rawTarget) async {
+    final resolution = _index.resolve(
+      rawTarget,
+      currentNotebook: _selectedNotebook?.name,
+    );
+    final missing = resolution is LinkMissing
+        ? resolution
+        : LinkMissing(rawTarget, _selectedNotebook?.name);
+
+    final targetNotebook =
+        missing.suggestedNotebook ??
+        _selectedNotebook?.name ??
+        (_notebooks.isNotEmpty ? _notebooks.first.name : null);
+
+    if (targetNotebook == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请先创建一个笔记本')));
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('创建笔记'),
+        content: Text(
+          '笔记「${missing.suggestedTitle}」不存在，是否在「$targetNotebook」中创建？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('创建'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    await _createNoteAt(targetNotebook, missing.suggestedTitle);
+  }
+
+  /// 在指定笔记本下创建一篇空笔记，并选中它。
+  Future<void> _createNoteAt(String notebookName, String rawTitle) async {
+    final fileName = ensureMdSuffix(rawTitle);
+    final noteId = '$notebookName/$fileName';
+
+    final notebook = _notebooks.cast<Notebook?>().firstWhere(
+      (n) => n?.name == notebookName,
+      orElse: () => null,
+    );
+    if (notebook == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('笔记本「$notebookName」不存在')));
+      return;
+    }
+
+    if (notebook.notes.any((n) => n.id == noteId)) {
+      _openNoteByRef(NoteRef.fromId(noteId));
+      return;
+    }
+
+    final newNote = Note(
+      id: noteId,
+      title: fileName,
+      content: '',
+      lastModified: DateTime.now(),
+      notebookName: notebookName,
+    );
+
+    await FileUtil().saveFile(
+      '$workingDirectory/notes',
+      notebookName,
+      fileName,
+      utf8.encode(''),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      notebook.notes.add(newNote);
+      _selectedNotebook = notebook;
+      _selectedNote = newNote;
+      _expandedNotebooks.add(notebookName);
+      if (git != null && remoteUrl != null) {
+        _unsyncedNoteIds.add(noteId);
+        _persistUnsyncedIds();
+      }
+    });
+
+    // 新笔记可能让此前指向它的「未解析链接」立即生效。
+    _index.onNoteSaved(newNote, notebookName: notebookName);
+    SPUtil.set<String>(PrefKeys.selectedNote, noteId);
+  }
+
+  void _showGraph() {
+    NoteGraphView.show(
+      context,
+      focusNoteId: _selectedNote?.id,
+      onOpenNote: (ref) {
+        Navigator.of(context).maybePop();
+        _openNoteByRef(ref);
+      },
     );
   }
 
@@ -827,6 +1195,13 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
                 icon: Icon(Icons.folder_open, size: 20),
                 onPressed: _openLocalFile,
                 tooltip: '打开本地文件',
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+              IconButton(
+                icon: Icon(Icons.hub_outlined, size: 20),
+                onPressed: _showGraph,
+                tooltip: '关系图谱',
                 padding: EdgeInsets.zero,
                 constraints: BoxConstraints(minWidth: 32, minHeight: 32),
               ),
@@ -1080,14 +1455,17 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ..._sortNotes(notebook.notes).map((note) {
+                  ..._applyTagFilter(_sortNotes(notebook.notes)).map((note) {
                     final noteIsSelected = _selectedNote?.id == note.id;
                     final isUnsynced = _unsyncedNoteIds.contains(note.id);
                     return InkWell(
                       onTap: () {
-                        _detailPanelKey.currentState?._saveScrollPosition(
-                          _selectedNote!.id,
-                        );
+                        final current = _selectedNote;
+                        if (current != null) {
+                          _detailPanelKey.currentState?._saveScrollPosition(
+                            current.id,
+                          );
+                        }
                         setState(() {
                           _selectedNote = note;
                           SPUtil.set(PrefKeys.selectedNote, note.id);
@@ -1353,6 +1731,9 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       onTitleChanged: (newTitle) {
         noteChanged(note, newTitle: newTitle);
       },
+      onOpenIntent: _handleOpenIntent,
+      onOpenNote: _openNoteByRef,
+      onCreateNote: _confirmCreateLinkedNote,
     );
   }
 
@@ -1509,7 +1890,7 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
     );
   }
 
-  void _performSync() {
+  Future<void> _performSync() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     if (git == null || remoteUrl == null) {
       scaffoldMessenger.showSnackBar(SnackBar(content: Text('Git 服务未配置，无法同步')));
@@ -1522,50 +1903,43 @@ class _NotebookDesktopPageState extends State<NotebookDesktopPage> {
       _isSyncing = true;
     });
 
-    git!
-        .pull(
-          owner,
-          repo,
-          '$workingDirectory/notes',
-          unsyncedIds: _unsyncedNoteIds,
-        )
-        .then((_) {
-          SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
-          git!
-              .push(
-                owner,
-                repo,
-                '$workingDirectory/notes',
-                deleteRemoteMissing: true,
-              )
-              .then((_) {
-                setState(() {
-                  _isSyncing = false;
-                  _unsyncedNoteIds.clear();
-                  _persistUnsyncedIds();
-                });
-                scaffoldMessenger.showSnackBar(
-                  const SnackBar(content: Text('仓库同步完成')),
-                );
-                _loadNotebookList();
-              })
-              .catchError((error) {
-                setState(() {
-                  _isSyncing = false;
-                });
-                scaffoldMessenger.showSnackBar(
-                  SnackBar(content: Text('仓库同步push失败: $error')),
-                );
-              });
-        })
-        .catchError((error) {
-          setState(() {
-            _isSyncing = false;
-          });
-          scaffoldMessenger.showSnackBar(
-            SnackBar(content: Text('仓库同步pull失败: $error')),
-          );
-        });
+    // 同步前对标签索引做内存快照，pull 覆盖本地文件后按条目 LWW 合并
+    await _index.beforeGitSync();
+
+    try {
+      await git!.pull(
+        owner,
+        repo,
+        '$workingDirectory/notes',
+        unsyncedIds: _unsyncedNoteIds,
+      );
+      SPUtil.set(PrefKeys.lastPullTime, DateTime.now().toIso8601String());
+      // 合并远端标签索引，须在 push 之前完成，避免把旧数据推回远端
+      await _index.afterGitSync();
+
+      await git!.push(
+        owner,
+        repo,
+        '$workingDirectory/notes',
+        deleteRemoteMissing: true,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _isSyncing = false;
+        _unsyncedNoteIds.clear();
+        _persistUnsyncedIds();
+      });
+      scaffoldMessenger.showSnackBar(const SnackBar(content: Text('仓库同步完成')));
+      _loadNotebookList();
+    } catch (error) {
+      appLog.warning('笔记仓库同步失败: $error');
+      if (!mounted) return;
+      setState(() {
+        _isSyncing = false;
+      });
+      scaffoldMessenger.showSnackBar(SnackBar(content: Text('仓库同步失败: $error')));
+    }
   }
 }
 
@@ -1579,6 +1953,15 @@ class _NoteDetailPanel extends StatefulWidget {
   final Function(String) onTitleChanged;
   final String searchQuery;
 
+  /// 预览中点击 `[[...]]` 时的跳转意图回调。
+  final void Function(wiki.OpenNoteIntent intent)? onOpenIntent;
+
+  /// 反链/出链条目点击后的跳转回调。
+  final void Function(NoteRef ref)? onOpenNote;
+
+  /// 未解析链接点击后的「创建笔记」回调。
+  final void Function(String rawTarget)? onCreateNote;
+
   const _NoteDetailPanel({
     super.key,
     required this.note,
@@ -1588,6 +1971,9 @@ class _NoteDetailPanel extends StatefulWidget {
     required this.onDeleteNote,
     required this.onTitleChanged,
     this.searchQuery = '',
+    this.onOpenIntent,
+    this.onOpenNote,
+    this.onCreateNote,
   });
 
   @override
@@ -1619,9 +2005,19 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   // 标题确认按钮是否已点击（用于变灰效果）
   bool _isTitleConfirmClicked = false;
 
+  // 双链自动补全控制器（仅 re_editor 编辑区使用）
+  late WikiAutocompleteController _autocomplete;
+  // 反向链接面板是否展开
+  bool _showBacklinks = false;
+
   @override
   void initState() {
     super.initState();
+    _autocomplete = WikiAutocompleteController(
+      currentNotebook: widget.notebook.name,
+    );
+    // 快捷键绑定在 build 期读取 isActive，状态变化时必须重建
+    _autocomplete.addListener(_onAutocompleteChanged);
     _titleController = TextEditingController(
       text: widget.note.title.replaceAll('.md', ''),
     );
@@ -1653,10 +2049,27 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
       _contentController.text = widget.note.content;
       _viewMode = 'edit';
       _isTitleModified = false;
+      // 切换笔记时重置新增子状态，避免串页
+      _isTitleConfirmClicked = false;
+      _showBacklinks = false;
+      _autocomplete.dismiss();
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _tryRestoreScrollPosition(widget.note.id, 0),
       );
     }
+    // currentNotebook 是 final，跨笔记本时需重建控制器以保证「本本优先」正确
+    if (oldWidget.notebook.name != widget.notebook.name) {
+      _autocomplete.removeListener(_onAutocompleteChanged);
+      _autocomplete.dispose();
+      _autocomplete = WikiAutocompleteController(
+        currentNotebook: widget.notebook.name,
+      )..addListener(_onAutocompleteChanged);
+    }
+  }
+
+  /// 补全状态变化需触发重建：快捷键绑定在 build 期读取 `isActive`。
+  void _onAutocompleteChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -1675,6 +2088,8 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
     _codeScrollController.verticalScroller.dispose();
     _codeScrollController.dispose();
     _previewScrollController.dispose();
+    _autocomplete.removeListener(_onAutocompleteChanged);
+    _autocomplete.dispose();
     super.dispose();
   }
 
@@ -1759,6 +2174,7 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
 
   void _onContentChanged() {
     final newContent = _contentController.text;
+    _updateAutocomplete(newContent);
     if (newContent != widget.note.content) {
       widget.note.content = newContent;
       widget.note.lastModified = DateTime.now();
@@ -1774,6 +2190,65 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
         _saveContentToFile();
       });
     }
+  }
+
+  /// 把补全上下文限制在当前行内计算。
+  ///
+  /// `re_editor` 的选区是「行索引 + 行内偏移」模型，没有全文线性偏移；
+  /// 而 `[[...]]` 补全语法本身不跨行，因此按当前行做局部匹配既准确又廉价。
+  void _updateAutocomplete(String fullText) {
+    final sel = _contentController.selection;
+    // 存在选区（非折叠）或跨行时不触发补全
+    if (sel.baseIndex != sel.extentIndex ||
+        sel.baseOffset != sel.extentOffset) {
+      _autocomplete.dismiss();
+      return;
+    }
+    final line = _currentLineText(sel.extentIndex);
+    if (line == null) {
+      _autocomplete.dismiss();
+      return;
+    }
+    final caret = sel.extentOffset.clamp(0, line.length);
+    _autocomplete.onTextChanged(line, caret);
+  }
+
+  /// 取指定行的文本；越界返回 null。
+  String? _currentLineText(int index) {
+    final lines = _contentController.codeLines;
+    if (index < 0 || index >= lines.length) return null;
+    return lines[index].text;
+  }
+
+  /// 应用补全：用新行文本整体替换当前行，并把光标移到 `]]` 之后。
+  void _acceptAutocomplete(NoteRef ref) {
+    final sel = _contentController.selection;
+    final lineIndex = sel.extentIndex;
+    final line = _currentLineText(lineIndex);
+    if (line == null) {
+      _autocomplete.dismiss();
+      return;
+    }
+
+    final result = _autocomplete.buildResult(line, ref: ref);
+    if (result == null) {
+      _autocomplete.dismiss();
+      return;
+    }
+
+    // 选中整行后替换，避免手工拼接全文导致偏移错乱
+    _contentController.selection = CodeLineSelection(
+      baseIndex: lineIndex,
+      baseOffset: 0,
+      extentIndex: lineIndex,
+      extentOffset: line.length,
+    );
+    _contentController.replaceSelection(result.newText);
+    _contentController.selection = CodeLineSelection.collapsed(
+      index: lineIndex,
+      offset: result.newCaret.clamp(0, result.newText.length),
+    );
+    _autocomplete.dismiss();
   }
 
   void _onTitleChanged() {
@@ -1846,7 +2321,8 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                           Expanded(
                             child: TextField(
                               controller: _titleController,
-                              style: theme.textTheme.titleLarge?.copyWith(
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontSize: 14,
                                 fontWeight: FontWeight.bold,
                               ),
                               decoration: InputDecoration(
@@ -1913,6 +2389,15 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                   ),
                 ),
                 SizedBox(width: 16),
+                // 标签编辑条（紧凑模式，与右上角工具按钮同处一行）
+                Expanded(
+                  child: TagEditorBar(
+                    noteId: widget.note.id,
+                    dense: true,
+                    editable: true,
+                  ),
+                ),
+                SizedBox(width: 8),
                 // 自动换行按钮
                 IconButton(
                   icon: Icon(
@@ -1929,63 +2414,115 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                   },
                   tooltip: _autoWrap ? '自动换行' : '取消自动换行',
                 ),
-                // 编辑器字号调整
-                IconButton(
-                  icon: const Icon(Icons.text_decrease),
-                  onPressed: () => _changeEditorFontSize(-1),
-                  tooltip: '减小字号',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: Text(
-                    _editorFontSize.toInt().toString(),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.primaryColor,
-                      fontWeight: FontWeight.w600,
+                // 编辑器字号：减/增合并为一个菜单
+                PopupMenuButton<double>(
+                  icon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.format_size),
+                      const SizedBox(width: 2),
+                      Text(
+                        _editorFontSize.toInt().toString(),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.primaryColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  tooltip: '调整字号',
+                  onSelected: _changeEditorFontSize,
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: -1,
+                      child: const Row(
+                        children: [
+                          Icon(Icons.text_decrease, size: 18),
+                          SizedBox(width: 8),
+                          Text('减小字号'),
+                        ],
+                      ),
                     ),
-                  ),
+                    PopupMenuItem(
+                      value: 1,
+                      child: const Row(
+                        children: [
+                          Icon(Icons.text_increase, size: 18),
+                          SizedBox(width: 8),
+                          Text('增大字号'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.text_increase),
-                  onPressed: () => _changeEditorFontSize(1),
-                  tooltip: '增大字号',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                ),
-                // 普通编辑模式按钮
-                IconButton(
+                // 视图模式：编辑 / 分栏 / 预览 合并为一个菜单
+                PopupMenuButton<String>(
                   icon: Icon(
-                    Icons.edit_note,
-                    color: _viewMode == 'edit'
-                        ? theme.primaryColor
-                        : (isDark ? theme.disabledColor : Colors.grey),
+                    _viewMode == 'edit'
+                        ? Icons.edit_note
+                        : (_viewMode == 'split'
+                              ? Icons.vertical_split
+                              : Icons.preview),
+                    color: theme.primaryColor,
                   ),
-                  onPressed: () => _switchViewMode('edit'),
-                  tooltip: '普通编辑',
+                  tooltip: '视图模式',
+                  onSelected: _switchViewMode,
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_note, size: 18),
+                          SizedBox(width: 8),
+                          Text('编辑'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'split',
+                      child: Row(
+                        children: [
+                          Icon(Icons.vertical_split, size: 18),
+                          SizedBox(width: 8),
+                          Text('分栏'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'preview',
+                      child: Row(
+                        children: [
+                          Icon(Icons.preview, size: 18),
+                          SizedBox(width: 8),
+                          Text('预览'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                // 分栏预览按钮
-                IconButton(
-                  icon: Icon(
-                    Icons.vertical_split,
-                    color: _viewMode == 'split'
-                        ? theme.primaryColor
-                        : (isDark ? theme.disabledColor : Colors.grey),
-                  ),
-                  onPressed: () => _switchViewMode('split'),
-                  tooltip: '分栏预览',
-                ),
-                // 预览模式按钮
-                IconButton(
-                  icon: Icon(
-                    Icons.preview,
-                    color: _viewMode == 'preview'
-                        ? theme.primaryColor
-                        : (isDark ? theme.disabledColor : Colors.grey),
-                  ),
-                  onPressed: () => _switchViewMode('preview'),
-                  tooltip: '预览',
+                // 反向链接面板开关
+                ListenableBuilder(
+                  listenable: NotesIndexService(),
+                  builder: (context, _) {
+                    final count = NotesIndexService()
+                        .backlinksOf(widget.note.id)
+                        .length;
+                    return IconButton(
+                      icon: Badge(
+                        isLabelVisible: count > 0,
+                        label: Text('$count'),
+                        child: Icon(
+                          Icons.call_received,
+                          color: _showBacklinks
+                              ? theme.primaryColor
+                              : (isDark ? theme.disabledColor : Colors.grey),
+                        ),
+                      ),
+                      onPressed: () =>
+                          setState(() => _showBacklinks = !_showBacklinks),
+                      tooltip: '反向链接',
+                    );
+                  },
                 ),
                 IconButton(
                   icon: Icon(Icons.save),
@@ -2049,6 +2586,24 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
               child: _buildContentArea(theme),
             ),
           ),
+          // 反向链接面板（可折叠，默认收起）
+          if (_showBacklinks)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  border: Border(top: BorderSide(color: theme.dividerColor)),
+                ),
+                child: SingleChildScrollView(
+                  child: BacklinksPanel(
+                    noteId: widget.note.id,
+                    onOpenNote: widget.onOpenNote,
+                    onCreateNote: widget.onCreateNote,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -2056,47 +2611,55 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
 
   Widget _buildMarkdownPreview(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
-    return fm.Markdown(
+    return WikiMarkdownView(
       data: _contentController.text,
+      currentNotebook: widget.notebook.name,
+      onOpenNote: widget.onOpenIntent,
       selectable: true,
       controller: _previewScrollController,
       imageDirectory: SPUtil.get<String>(PrefKeys.workingDirectory, ''),
-      styleSheet: fm.MarkdownStyleSheet.fromTheme(theme).copyWith(
-        p: theme.textTheme.bodyMedium,
-        h1: theme.textTheme.headlineMedium,
-        h2: theme.textTheme.titleLarge,
-        h3: theme.textTheme.titleMedium,
-        code: theme.textTheme.bodyMedium?.copyWith(
-          fontFamily: 'monospace',
-          backgroundColor: theme.colorScheme.surfaceContainerHighest,
-        ),
-        codeblockDecoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        blockquote: theme.textTheme.bodyMedium?.copyWith(
-          color: isDark ? const Color(0xFFADB5BD) : const Color(0xFF6C757D),
-          fontStyle: FontStyle.italic,
-        ),
-        blockquoteDecoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF8F9FA),
-          border: Border(
-            left: BorderSide(
-              color: isDark ? const Color(0xFF4A5568) : const Color(0xFFCED4DA),
-              width: 3,
+      styleSheet:
+          applyWikiLinkStyle(
+            fm.MarkdownStyleSheet.fromTheme(theme),
+            theme,
+          ).copyWith(
+            p: theme.textTheme.bodyMedium,
+            h1: theme.textTheme.headlineMedium,
+            h2: theme.textTheme.titleLarge,
+            h3: theme.textTheme.titleMedium,
+            code: theme.textTheme.bodyMedium?.copyWith(
+              fontFamily: 'monospace',
+              backgroundColor: theme.colorScheme.surfaceContainerHighest,
+            ),
+            codeblockDecoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            blockquote: theme.textTheme.bodyMedium?.copyWith(
+              color: isDark ? const Color(0xFFADB5BD) : const Color(0xFF6C757D),
+              fontStyle: FontStyle.italic,
+            ),
+            blockquoteDecoration: BoxDecoration(
+              color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF8F9FA),
+              border: Border(
+                left: BorderSide(
+                  color: isDark
+                      ? const Color(0xFF4A5568)
+                      : const Color(0xFFCED4DA),
+                  width: 3,
+                ),
+              ),
+            ),
+            blockquotePadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 4,
+            ),
+            del: theme.textTheme.bodyMedium?.copyWith(
+              decoration: TextDecoration.lineThrough,
+              decorationColor: isDark ? Colors.red[300] : Colors.red[600],
+              decorationThickness: 2,
             ),
           ),
-        ),
-        blockquotePadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 4,
-        ),
-        del: theme.textTheme.bodyMedium?.copyWith(
-          decoration: TextDecoration.lineThrough,
-          decorationColor: isDark ? Colors.red[300] : Colors.red[600],
-          decorationThickness: 2,
-        ),
-      ),
     );
   }
 
@@ -2210,6 +2773,20 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
   }
 
   Widget _buildEditor(ThemeData theme) {
+    return Column(
+      children: [
+        // 双链补全候选栏：仅在 `[[` 触发时占位，其余情况零高度
+        WikiAutocompleteBar(
+          controller: _autocomplete,
+          onPick: _acceptAutocomplete,
+          onDismiss: _autocomplete.dismiss,
+        ),
+        Expanded(child: _buildCodeEditor(theme)),
+      ],
+    );
+  }
+
+  Widget _buildCodeEditor(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
     return CallbackShortcuts(
       bindings: {
@@ -2218,6 +2795,16 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
           control: true,
           shift: true,
         ): _joinSelectedLines,
+        // 补全激活时接管方向键/回车/Esc；未激活时回调内部为空操作，
+        // 但 CallbackShortcuts 仍会吞掉按键，故仅在激活时才注册。
+        if (_autocomplete.isActive)
+          ...buildAutocompleteShortcuts(
+            controller: _autocomplete,
+            onAccept: () {
+              final ref = _autocomplete.selected;
+              if (ref != null) _acceptAutocomplete(ref);
+            },
+          ),
       },
       child: CodeEditor(
         controller: _contentController,

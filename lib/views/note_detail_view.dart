@@ -1,10 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:ashes_note/models/notes/note_index_models.dart';
+import 'package:ashes_note/services/notes/notes_index_service.dart';
+import 'package:ashes_note/services/notes/wiki_link_parser.dart' as wiki;
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
+import 'package:ashes_note/views/notes/backlinks_panel.dart';
+import 'package:ashes_note/views/notes/tag_editor_bar.dart';
+import 'package:ashes_note/views/notes/wiki_link_autocomplete.dart';
+import 'package:ashes_note/views/notes/wiki_markdown_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
@@ -20,11 +27,21 @@ class NoteDetailPage extends StatefulWidget {
   final Function(Note, {String? newTitle}) onNoteChanged;
   final Function(Note) saveNote;
 
+  /// 点击 `[[双链]]` 或反链条目时打开另一篇笔记。
+  ///
+  /// 可空以兼容既有调用点；为空时链接仍可渲染，只是点击不跳转。
+  final void Function(NoteRef ref)? onOpenNote;
+
+  /// 点击未解析链接时的「一键创建」回调。
+  final void Function(String rawTarget)? onCreateNote;
+
   const NoteDetailPage({
     super.key,
     required this.note,
     required this.onNoteChanged,
     required this.saveNote,
+    this.onOpenNote,
+    this.onCreateNote,
   });
 
   @override
@@ -95,12 +112,22 @@ class NoteDetailState extends State<NoteDetailPage> {
         const FindPreviousIntent(),
   };
 
+  /// 双链补全控制器（仅 edit 模式的 TextField 使用）。
+  ///
+  /// superEditor 富文本模式无法直接取得线性光标偏移，故不提供补全；
+  /// 但 `[[...]]` 会被 `serializeDocumentToMarkdown` 原样保留，链接不会被破坏。
+  late WikiAutocompleteController _autocomplete;
+
   @override
   void initState() {
     super.initState();
     note = widget.note;
     _titleController.text = note.title.replaceAll('.md', '');
     _textController.text = note.content;
+
+    _autocomplete = WikiAutocompleteController(
+      currentNotebook: NoteRef.fromId(note.id).notebookName,
+    )..addListener(_onAutocompleteChanged);
 
     _textController.addListener(_onTextChanged);
     _findController.addListener(_onFindTextChanged);
@@ -121,8 +148,134 @@ class NoteDetailState extends State<NoteDetailPage> {
     });
   }
 
+  void _onAutocompleteChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// 依据 TextField 当前选区刷新补全候选。
+  void _updateAutocomplete() {
+    final sel = _textController.selection;
+    // 非折叠选区或无效光标时不触发
+    if (!sel.isValid || !sel.isCollapsed) {
+      _autocomplete.dismiss();
+      return;
+    }
+    _autocomplete.onTextChanged(_textController.text, sel.baseOffset);
+  }
+
+  /// 应用补全结果：替换全文并把光标移到 `]]` 之后。
+  void _acceptAutocomplete(NoteRef ref) {
+    final result = _autocomplete.buildResult(_textController.text, ref: ref);
+    if (result == null) {
+      _autocomplete.dismiss();
+      return;
+    }
+    _textController.value = TextEditingValue(
+      text: result.newText,
+      selection: TextSelection.collapsed(
+        offset: result.newCaret.clamp(0, result.newText.length),
+      ),
+    );
+    _autocomplete.dismiss();
+  }
+
+  /// 处理预览中点击 `[[...]]` 的跳转意图。
+  ///
+  /// 实际的页面跳转/创建由列表页注入的回调完成，详情页只负责消歧。
+  Future<void> _handleOpenIntent(wiki.OpenNoteIntent intent) async {
+    final currentNotebook = NoteRef.fromId(note.id).notebookName;
+
+    if (intent.ambiguous) {
+      final resolution = NotesIndexService().resolve(
+        intent.rawTarget,
+        currentNotebook: currentNotebook,
+      );
+      if (resolution is LinkAmbiguous) {
+        final picked = await showDialog<NoteRef>(
+          context: context,
+          builder: (ctx) => SimpleDialog(
+            title: Text('「${intent.rawTarget}」有多篇同名笔记'),
+            children: resolution.candidates
+                .map(
+                  (c) => SimpleDialogOption(
+                    onPressed: () => Navigator.pop(ctx, c),
+                    child: ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.description_outlined, size: 18),
+                      title: Text(c.displayTitle),
+                      subtitle: Text(c.notebookName),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        );
+        if (picked != null) widget.onOpenNote?.call(picked);
+      } else if (resolution is LinkResolved) {
+        widget.onOpenNote?.call(resolution.target);
+      }
+      return;
+    }
+
+    final noteId = intent.noteId;
+    if (intent.exists && noteId != null) {
+      widget.onOpenNote?.call(NoteRef.fromId(noteId));
+      return;
+    }
+
+    widget.onCreateNote?.call(intent.rawTarget);
+  }
+
+  /// 底部弹出反向链接面板。
+  void _showBacklinksSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.92,
+        builder: (context, scrollController) => Column(
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).dividerColor,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Expanded(
+              child: BacklinksPanel(
+                noteId: note.id,
+                dense: true,
+                scrollController: scrollController,
+                onOpenNote: (ref) {
+                  Navigator.of(sheetContext).pop();
+                  widget.onOpenNote?.call(ref);
+                },
+                onCreateNote: (raw) {
+                  Navigator.of(sheetContext).pop();
+                  widget.onCreateNote?.call(raw);
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    _autocomplete.removeListener(_onAutocompleteChanged);
+    _autocomplete.dispose();
     _textController.removeListener(_onTextChanged);
     _findController.removeListener(_onFindTextChanged);
     _titleController.removeListener(_onTitleChanged);
@@ -230,8 +383,11 @@ class NoteDetailState extends State<NoteDetailPage> {
           note.title,
           utf8.encode(note.content),
         );
+        // 正文落盘后增量刷新出链/反链
+        NotesIndexService().onNoteSaved(note);
       });
     }
+    _updateAutocomplete();
   }
 
   void _onFindTextChanged() {
@@ -271,7 +427,10 @@ class NoteDetailState extends State<NoteDetailPage> {
     
     // 通知父组件笔记已更改
     widget.onNoteChanged(note);
-    
+
+    // 同步索引：迁移标签归属并重建该笔记的链接关系，避免悬空数据
+    NotesIndexService().onNoteRenamed(oldNoteId, note);
+
     // 删除本地旧文件
     FileUtil().deleteFile(
       '$workingDir/notes',
@@ -1073,6 +1232,24 @@ class NoteDetailState extends State<NoteDetailPage> {
                   },
                   tooltip: 'SuperEditor',
                 ),
+                // 反向链接入口（带数量角标）
+                ListenableBuilder(
+                  listenable: NotesIndexService(),
+                  builder: (context, _) {
+                    final count = NotesIndexService()
+                        .backlinksOf(note.id)
+                        .length;
+                    return IconButton(
+                      icon: Badge(
+                        isLabelVisible: count > 0,
+                        label: Text('$count'),
+                        child: const Icon(Icons.call_received),
+                      ),
+                      onPressed: _showBacklinksSheet,
+                      tooltip: '反向链接',
+                    );
+                  },
+                ),
                 IconButton(
                   icon: Icon(Icons.save),
                   onPressed: () {
@@ -1154,6 +1331,8 @@ class NoteDetailState extends State<NoteDetailPage> {
                     ],
                   ),
                 ),
+                // 标签编辑条
+                TagEditorBar(noteId: note.id, dense: true),
                 // 查找面板
                 if (_viewMode == 'edit' && _showFindPanel) _buildFindPanel(),
                 if (_viewMode == 'superEditor' && _isSearchVisible)
@@ -1165,6 +1344,12 @@ class NoteDetailState extends State<NoteDetailPage> {
                       ? _buildPreview()
                       : _buildSuperEditorView(),
                 ),
+                // 双链补全候选条：贴在键盘上方，仅 edit 模式生效
+                if (_viewMode == 'edit')
+                  WikiAutocompleteStrip(
+                    controller: _autocomplete,
+                    onPick: _acceptAutocomplete,
+                  ),
               ],
             ),
           ),
@@ -1534,9 +1719,11 @@ class NoteDetailState extends State<NoteDetailPage> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    // 使用flutter_markdown包实现真正的Markdown预览
-    return fm.Markdown(
+    // 使用flutter_markdown包实现真正的Markdown预览（含 [[双链]] 支持）
+    return WikiMarkdownView(
       data: note.content,
+      currentNotebook: NoteRef.fromId(note.id).notebookName,
+      onOpenNote: _handleOpenIntent,
       selectable: true,
       imageDirectory: SPUtil.get<String>(PrefKeys.workingDirectory, ''),
       // 添加图片显示相关配置

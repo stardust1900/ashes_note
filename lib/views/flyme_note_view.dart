@@ -1,11 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:ashes_note/logging.dart';
+import 'package:ashes_note/models/notes/note_index_models.dart';
+import 'package:ashes_note/services/notes/notes_index_service.dart';
+import 'package:ashes_note/services/notes/wiki_link_parser.dart' as wiki;
 import 'package:ashes_note/utils/const.dart';
 import 'package:ashes_note/utils/file_util.dart';
 import 'package:ashes_note/utils/git_service.dart';
 import 'package:ashes_note/utils/prefs_util.dart';
 import 'package:ashes_note/views/note_detail_view.dart' show NoteDetailPage;
+import 'package:ashes_note/views/notes/note_graph_view.dart';
+import 'package:ashes_note/views/notes/tag_filter_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:ashes_note/entity/entities_notebook.dart';
 
@@ -35,6 +41,10 @@ class NotebookHomePageState extends State<NotebookHomePage> {
   GitService? git;
   String? remoteUrl;
   bool _isSyncing = false;
+
+  // 标签筛选状态
+  final Set<String> _selectedTagFilter = {};
+  bool _tagFilterMatchAll = true;
 
   @override
   void initState() {
@@ -115,21 +125,51 @@ class NotebookHomePageState extends State<NotebookHomePage> {
   void _performSearch(String query) {
     _searchResults.clear();
 
+    // 支持 `tag:标签名 关键字` 组合语法
+    final parsed = wiki.parseSearchQuery(query);
+    final keyword = parsed.keyword.toLowerCase();
+    final index = NotesIndexService();
+
+    // 有 tag: 条件时先用倒排表把候选集缩到最小
+    Set<String>? tagNoteIds;
+    if (parsed.tags.isNotEmpty) {
+      tagNoteIds = index.notesOfTags(parsed.tags, matchAll: true);
+      if (tagNoteIds.isEmpty) return;
+    }
+
     for (final notebook in _notebooks) {
       for (final note in notebook.notes) {
-        final titleMatch = note.title.toLowerCase().contains(
-          query.toLowerCase(),
-        );
-        final contentMatch = note.content.toLowerCase().contains(
-          query.toLowerCase(),
-        );
+        if (tagNoteIds != null && !tagNoteIds.contains(note.id)) continue;
 
-        if (titleMatch || contentMatch) {
+        // 纯 tag: 查询（无关键字）时，命中标签即为结果
+        if (keyword.isEmpty) {
+          if (tagNoteIds != null) {
+            _searchResults.add(
+              GlobalSearchResult(
+                note: note,
+                notebookName: notebook.name,
+                matchType: '标签',
+              ),
+            );
+          }
+          continue;
+        }
+
+        final titleMatch = note.title.toLowerCase().contains(keyword);
+        final contentMatch = note.content.toLowerCase().contains(keyword);
+        // 无 tag: 前缀时，关键字也参与标签匹配
+        final tagMatch =
+            tagNoteIds == null &&
+            index.tagsOf(note.id).any((t) => t.toLowerCase().contains(keyword));
+
+        if (titleMatch || contentMatch || tagMatch) {
           _searchResults.add(
             GlobalSearchResult(
               note: note,
               notebookName: notebook.name,
-              matchType: titleMatch ? '标题' : '内容',
+              matchType: titleMatch
+                  ? '标题'
+                  : (contentMatch ? '内容' : '标签'),
             ),
           );
         }
@@ -179,6 +219,13 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         }
       }
     });
+
+    // 重建笔记链接索引与标签索引，供双链 / 标签功能使用。
+    try {
+      await NotesIndexService().rebuild(_notebooks);
+    } catch (e, st) {
+      appLog.warning('重建笔记索引失败: $e', e, st);
+    }
   }
 
   // 删除笔记本
@@ -234,6 +281,13 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     print("delete second then");
                   });
 
+              // 同步标签/链接索引。
+              try {
+                NotesIndexService().onNotebookDeleted(notebookName);
+              } catch (e, st) {
+                appLog.warning('删除笔记本索引同步失败: $e', e, st);
+              }
+
               Navigator.pop(context);
               ScaffoldMessenger.of(
                 context,
@@ -266,12 +320,20 @@ class NotebookHomePageState extends State<NotebookHomePage> {
       git!.deleteFile(owner, repo, noteId, 'Delete note $noteId', sha);
     }
 
+    // 同步标签/链接索引。
+    try {
+      NotesIndexService().onNoteDeleted(noteId);
+    } catch (e, st) {
+      appLog.warning('删除笔记索引同步失败: $e', e, st);
+    }
+
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('笔记已删除')));
   }
 
   void noteChanged(Note updatedNote, {String? newTitle}) {
+    String? oldId;
     setState(() {
       if (newTitle != null && newTitle != updatedNote.title) {
         final exists = _selectedNotebook!.notes.any(
@@ -284,6 +346,7 @@ class NotebookHomePageState extends State<NotebookHomePage> {
           return;
         }
 
+        oldId = updatedNote.id;
         final oldTitle = updatedNote.title.endsWith('.md')
             ? updatedNote.title
             : '${updatedNote.title}.md';
@@ -316,6 +379,18 @@ class NotebookHomePageState extends State<NotebookHomePage> {
         _selectedNotebook!.notes[index] = updatedNote;
       }
     });
+
+    // 同步标签 / 链接索引：改名走重命名，内容变更走保存。
+    try {
+      final index = NotesIndexService();
+      if (oldId != null && oldId != updatedNote.id) {
+        index.onNoteRenamed(oldId!, updatedNote);
+      } else {
+        index.onNoteSaved(updatedNote);
+      }
+    } catch (e, st) {
+      appLog.warning('笔记变更索引同步失败: $e', e, st);
+    }
   }
 
   void saveNote(Note note) {
@@ -354,6 +429,8 @@ class NotebookHomePageState extends State<NotebookHomePage> {
           note: result.note,
           onNoteChanged: noteChanged,
           saveNote: saveNote,
+          onOpenNote: _openNoteByRef,
+          onCreateNote: _confirmCreateLinkedNote,
         ),
       ),
     );
@@ -444,9 +521,24 @@ class NotebookHomePageState extends State<NotebookHomePage> {
             ),
           ),
           IconButton(
+            icon: const Icon(Icons.sell_outlined),
+            tooltip: '标签筛选',
+            color: Theme.of(context).primaryColor,
+            onPressed: _showTagFilterSheet,
+          ),
+          IconButton(
+            icon: const Icon(Icons.hub_outlined),
+            tooltip: '关系图谱',
+            color: Theme.of(context).primaryColor,
+            onPressed: () => NoteGraphView.show(
+              context,
+              onOpenNote: _openNoteByRef,
+            ),
+          ),
+          IconButton(
             icon: Icon(Icons.sync),
             color: _isSyncing ? Colors.grey : Theme.of(context).primaryColor,
-            onPressed: () {
+            onPressed: () async {
               final scaffoldMessenger = ScaffoldMessenger.of(context);
               if (git == null || remoteUrl == null) {
                 scaffoldMessenger.showSnackBar(
@@ -461,17 +553,26 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                 _isSyncing = true;
               });
 
+              // 同步前对标签索引做快照，供 pull 后按条目合并。
+              await NotesIndexService().beforeGitSync();
+
               // 拉取远程仓库的数据
               git!
                   .pull(owner, repo, '$workingDirectory/notes')
-                  .then((_) {
+                  .then((_) async {
                     SPUtil.set(
                       PrefKeys.lastPullTime,
                       DateTime.now().toIso8601String(),
                     );
+                    // 拉取后合并标签索引（按笔记条目取新），并重建链接索引。
+                    try {
+                      await NotesIndexService().afterGitSync();
+                    } catch (e, st) {
+                      appLog.warning('同步后索引合并失败: $e', e, st);
+                    }
                     // 推送本地仓库的数据
                     //pull完成再push，远程有的文件本地不可能没有，所以不会删除远程文件
-                    git!
+                    return git!
                         .push(
                           owner,
                           repo,
@@ -669,6 +770,8 @@ class NotebookHomePageState extends State<NotebookHomePage> {
               _currentSearchQuery,
               maxLines: 2,
             ),
+            SizedBox(height: 4),
+            _buildNoteTagChips(note.id),
             SizedBox(height: 4),
             Text(
               '修改时间: ${note.lastModified.toString().substring(0, 10)}',
@@ -908,7 +1011,16 @@ class NotebookHomePageState extends State<NotebookHomePage> {
   }
 
   Widget _buildNoteList() {
-    final notes = _selectedNotebook?.notes ?? [];
+    var notes = _selectedNotebook?.notes ?? [];
+
+    // 按标签筛选（从标签索引取倒排表）。
+    if (_selectedTagFilter.isNotEmpty) {
+      final matched = NotesIndexService().notesOfTags(
+        _selectedTagFilter,
+        matchAll: _tagFilterMatchAll,
+      );
+      notes = notes.where((n) => matched.contains(n.id)).toList();
+    }
 
     if (notes.isEmpty) {
       return Center(
@@ -1005,6 +1117,8 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                     ),
                   ),
                   SizedBox(height: 4),
+                  _buildNoteTagChips(note.id),
+                  SizedBox(height: 4),
                   Text(
                     '${note.lastModified.year}-${note.lastModified.month.toString().padLeft(2, '0')}-${note.lastModified.day.toString().padLeft(2, '0')}',
                     style: TextStyle(
@@ -1030,6 +1144,8 @@ class NotebookHomePageState extends State<NotebookHomePage> {
                       note: note,
                       onNoteChanged: noteChanged,
                       saveNote: saveNote,
+                      onOpenNote: _openNoteByRef,
+                      onCreateNote: _confirmCreateLinkedNote,
                     ),
                   ),
                 );
@@ -1171,6 +1287,213 @@ class NotebookHomePageState extends State<NotebookHomePage> {
             child: Text('创建'),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 渲染单篇笔记的标签胶囊行（最多 3 个 + 溢出计数）。
+  Widget _buildNoteTagChips(String noteId) {
+    final tags = NotesIndexService().tagsOf(noteId);
+    if (tags.isEmpty) return const SizedBox.shrink();
+    final visible = tags.take(3).toList();
+    final overflow = tags.length - visible.length;
+    return Wrap(
+      spacing: 4,
+      runSpacing: 2,
+      children: [
+        for (final tag in visible)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).primaryColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              tag,
+              style: TextStyle(
+                fontSize: 10,
+                color: Theme.of(context).primaryColor,
+              ),
+            ),
+          ),
+        if (overflow > 0)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).disabledColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '+$overflow',
+              style: TextStyle(
+                fontSize: 10,
+                color: Theme.of(context).disabledColor,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// 从笔记详情/预览/图谱跳转至目标笔记。
+  Future<void> _openNoteByRef(NoteRef ref) async {
+    // 先按 id 精确查找。
+    for (final nb in _notebooks) {
+      for (final note in nb.notes) {
+        if (note.id == ref.id) {
+          await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(
+              builder: (context) => NoteDetailPage(
+                note: note,
+                onNoteChanged: noteChanged,
+                saveNote: saveNote,
+                onOpenNote: _openNoteByRef,
+                onCreateNote: _confirmCreateLinkedNote,
+              ),
+            ),
+          );
+          return;
+        }
+      }
+    }
+    // 目标不存在：提示创建。
+    await _confirmCreateLinkedNote(ref.id);
+  }
+
+  /// 当从双链/图谱跳转到不存在的笔记时，确认后在指定笔记本创建空笔记并跳转。
+  Future<void> _confirmCreateLinkedNote(String rawTarget) async {
+    final ref = NoteRef.fromId(rawTarget);
+    final nb = ref.notebookName.isNotEmpty
+        ? (_notebooks.firstWhere(
+            (n) => n.name == ref.notebookName,
+            orElse: () => _notebooks.first,
+          ))
+        : (_selectedNotebook ?? _notebooks.first);
+    final title = ref.title;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('创建链接笔记'),
+        content: Text('笔记「$title」尚不存在，是否在「${nb.name}」中创建它？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('创建'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final content = '';
+    final fileName = title.endsWith('.md') ? title : '$title.md';
+    FileUtil().saveFile(
+      '$workingDirectory/notes',
+      nb.name,
+      fileName,
+      utf8.encode(content),
+    );
+    await _loadNotebookList();
+    if (!mounted) return;
+    // 找到刚创建的笔记并跳转。
+    for (final note in nb.notes) {
+      if (note.title == title) {
+        await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (context) => NoteDetailPage(
+              note: note,
+              onNoteChanged: noteChanged,
+              saveNote: saveNote,
+              onOpenNote: _openNoteByRef,
+              onCreateNote: _confirmCreateLinkedNote,
+            ),
+          ),
+        );
+        return;
+      }
+    }
+  }
+
+  /// 底部抽屉承载标签筛选面板。
+  void _showTagFilterSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        minChildSize: 0.4,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Expanded(
+              child: TagFilterPanel(
+                selectedTags: _selectedTagFilter,
+                matchAll: _tagFilterMatchAll,
+                allowManage: true,
+                onSelectionChanged: (tags) {
+                  setState(() {
+                    _selectedTagFilter
+                      ..clear()
+                      ..addAll(tags);
+                  });
+                },
+                onMatchModeChanged: (matchAll) {
+                  setState(() {
+                    _tagFilterMatchAll = matchAll;
+                  });
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        setState(() {
+                          _selectedTagFilter.clear();
+                        });
+                        Navigator.pop(context);
+                      },
+                      child: const Text('清除筛选'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('完成'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
