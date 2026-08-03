@@ -19,6 +19,7 @@ import 'package:ashes_note/views/notes/tag_editor_bar.dart';
 import 'package:ashes_note/views/notes/tag_filter_panel.dart';
 import 'package:ashes_note/views/notes/wiki_link_autocomplete.dart';
 import 'package:ashes_note/views/notes/wiki_markdown_view.dart';
+import 'package:ashes_note/views/blog_export_dialog.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart' as fm;
 import 'package:re_editor/re_editor.dart';
 import 'package:re_highlight/languages/markdown.dart';
@@ -2593,6 +2594,17 @@ class _NoteDetailPanelState extends State<_NoteDetailPanel> {
                     ).showSnackBar(SnackBar(content: Text('笔记已保存')));
                   },
                   tooltip: '保存 (Ctrl+S)',
+                ),
+                IconButton(
+                  icon: Icon(Icons.send),
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) =>
+                          BlogExportDialog(note: widget.note),
+                    );
+                  },
+                  tooltip: '保存为博客 (Jekyll post)',
                 ),
                 if (_viewMode == 'preview' || _viewMode == 'split')
                   IconButton(

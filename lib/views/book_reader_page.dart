@@ -242,8 +242,8 @@ class _BookReaderPageState extends State<BookReaderPage>
 
     // 初始化有道词典服务（使用默认配置，实际使用需要替换）
     _youdaoService = YoudaoDictionaryService(
-      appId: '55b585b48ea1a831', // 请替换为有道应用的 App ID
-      appKey: 'xi4pR1yRyTuWamZVCJRnNXC6FR4l8seQ', // 请替换为有道应用的 App Key
+      appId: YoudaoConstants.appId, // 请替换为有道应用的 App ID
+      appKey: YoudaoConstants.appKey, // 请替换为有道应用的 App Key
     );
     // 初始化 Free Dictionary 服务
     _freeDictionaryService = FreeDictionaryService();

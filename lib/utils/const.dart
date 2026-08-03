@@ -29,6 +29,11 @@ class PrefKeys {
   static const String rssShowRead = 'rssShowRead'; // 是否在列表显示已读
   static const String rssStarredOnly = 'rssStarredOnly'; // 仅看收藏
 
+  // ===== 博客导出（Jekyll post）相关 =====
+  static const String blogExportDir = 'blogExportDir'; // 上次选择的导出目录
+  static const String blogCategories = 'blogCategories'; // 历史分类（逗号分隔）
+  static const String blogTags = 'blogTags'; // 历史标签（逗号分隔）
+
   // ===== 双向链接与标签相关 =====
   static const String noteSidebarTab = 'noteSidebarTab'; // notes / tags
   static const String noteTagFilter = 'noteTagFilter'; // 逗号分隔的标签名
@@ -130,6 +135,15 @@ class RssConstants {
   static const String allFeedsId = '__all__';
   static const String unreadFeedsId = '__unread__';
   static const String starredFeedsId = '__starred__';
+}
+
+/// 有道词典翻译相关常量（博客导出复用语块翻译）。
+class YoudaoConstants {
+  /// 有道应用 App ID（与书籍阅读器共用同一套凭据）。
+  static const String appId = '55b585b48ea1a831';
+
+  /// 有道应用 App Key。
+  static const String appKey = 'xi4pR1yRyTuWamZVCJRnNXC6FR4l8seQ';
 }
 
 /// 双向链接与标签索引相关常量。
