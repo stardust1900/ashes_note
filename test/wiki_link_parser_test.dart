@@ -300,6 +300,22 @@ void main() {
       final r = applyAutocomplete(text, ctx, NoteRef.of('nb', '卡片法'));
       expect(r.newText, '[[nb/卡片法]] 尾巴');
     });
+
+    test('重选链接时整段删除旧链接，不残留新老混排', () {
+      // 用户把光标放在已有「[[老链接]]」内部，删掉旧文字输入「新 」后触发补全。
+      const text = '[[新 老]] 结尾';
+      // 触发点：光标在「新」与空格之间（offset 3，仍处于未闭合 [[ 内）。
+      final ctx = detectAutocomplete(text, 3)!;
+      final r = applyAutocomplete(text, ctx, NoteRef.of('nb', '新链接'));
+      expect(r.newText, '[[nb/新链接]] 结尾');
+    });
+
+    test('重选链接且旧链接含多字时整段删除', () {
+      const text = '[[新读书笔记/旧标题]] 后文';
+      final ctx = detectAutocomplete(text, 4)!;
+      final r = applyAutocomplete(text, ctx, NoteRef.of('nb', '新标题'));
+      expect(r.newText, '[[nb/新标题]] 后文');
+    });
   });
 
   group('buildInsertion', () {

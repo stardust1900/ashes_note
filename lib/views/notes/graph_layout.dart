@@ -84,8 +84,13 @@ class GraphLayout {
     // 初始位置按圆环均匀铺开，避免初始重叠导致斥力爆炸。
     final cx = width / 2;
     final cy = height / 2;
-    final radius = math.min(width, height) * 0.35;
     final n = _nodes.length;
+    // 节点数较少时缩小初始半径，让它们聚拢居中、整体完整可见。
+    final baseRadius = math.min(width, height) * 0.35;
+    final radius = n <= 1
+        ? 0.0
+        : (n <= 6 ? math.min(width, height) * 0.16 : baseRadius);
+    _k = n == 0 ? 1 : math.sqrt(width * height / n) * 0.8;
 
     for (var i = 0; i < n; i++) {
       final id = _nodes[i].id;
@@ -104,7 +109,6 @@ class GraphLayout {
     pinned.removeWhere((id) => !positions.containsKey(id));
 
     _displacement = List.generate(n, (_) => Vec2(0, 0));
-    _k = n == 0 ? 1 : math.sqrt(width * height / n) * 0.8;
     _temperature = math.min(width, height) * 0.1;
     _iteration = 0;
     version++;

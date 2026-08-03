@@ -204,6 +204,7 @@ class _TagEditorBarState extends State<TagEditorBar> {
                 '标签',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.hintColor,
+                  fontSize: 11,
                 ),
               ),
             ],
@@ -254,6 +255,7 @@ class _TagEditorBarState extends State<TagEditorBar> {
                 hintText: '标签名',
                 hintStyle: theme.textTheme.labelSmall?.copyWith(
                   color: theme.hintColor,
+                  fontSize: 11,
                 ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 10,

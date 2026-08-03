@@ -75,6 +75,12 @@ class _NoteGraphViewState extends State<NoteGraphView>
   /// 一度邻居集合，用于悬停高亮。
   Set<String> _highlighted = const {};
 
+  /// 双向边集合：'from|to' 形式。当 'from|to' 与 'to|from' 都存在时为双向链接。
+  Set<String> _bidirectional = const {};
+
+  /// 画布视口尺寸，用于重置视图时计算居中缩放。
+  Size _viewportSize = const Size(800, 600);
+
   @override
   void initState() {
     super.initState();
@@ -151,6 +157,66 @@ class _NoteGraphViewState extends State<NoteGraphView>
     }
 
     _layout.setGraph(graph);
+    _computeBidirectional(graph);
+  }
+
+  /// 根据边列表计算双向链接（A→B 且 B→A 均存在）。
+  void _computeBidirectional(NoteGraph graph) {
+    final set = <String>{};
+    final keys = graph.edges
+        .map((e) => '${e.from}|${e.to}')
+        .toSet();
+    for (final e in graph.edges) {
+      if (keys.contains('${e.to}|${e.from}')) {
+        set.add('${e.from}|${e.to}');
+      }
+    }
+    _bidirectional = set;
+  }
+
+  /// 重置视图：重建图谱并把所有内容居中、完整可见。
+  void _resetView() {
+    _viewer.value = Matrix4.identity();
+    _layout.pinned.clear();
+    _rebuildGraph();
+    _fitToBounds();
+    _restartTicker();
+  }
+
+  /// 按所有节点包围盒计算缩放与平移，使图谱居中且完整展示。
+  void _fitToBounds() {
+    if (_layout.nodes.isEmpty) return;
+    var minX = double.infinity;
+    var minY = double.infinity;
+    var maxX = double.negativeInfinity;
+    var maxY = double.negativeInfinity;
+    for (final n in _layout.nodes) {
+      final p = _layout.positionOf(n.id);
+      if (p == null) continue;
+      minX = math.min(minX, p.x);
+      minY = math.min(minY, p.y);
+      maxX = math.max(maxX, p.x);
+      maxY = math.max(maxY, p.y);
+    }
+    if (!minX.isFinite) return;
+
+    const padding = 80.0;
+    final contentW = (maxX - minX) + padding * 2;
+    final contentH = (maxY - minY) + padding * 2;
+    final scale = math
+        .min(_viewportSize.width / contentW, _viewportSize.height / contentH)
+        .clamp(0.2, 4.0);
+    final cx = (minX + maxX) / 2;
+    final cy = (minY + maxY) / 2;
+    final tx = _viewportSize.width / 2 - scale * cx;
+    final ty = _viewportSize.height / 2 - scale * cy;
+
+    final m = Matrix4.identity();
+    m.setEntry(0, 0, scale);
+    m.setEntry(1, 1, scale);
+    m.setEntry(0, 3, tx);
+    m.setEntry(1, 3, ty);
+    _viewer.value = m;
   }
 
   void _updateHighlight(String? nodeId) {
@@ -193,6 +259,7 @@ class _NoteGraphViewState extends State<NoteGraphView>
       children: [
         _buildToolbar(theme),
         if (_forcedNeighborhood) _buildNotice(theme),
+        _buildLegend(theme),
         Expanded(
           child: _layout.nodes.isEmpty
               ? _buildEmpty(theme)
@@ -270,12 +337,7 @@ class _NoteGraphViewState extends State<NoteGraphView>
           IconButton(
             icon: const Icon(Icons.center_focus_strong, size: 18),
             tooltip: '重置视图',
-            onPressed: () {
-              _viewer.value = Matrix4.identity();
-              _layout.pinned.clear();
-              _rebuildGraph();
-              _restartTicker();
-            },
+            onPressed: _resetView,
           ),
           IconButton(
             icon: const Icon(Icons.close, size: 18),
@@ -345,7 +407,10 @@ class _NoteGraphViewState extends State<NoteGraphView>
   Widget _buildCanvas(ThemeData theme) {
     final colors = _buildColorMap(theme);
 
-    return MouseRegion(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _viewportSize = constraints.biggest;
+        return MouseRegion(
       onHover: (event) {
         final p = _toCanvas(event.localPosition);
         final hit = _layout.hitTest(p.dx, p.dy, 26);
@@ -393,11 +458,14 @@ class _NoteGraphViewState extends State<NoteGraphView>
                 hoveredId: _hoveredId,
                 highlighted: _highlighted,
                 focusId: _neighborhoodMode ? _focusId : null,
+                bidirectional: _bidirectional,
               ),
             ),
           ),
         ),
       ),
+        );
+      },
     );
   }
 
@@ -439,6 +507,64 @@ class _NoteGraphViewState extends State<NoteGraphView>
     if (!NotesIndexService().containsNote(nodeId)) return;
     widget.onOpenNote?.call(NoteRef.fromId(nodeId));
   }
+
+  /// 图例数据：着色模式下的分类 → 颜色。按 notebookName 或 tag 聚合。
+  List<(String, Color)> _buildLegendData(ThemeData theme) {
+    final map = _buildColorMap(theme);
+    if (_colorMode == GraphColorMode.tag) {
+      final seen = <String, Color>{};
+      for (final n in _layout.nodes) {
+        for (final tag in n.tags) {
+          seen.putIfAbsent(tag, () => resolveTagColor(tag, theme));
+        }
+      }
+      return seen.entries.map((e) => (e.key, e.value)).toList();
+    }
+    final seen = <String, Color>{};
+    for (final n in _layout.nodes) {
+      seen.putIfAbsent(n.notebookName, () => map[n.id]!);
+    }
+    return seen.entries.map((e) => (e.key, e.value)).toList();
+  }
+
+  /// 图例组件：用色块 + 文字展示当前着色分类。
+  Widget _buildLegend(ThemeData theme) {
+    final items = _buildLegendData(theme);
+    if (items.length <= 1) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
+      ),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 4,
+        children: [
+          ...items.map(
+            (item) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: item.$2,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  item.$1,
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: theme.hintColor),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _GraphPainter extends CustomPainter {
@@ -448,6 +574,7 @@ class _GraphPainter extends CustomPainter {
   final String? hoveredId;
   final Set<String> highlighted;
   final String? focusId;
+  final Set<String> bidirectional;
 
   /// 记录绘制时的布局版本，用于 shouldRepaint 判断。
   final int layoutVersion;
@@ -459,6 +586,7 @@ class _GraphPainter extends CustomPainter {
     required this.hoveredId,
     required this.highlighted,
     required this.focusId,
+    required this.bidirectional,
   }) : layoutVersion = layout.version;
 
   bool get _dimOthers => highlighted.isNotEmpty;
@@ -470,11 +598,6 @@ class _GraphPainter extends CustomPainter {
   }
 
   void _paintEdges(Canvas canvas) {
-    final basePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..color = theme.dividerColor;
-
     for (final edge in layout.edges) {
       final from = layout.positionOf(edge.from);
       final to = layout.positionOf(edge.to);
@@ -485,12 +608,23 @@ class _GraphPainter extends CustomPainter {
           highlighted.contains(edge.from) &&
           highlighted.contains(edge.to);
 
+      final isBi = bidirectional.contains('${edge.from}|${edge.to}');
+
+      // 双向链接用实线 + 主色强调；单向普通关系用淡色虚线，便于区分。
       final paint = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = active ? 1.8 : basePaint.strokeWidth
+        ..strokeWidth = active
+            ? 2
+            : (isBi ? 1.6 : 1)
         ..color = active
-            ? theme.colorScheme.primary.withValues(alpha: 0.8)
-            : theme.dividerColor.withValues(alpha: _dimOthers ? 0.25 : 0.7);
+            ? theme.colorScheme.primary
+            : (isBi
+                ? theme.colorScheme.primary.withValues(
+                    alpha: _dimOthers ? 0.35 : 0.85,
+                  )
+                : theme.dividerColor.withValues(
+                    alpha: _dimOthers ? 0.2 : 0.55,
+                  ));
 
       final start = Offset(from.x, from.y);
       final end = Offset(to.x, to.y);
@@ -506,13 +640,44 @@ class _GraphPainter extends CustomPainter {
         end.dy - dy / dist * (targetRadius + 2),
       );
 
-      canvas.drawLine(start, shrunk, paint);
-      _paintArrow(canvas, start, shrunk, paint);
+      if (isBi || active) {
+        canvas.drawLine(start, shrunk, paint);
+      } else {
+        _drawDashedLine(canvas, start, shrunk, paint);
+      }
+      _paintArrow(canvas, start, shrunk, paint, isBi || active ? 7.0 : 5.0);
     }
   }
 
-  void _paintArrow(Canvas canvas, Offset start, Offset end, Paint paint) {
-    const arrowSize = 6.0;
+  /// 手绘虚线（按固定间隔绘制短线段，无额外依赖）。
+  void _drawDashedLine(Canvas canvas, Offset a, Offset b, Paint paint) {
+    const dash = 5.0;
+    const gap = 4.0;
+    final dx = b.dx - a.dx;
+    final dy = b.dy - a.dy;
+    final dist = math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) return;
+    final ux = dx / dist;
+    final uy = dy / dist;
+    var pos = 0.0;
+    while (pos < dist) {
+      final seg = math.min(dash, dist - pos);
+      canvas.drawLine(
+        Offset(a.dx + ux * pos, a.dy + uy * pos),
+        Offset(a.dx + ux * (pos + seg), a.dy + uy * (pos + seg)),
+        paint,
+      );
+      pos += dash + gap;
+    }
+  }
+
+  void _paintArrow(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Paint paint, [
+    double arrowSize = 6.0,
+  ]) {
     final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
 
     final p1 = Offset(
@@ -589,23 +754,27 @@ class _GraphPainter extends CustomPainter {
     double radius,
     bool dimmed,
   ) {
+    // 字号随节点规模轻微缩小，保证名称完整可读。
+    final fontSize = (theme.textTheme.labelSmall?.fontSize ?? 11) - 1.0;
+    final baseColor =
+        theme.textTheme.labelSmall?.color ?? theme.hintColor;
     final style = theme.textTheme.labelSmall?.copyWith(
-      color: (theme.textTheme.labelSmall?.color ?? theme.hintColor).withValues(
-        alpha: dimmed ? 0.25 : 1,
-      ),
+      fontSize: fontSize,
+      color: baseColor.withValues(alpha: dimmed ? 0.25 : 1),
       fontWeight: node.id == hoveredId ? FontWeight.w600 : FontWeight.normal,
     );
 
+    // 完整展示名称：最多两行，不截断；宽度上限随画布放宽。
     final painter = TextPainter(
       text: TextSpan(text: node.label, style: style),
       textDirection: TextDirection.ltr,
-      maxLines: 1,
-      ellipsis: '…',
-    )..layout(maxWidth: 110);
+      textAlign: TextAlign.center,
+      maxLines: 2,
+    )..layout(maxWidth: 120);
 
     painter.paint(
       canvas,
-      Offset(center.dx - painter.width / 2, center.dy + radius + 3),
+      Offset(center.dx - painter.width / 2, center.dy + radius + 4),
     );
   }
 
@@ -615,6 +784,7 @@ class _GraphPainter extends CustomPainter {
         old.hoveredId != hoveredId ||
         old.focusId != focusId ||
         old.highlighted.length != highlighted.length ||
+        old.bidirectional.length != bidirectional.length ||
         old.theme.brightness != theme.brightness;
   }
 }

@@ -362,13 +362,32 @@ class AutocompleteResult {
 }
 
 /// 在 [context] 处用 [ref] 替换掉已输入的 `[[前缀`，生成完整链接。
+///
+/// 关键修复：当用户在已有 `[[老链接]]` 内部删改前缀后重新触发补全时，
+/// 光标之后可能残留「老链接]]」甚至整段旧 `[[...]]`。无论 [AutocompleteContext.hasClosing]
+/// 是否成立，这里都会把光标之后直到第一个 `]]`（含）的整段旧链接一并删除，
+/// 保证最终只保留新链接，不会「新老链接混在一起」。
 AutocompleteResult applyAutocomplete(
   String text,
   AutocompleteContext context,
   NoteRef ref,
 ) {
   final insertion = buildInsertion(ref);
-  final tailStart = context.hasClosing ? context.caret + 2 : context.caret;
+
+  // 替换尾部起点：默认从光标处截断；若光标之后还存在旧的 `]]`，
+  // 则把整段旧 `[[...]]` 一并吃掉。
+  int tailStart = context.caret;
+  if (!context.hasClosing) {
+    final oldLink = _oldClosingPattern.firstMatch(text.substring(context.triggerStart));
+    if (oldLink != null) {
+      final end = context.triggerStart + oldLink.end;
+      // 仅在旧闭合结构覆盖到光标之后时才截断，避免误删光标前的内容。
+      if (end >= context.caret) tailStart = end;
+    }
+  } else {
+    tailStart = context.caret + 2;
+  }
+
   final newText =
       text.substring(0, context.triggerStart) + insertion + text.substring(tailStart);
   return AutocompleteResult(
@@ -376,6 +395,10 @@ AutocompleteResult applyAutocomplete(
     context.triggerStart + insertion.length,
   );
 }
+
+/// 从 `[[` 起匹配一整个已有的 `[[...]]`（内部不含 `[`、`]`、换行），
+/// 用于重选链接时定位需要被整体删除的旧闭合结构。
+final RegExp _oldClosingPattern = RegExp(r'\[\[[^\[\]\n]*\]\]');
 
 /// 搜索语句解析结果：标签条件 + 剩余关键字。
 class ParsedSearchQuery {

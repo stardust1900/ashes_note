@@ -411,10 +411,11 @@ class NoteDetailState extends State<NoteDetailPage> {
     final oldTitle = note.title;
     final newFileName = newTitle.endsWith('.md') ? newTitle : '$newTitle.md';
     final oldNoteId = note.id;
-    
+
     note.title = newFileName;
-    note.id = '${note.id.substring(0, note.id.lastIndexOf('/') + 1)}$newFileName';
-    
+    note.id =
+        '${note.id.substring(0, note.id.lastIndexOf('/') + 1)}$newFileName';
+
     // 保存新笔记到文件
     final workingDir = SPUtil.get<String>(PrefKeys.workingDirectory, '');
     final notebookDir = note.id.substring(0, note.id.lastIndexOf('/'));
@@ -424,7 +425,7 @@ class NoteDetailState extends State<NoteDetailPage> {
       newFileName,
       utf8.encode(note.content),
     );
-    
+
     // 通知父组件笔记已更改
     widget.onNoteChanged(note);
 
@@ -437,29 +438,39 @@ class NoteDetailState extends State<NoteDetailPage> {
       notebookDir.substring(notebookDir.lastIndexOf('/') + 1),
       oldTitle,
     );
-    
+
     // 如果 git 已配置，删除远程的旧笔记文件
     final gitPlatform = SPUtil.get<String>(PrefKeys.gitPlatform, '');
-    final remoteUrl = SPUtil.get<String>(gitPlatform == GitPlatforms.github 
-        ? PrefKeys.githubRemoteUrl 
-        : PrefKeys.giteeRemoteUrl, '');
-    final token = SPUtil.get<String>(gitPlatform == GitPlatforms.github 
-        ? PrefKeys.githubToken 
-        : PrefKeys.giteeToken, '');
-    
+    final remoteUrl = SPUtil.get<String>(
+      gitPlatform == GitPlatforms.github
+          ? PrefKeys.githubRemoteUrl
+          : PrefKeys.giteeRemoteUrl,
+      '',
+    );
+    final token = SPUtil.get<String>(
+      gitPlatform == GitPlatforms.github
+          ? PrefKeys.githubToken
+          : PrefKeys.giteeToken,
+      '',
+    );
+
     if (gitPlatform.isNotEmpty && remoteUrl.isNotEmpty && token.isNotEmpty) {
       try {
         final git = GitFactory.getGitService(gitPlatform, token);
         String sha = git.hashObject(utf8.encode(note.content));
         final (owner, repo) = git.getOwnerRepoFromUrl(remoteUrl);
-        git.deleteFile(owner, repo, oldNoteId, 'Rename note to $newFileName', sha);
+        git.deleteFile(
+          owner,
+          repo,
+          oldNoteId,
+          'Rename note to $newFileName',
+          sha,
+        );
       } catch (e) {
         print('删除 Git 旧笔记失败: $e');
       }
     }
   }
-
-
 
   void _findMatches() {
     final query = _findController.text.trim();
@@ -1164,6 +1175,7 @@ class NoteDetailState extends State<NoteDetailPage> {
                 // 查找按钮：普通编辑模式或 SuperEditor 模式
                 if (_viewMode == 'edit' || _viewMode == 'superEditor')
                   IconButton(
+                    iconSize: 24,
                     icon: Icon(Icons.find_in_page),
                     onPressed: _viewMode == 'superEditor'
                         ? _toggleSuperSearch
@@ -1172,6 +1184,7 @@ class NoteDetailState extends State<NoteDetailPage> {
                   ),
                 // 普通编辑模式按钮
                 IconButton(
+                  iconSize: 24,
                   icon: Icon(
                     Icons.edit_note,
                     color: _viewMode == 'edit'
@@ -1194,6 +1207,7 @@ class NoteDetailState extends State<NoteDetailPage> {
                 ),
                 // 预览模式按钮
                 IconButton(
+                  iconSize: 24,
                   icon: Icon(
                     Icons.preview,
                     color: _viewMode == 'preview'
@@ -1214,6 +1228,7 @@ class NoteDetailState extends State<NoteDetailPage> {
                 ),
                 // SuperEditor 模式按钮
                 IconButton(
+                  iconSize: 24,
                   icon: Icon(
                     Icons.format_paint,
                     color: _viewMode == 'superEditor'
@@ -1240,10 +1255,18 @@ class NoteDetailState extends State<NoteDetailPage> {
                         .backlinksOf(note.id)
                         .length;
                     return IconButton(
+                      iconSize: 24,
                       icon: Badge(
                         isLabelVisible: count > 0,
-                        label: Text('$count'),
-                        child: const Icon(Icons.call_received),
+                        // alignment: Alignment.topRight,
+                        // smallSize: 5, // 关键
+                        padding: EdgeInsets.zero,
+                        // offset: const Offset(3, -3),
+                        label: Text(
+                          '$count',
+                          style: const TextStyle(fontSize: 1, height: 1),
+                        ),
+                        child: const Icon(Icons.call_received, size: 24),
                       ),
                       onPressed: _showBacklinksSheet,
                       tooltip: '反向链接',
@@ -1251,6 +1274,7 @@ class NoteDetailState extends State<NoteDetailPage> {
                   },
                 ),
                 IconButton(
+                  iconSize: 24,
                   icon: Icon(Icons.save),
                   onPressed: () {
                     widget.saveNote(note);
@@ -1295,27 +1319,36 @@ class NoteDetailState extends State<NoteDetailPage> {
                             IconButton(
                               icon: Icon(Icons.check, size: 20),
                               onPressed: () {
-                                if (_titleController.text.isNotEmpty && !_isTitleConfirmClicked) {
+                                if (_titleController.text.isNotEmpty &&
+                                    !_isTitleConfirmClicked) {
                                   setState(() {
                                     _isTitleConfirmClicked = true;
                                   });
                                   _updateNoteTitle(_titleController.text);
-                                  Future.delayed(Duration(milliseconds: 300), () {
-                                    if (mounted) {
-                                      setState(() {
-                                        _isTitleModified = false;
-                                        _isTitleConfirmClicked = false;
-                                      });
-                                    }
-                                  });
+                                  Future.delayed(
+                                    Duration(milliseconds: 300),
+                                    () {
+                                      if (mounted) {
+                                        setState(() {
+                                          _isTitleModified = false;
+                                          _isTitleConfirmClicked = false;
+                                        });
+                                      }
+                                    },
+                                  );
                                 }
                               },
                               color: _isTitleConfirmClicked
-                                  ? (isDark ? Colors.grey[700] : Colors.grey[400])
+                                  ? (isDark
+                                        ? Colors.grey[700]
+                                        : Colors.grey[400])
                                   : theme.primaryColor,
                               tooltip: '确认修改标题',
                               padding: EdgeInsets.zero,
-                              constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                              constraints: BoxConstraints(
+                                minWidth: 28,
+                                minHeight: 28,
+                              ),
                             ),
                         ],
                       ),
