@@ -243,6 +243,32 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
     );
   }
 
+  /// 自定义 a 标签渲染：flutter_html 在该版本下链接虽可点击，但 hover 时不会
+  /// 自动变为手形光标。这里用 MouseRegion 包裹，使鼠标悬停时显示手形，并保留
+  /// 内部富文本与点击打开外链的行为。
+  Widget _buildLink(ExtensionContext ec) {
+    final url = ec.attributes['href'];
+    final spans = ec.inlineSpanChildren ?? const <InlineSpan>[];
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () async {
+          if (url == null) return;
+          final uri = Uri.tryParse(url);
+          if (uri != null && await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        },
+        child: RichText(
+          text: TextSpan(children: spans),
+          // 继承 flutter_html 的默认文本排版
+          textAlign: TextAlign.start,
+          softWrap: true,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = ThemeManager.getCurrentTheme();
@@ -376,14 +402,12 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
                       color: subColor,
                     ),
                   },
-                  onLinkTap: (url, _, _) async {
-                    if (url == null) return;
-                    final uri = Uri.tryParse(url);
-                    if (uri != null && await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  },
                   extensions: [
+                    // 自定义链接渲染：悬停显示手形光标，点击打开外链
+                    TagExtension(
+                      tagsToExtend: {'a'},
+                      builder: (ec) => _buildLink(ec),
+                    ),
                     // 自定义图片渲染：撑满正文宽度、保持比例，点击查看大图
                     TagExtension(
                       tagsToExtend: {'img'},
