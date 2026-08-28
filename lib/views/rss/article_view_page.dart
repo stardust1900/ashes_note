@@ -1,6 +1,7 @@
 import 'package:ashes_note/ashes_theme.dart';
 import 'package:ashes_note/models/rss/rss_models.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
@@ -139,12 +140,21 @@ class ArticleViewPage extends StatefulWidget {
 class _ArticleViewPageState extends State<ArticleViewPage> {
   late bool _isRead;
   late bool _isStarred;
+  final FocusNode _focusNode = FocusNode();
+  final ScrollController _scrollController = ScrollController();
+  bool _ready = false; // 首帧布局完成前不响应滚动，避免一次性跳到底部
 
   @override
   void initState() {
     super.initState();
     _isRead = widget.article.isRead;
     _isStarred = widget.article.isStarred;
+    // 首帧布局完成后才允许滚动，并把位置重置到顶部
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _ready = true;
+      if (_scrollController.hasClients) _scrollController.jumpTo(0);
+    });
     // 打开即标记已读：延迟到首帧之后，避免在父级 build 期间触发 setState
     if (!widget.article.isRead) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -154,6 +164,66 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
         setState(() {});
         widget.onUpdated();
       });
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// 向下/向上滚动一屏（Space 向下，Shift+Space 向上）
+  void _scrollByPage(bool down) {
+    if (!_scrollController.hasClients) return;
+    void doScroll() {
+      if (!_scrollController.hasClients) return;
+      final pos = _scrollController.position;
+      // 布局尚未完成（viewport/content 尺寸未知）时不滚动，避免一次性跳到底部
+      if (!pos.hasViewportDimension || !pos.hasContentDimensions) return;
+      final delta = pos.viewportDimension * 0.9 * (down ? 1 : -1);
+      final target = (pos.pixels + delta)
+          .clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      // 已到边界则不再滚动，避免无效动画
+      if ((target - pos.pixels).abs() < 1.0) return;
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+      );
+    }
+
+    if (_ready) {
+      doScroll();
+    } else {
+      // 首帧布局尚未完成：强制等待一帧再滚动，确保尺寸已就绪
+      WidgetsBinding.instance.addPostFrameCallback((_) => doScroll());
+    }
+  }
+
+  /// 键盘快捷键处理
+  void _handleKey(RawKeyEvent event) {
+    if (event is! RawKeyDownEvent) return;
+    final key = event.logicalKey;
+    // 上一篇 / 下一篇
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.pageUp) {
+      if (widget.hasPrev) widget.onPrev?.call();
+      return;
+    }
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.pageDown) {
+      if (widget.hasNext) widget.onNext?.call();
+      return;
+    }
+    // 滚动：仅用 Space / Shift+Space。
+    // 注意：不使用 ↑/↓ 方向键滚动——文章正文被 SelectionArea 包裹，
+    // 方向键会被 SelectionArea 的文本导航消费，与我们这里的处理叠加，
+    // 导致首次按 ↓ 直接跳到底部。Space 不受影响，故保留。
+    if (key == LogicalKeyboardKey.space) {
+      _scrollByPage(!event.isShiftPressed);
+      return;
     }
   }
 
@@ -289,7 +359,11 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
         widget.article.summary ??
         '<p style="color:grey">（该文章没有可显示的正文内容）</p>';
 
-    return Scaffold(
+    return RawKeyboardListener(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKey: _handleKey,
+      child: Scaffold(
       appBar: AppBar(
         leading: widget.onBack == null
             ? null
@@ -336,6 +410,7 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
           constraints: const BoxConstraints(maxWidth: 880),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: ListView(
+            controller: _scrollController,
             children: [
               Text(
                 widget.article.title,
@@ -535,6 +610,7 @@ class _ArticleViewPageState extends State<ArticleViewPage> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

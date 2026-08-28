@@ -26,6 +26,7 @@ class _RssHomePageState extends State<RssHomePage> {
   String _selectedId = RssConstants.allFeedsId;
   String _searchQuery = '';
   bool _isRefreshing = false;
+  bool _pendingRefresh = false; // 刷新被占用时记录，结束后补刷新
   Timer? _refreshTimer;
   Timer? _debounce;
 
@@ -62,17 +63,38 @@ class _RssHomePageState extends State<RssHomePage> {
   }
 
   Future<void> _refreshAll() async {
-    // 防重入：正在刷新或没有订阅源时直接返回，避免并发刷新改同一批对象
-    if (_isRefreshing || _feeds.isEmpty) return;
+    // 防重入：正在刷新时标记为待刷新，结束后自动补刷，避免期间新增的源被丢弃
+    if (_isRefreshing) {
+      _pendingRefresh = true;
+      return;
+    }
+    if (_feeds.isEmpty) return;
     if (!mounted) return;
     setState(() => _isRefreshing = true);
     final updated = await RssService.refreshAll(_feeds);
-    await _storage.saveFeeds(updated);
-    if (!mounted) return;
+    if (!mounted) {
+      // 已卸载，仍尝试落盘以防数据丢失
+      await _storage.saveFeeds(updated);
+      return;
+    }
+    // 合并刷新结果：刷新栈基于本次传入的 _feeds，需把刷新期间新增/外部修改的源保留下来
+    final refreshedIds = {for (final f in updated) f.id};
+    final merged = <RssFeed>[
+      ...updated,
+      for (final f in _feeds)
+        if (!refreshedIds.contains(f.id)) f, // 保留本次未参与刷新的新源
+    ];
     setState(() {
-      _feeds = updated;
+      _feeds = merged;
       _isRefreshing = false;
     });
+    await _storage.saveFeeds(merged);
+    if (!mounted) return;
+    // 刷新期间又有新的添加/修改请求，补刷一次
+    if (_pendingRefresh) {
+      _pendingRefresh = false;
+      _refreshAll();
+    }
   }
 
   Future<void> _persist() async {
